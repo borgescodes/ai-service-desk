@@ -171,3 +171,49 @@ def test_endpoint_outside_api_is_refused(server_url: str) -> None:
             client.json_request("GET", "/other")
     finally:
         client.close()
+
+
+def test_http_pipeline_connects_classifier_index_and_retrieval(server_url: str, tmp_path) -> None:
+    import pandas as pd
+
+    from ai_service_desk.engine.index import build_index
+    from ai_service_desk.engine.retrieval import RetrievalEngine
+
+    client = OllamaClient(server_url)
+    try:
+        embedder = LocalEmbedder(client, dimensions=3)
+        data = pd.DataFrame(
+            [
+                {
+                    "ticket_id": "1",
+                    "ticket_number": "1",
+                    "title": "Rotina CIGAM",
+                    "texto_busca": "liberar rotina 1024 no cigam",
+                    "catalogo": "Sistemas",
+                    "area": "Cigam 11",
+                    "item": "Liberar rotina",
+                    "historico_atendimento": "registro sintetico",
+                },
+                {
+                    "ticket_id": "2",
+                    "ticket_number": "2",
+                    "title": "Email",
+                    "texto_busca": "outlook com erro",
+                    "catalogo": "Microsoft Office 365",
+                    "area": "Outlook",
+                    "item": "",
+                    "historico_atendimento": "registro sintetico",
+                },
+            ]
+        )
+        build_index(data, tmp_path / "index", embedder, batch_size=1)
+        result = RetrievalEngine(tmp_path / "index", client, embedder).search(
+            "preciso liberar a rotina 1024 do cigam"
+        )
+        assert result["classification"]["system"] == "CIGAM"
+        assert result["classification"]["entities"]["rotina"] == "1024"
+        assert [row["ticket_id"] for row in result["candidates"]] == ["1"]
+        assert "total" in result["timings"]
+        assert result["candidates"][0]["status_conhecimento"] == "HISTORICO_NAO_VALIDADO"
+    finally:
+        client.close()
