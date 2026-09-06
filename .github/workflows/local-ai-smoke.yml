@@ -1,0 +1,136 @@
+name: Local AI smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Windows Ollama smoke
+    runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
+    timeout-minutes: 10
+
+    steps:
+      - name: Runner diagnostics
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $identity = whoami
+          Write-Host "Machine: $env:COMPUTERNAME"
+          Write-Host "Identity: $identity"
+          Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Local AI smoke test"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Machine: $env:COMPUTERNAME"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Identity: $identity"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- PowerShell: $($PSVersionTable.PSVersion)"
+
+      - name: Verify Python
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $python = Get-Command python -ErrorAction Stop
+          Write-Host "Python executable: $($python.Source)"
+          python --version
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Python executable: $($python.Source)"
+
+      - name: Verify Ollama and required models
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $baseUrl = "http://localhost:11434"
+
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          $tags = Invoke-RestMethod -Uri "$baseUrl/api/tags" -Method Get -TimeoutSec 15
+          $sw.Stop()
+
+          $modelNames = @($tags.models | ForEach-Object { [string]$_.name })
+          Write-Host "Ollama responded in $([math]::Round($sw.Elapsed.TotalSeconds, 3)) s"
+          Write-Host "Models: $($modelNames -join ', ')"
+
+          $required = @("qwen3.5:4b", "qwen3-embedding:0.6b")
+          foreach ($model in $required) {
+            if ($modelNames -notcontains $model) {
+              throw "Required Ollama model not found: $model"
+            }
+          }
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Ollama /api/tags: $([math]::Round($sw.Elapsed.TotalSeconds, 3)) s"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Required models: present"
+
+      - name: Verify Qwen chat
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $baseUrl = "http://localhost:11434"
+
+          $payload = @{
+            model = "qwen3.5:4b"
+            think = $false
+            stream = $false
+            messages = @(
+              @{
+                role = "user"
+                content = "Responda somente com OK."
+              }
+            )
+          } | ConvertTo-Json -Depth 6
+
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          $response = Invoke-RestMethod `
+            -Uri "$baseUrl/api/chat" `
+            -Method Post `
+            -ContentType "application/json; charset=utf-8" `
+            -Body $payload `
+            -TimeoutSec 120
+          $sw.Stop()
+
+          $content = [string]$response.message.content
+          if ([string]::IsNullOrWhiteSpace($content)) {
+            throw "Qwen chat returned empty content."
+          }
+
+          Write-Host "Chat response: $content"
+          Write-Host "Chat elapsed: $([math]::Round($sw.Elapsed.TotalSeconds, 3)) s"
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- qwen3.5:4b chat: $([math]::Round($sw.Elapsed.TotalSeconds, 3)) s"
+
+      - name: Verify Qwen embedding
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $baseUrl = "http://localhost:11434"
+
+          $payload = @{
+            model = "qwen3-embedding:0.6b"
+            input = "teste de conectividade do ai service desk"
+          } | ConvertTo-Json -Depth 4
+
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          $response = Invoke-RestMethod `
+            -Uri "$baseUrl/api/embed" `
+            -Method Post `
+            -ContentType "application/json; charset=utf-8" `
+            -Body $payload `
+            -TimeoutSec 120
+          $sw.Stop()
+
+          $vector = @($response.embeddings[0])
+          $dimension = $vector.Count
+          if ($dimension -ne 1024) {
+            throw "Unexpected embedding dimension: $dimension. Expected 1024."
+          }
+
+          Write-Host "Embedding dimension: $dimension"
+          Write-Host "Embedding elapsed: $([math]::Round($sw.Elapsed.TotalSeconds, 3)) s"
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- qwen3-embedding:0.6b dimension: $dimension"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- embedding call: $([math]::Round($sw.Elapsed.TotalSeconds, 3)) s"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Smoke test completed."
