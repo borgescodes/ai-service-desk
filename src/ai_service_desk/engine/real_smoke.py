@@ -6,10 +6,52 @@ import re
 import numpy as np
 
 from ai_service_desk.engine.classification import SYSTEM_ALIASES
-from ai_service_desk.engine.index import load_index
+from ai_service_desk.engine.corpus import (
+    audit_corpus,
+    ensure_external_path,
+    load_corpus_manifest,
+    write_safe_report,
+)
+from ai_service_desk.engine.data import load_corpus
+from ai_service_desk.engine.index import build_index, load_index
+from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
+from ai_service_desk.engine.retrieval import RetrievalEngine
 from ai_service_desk.engine.validation import normalize_text
 
 THRESHOLD = 0.65
+REAL_SMOKE_CASES = [
+    {
+        "name": "cigam",
+        "query": "No CIGAM aparece erro ao abrir uma rotina de exemplo.",
+        "expected_system": "CIGAM",
+        "allowed_statuses": ["ENCONTRADOS", "SEM_EVIDENCIA"],
+    },
+    {
+        "name": "siagri",
+        "query": "No SIAGRI aparece erro ao abrir uma rotina de exemplo.",
+        "expected_system": "SIAGRI",
+        "allowed_statuses": ["ENCONTRADOS", "SEM_EVIDENCIA"],
+    },
+    {
+        "name": "unknown",
+        "query": "No sistema XYZ aparece um erro de exemplo.",
+        "expected_system": "XYZ",
+        "allowed_statuses": ["SEM_CONTEXTO"],
+        "expected_candidates": 0,
+    },
+    {
+        "name": "ambiguous",
+        "query": "CIGAM e SIAGRI apresentam um erro de exemplo.",
+        "allowed_statuses": ["CONTEXTO_AMBIGUO"],
+        "expected_candidates": 0,
+    },
+    {
+        "name": "printing",
+        "query": "A impressora de exemplo nao imprime.",
+        "expected_intent": "PROBLEMA_IMPRESSAO",
+        "allowed_statuses": ["ENCONTRADOS", "SEM_EVIDENCIA"],
+    },
+]
 
 
 def validate_real_index(index_directory, expected: dict) -> dict:
@@ -62,7 +104,8 @@ def _contains_alias(text: str, alias: str) -> bool:
 def _candidate_matches_system(candidate: dict, system: str) -> bool:
     aliases = SYSTEM_ALIASES.get(system, (system,))
     combined = " ".join(
-        str(candidate.get(key, "")) for key in ("catalogo", "area", "item", "title", "texto_busca")
+        str(candidate.get(key, ""))
+        for key in ("catalogo", "area", "item", "title", "texto_busca")
     )
     return any(_contains_alias(combined, alias) for alias in aliases)
 
@@ -136,3 +179,41 @@ def build_real_smoke_report(corpus: dict, index: dict, queries: list[dict]) -> d
             "history_displayed": False,
         },
     }
+
+
+def run_real_smoke(
+    corpus_path,
+    manifest_path,
+    index_directory,
+    report_path,
+    base_url,
+    checkout,
+) -> dict:
+    corpus_path = ensure_external_path(corpus_path, checkout)
+    index_directory = ensure_external_path(index_directory, checkout)
+    report_path = ensure_external_path(report_path, checkout)
+
+    corpus_report = audit_corpus(corpus_path, manifest_path)
+    manifest = load_corpus_manifest(manifest_path)
+    client = OllamaClient(base_url)
+    try:
+        embedder = LocalEmbedder(client)
+        client.model_info("qwen3.5:4b")
+        data = load_corpus(corpus_path)
+        build_index(data, index_directory, embedder)
+        engine = RetrievalEngine(index_directory, client, embedder, THRESHOLD)
+        expected = {
+            "rows": manifest["expected"]["rows"],
+            "dimensions": embedder.dimensions,
+            "model": embedder.model,
+            "model_digest": embedder.digest,
+            "recipe": "texto_busca-plain-v1",
+            "source_hash": manifest["expected"]["canonical_sha256"],
+        }
+        index_report = validate_real_index(index_directory, expected)
+        query_report = run_safe_queries(engine, REAL_SMOKE_CASES)
+        report = build_real_smoke_report(corpus_report, index_report, query_report)
+        write_safe_report(report_path, report)
+        return report
+    finally:
+        client.close()
