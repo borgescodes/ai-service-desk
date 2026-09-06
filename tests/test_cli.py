@@ -25,6 +25,7 @@ def test_help_runs_without_ollama() -> None:
     assert result.returncode == 0, result.stderr
     assert "validate" in result.stdout
     assert "search" in result.stdout
+    assert "audit" in result.stdout
 
 
 def test_inspect_uses_synthetic_fixture_without_history() -> None:
@@ -119,3 +120,34 @@ def test_context_json_without_query_fails_before_client_creation(
     )
     assert code == 1
     assert not (tmp_path / "context.json").exists()
+
+
+def test_audit_writes_aggregate_report_without_ollama(tmp_path: Path, monkeypatch) -> None:
+    class ForbiddenClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("audit must not create Ollama client")
+
+    monkeypatch.setattr(cli, "OllamaClient", ForbiddenClient)
+    report = tmp_path / "audit.json"
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        code = cli.main(
+            [
+                "audit",
+                "--file",
+                "tests/fixtures/phase2_corpus.csv",
+                "--manifest",
+                "tests/fixtures/phase2_corpus_manifest.json",
+                "--report",
+                str(report),
+            ]
+        )
+
+    assert code == 0
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["manifest_match"] is True
+    report_text = report.read_text(encoding="utf-8")
+    assert "Falha CIGAM" not in report_text
+    assert "1001" not in report_text
+    assert "Falha CIGAM" not in stdout.getvalue()
+    assert "1001" not in stdout.getvalue()
