@@ -1,0 +1,9 @@
+ticket_id;ticket_number;title;texto_busca;catalogo;area;item;historico_atendimento
+SYN-001;SYN-001;Falha CIGAM;o cigam fecha quando tento faturar;Sistemas;Cigam 11;Erro em rotinas;reiniciado componente local
+SYN-002;SYN-002;Liberar rotina CIGAM;preciso liberar a rotina 1024 do cigam;Sistemas;Cigam 11;Liberar rotina;solicitacao revisada por tecnico
+SYN-003;SYN-003;Impressora nao imprime;documento fica preso na fila e a impressora nao imprime;Impressoras;Impressora;Nao imprime;fila limpa localmente
+SYN-004;SYN-004;Sem internet;computador sem internet na rede cabeada;Redes e internet;Infraestrutura;Sem conexao;cabo revisado
+SYN-005;SYN-005;Falha SIAGRI;o siagri trava ao salvar pedido;Sistemas;Siagri;Erro;registro tecnico sintetico
+SYN-006;SYN-006;Outlook falha;o outlook nao recebe mensagens;Microsoft Office 365;Outlook;Email;perfil recriado em teste
+SYN-007;SYN-007;Acesso CIGAM;nao consigo acessar o cigam;Sistemas;Cigam 11;Acesso;permissao revisada
+SYN-008;SYN-008;Registro sensivel CIGAM;cigam solicita senha ao iniciar;Sistemas;Cigam 11;Acesso;senha: exemplo-nao-real
