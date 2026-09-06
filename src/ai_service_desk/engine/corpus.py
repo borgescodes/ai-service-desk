@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from pathlib import Path
 
 from ai_service_desk.engine.data import load_corpus
-from ai_service_desk.engine.index import atomic_json, corpus_bytes, file_hash
+from ai_service_desk.engine.index import corpus_bytes, file_hash
 
 EXPECTED_COLUMNS = (
     "ticket_id",
@@ -46,13 +45,6 @@ def ensure_external_path(path: str | Path, checkout: str | Path) -> Path:
     raise ValueError("Corpus, indice e relatorio reais devem ficar fora do checkout Git.")
 
 
-def load_corpus_manifest(path: str | Path) -> dict:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    if data.get("version") != 1:
-        raise ValueError("Versao de manifesto de corpus nao suportada.")
-    return data
-
-
 def _risk_counts(data) -> dict[str, int]:
     columns = [column for column in EXPECTED_COLUMNS if column in data.columns]
     counts = {name: 0 for name in RISK_PATTERNS}
@@ -64,14 +56,14 @@ def _risk_counts(data) -> dict[str, int]:
     return counts
 
 
-def audit_corpus(corpus_path: str | Path, manifest_path: str | Path | None = None) -> dict:
+def audit_corpus(corpus_path: str | Path) -> dict:
     path = Path(corpus_path)
     data = load_corpus(path)
     raw_hash = file_hash(path)
     canonical_hash = hashlib.sha256(corpus_bytes(data)).hexdigest()
     history = data["historico_atendimento"].astype(str).str.strip().ne("")
     limited = data["texto_limitado"].astype(str).str.lower().eq("true")
-    report = {
+    return {
         "version": 1,
         "rows": len(data),
         "columns": list(data.columns),
@@ -101,33 +93,3 @@ def audit_corpus(corpus_path: str | Path, manifest_path: str | Path | None = Non
             "human_review_required_before_history_display": True,
         },
     }
-    if manifest_path is not None:
-        validate_corpus_manifest(report, load_corpus_manifest(manifest_path))
-        report["manifest_match"] = True
-    return report
-
-
-def validate_corpus_manifest(report: dict, manifest: dict) -> None:
-    expected = manifest["expected"]
-    checks = {
-        "rows": report["rows"],
-        "with_history": report["with_history"],
-        "limited_texts": report["limited_texts"],
-        "raw_sha256": report["raw_sha256"],
-        "canonical_sha256": report["canonical_sha256"],
-    }
-    for key, actual in checks.items():
-        if actual != expected[key]:
-            raise ValueError(f"Snapshot divergente no campo agregado: {key}.")
-    if report["columns"] != manifest["columns"]:
-        raise ValueError("Schema do snapshot divergente do manifesto.")
-    if report["unique_ticket_ids"] != report["rows"] or report["empty_ticket_ids"]:
-        raise ValueError("ticket_id vazio ou duplicado no snapshot.")
-    if report["empty_search_texts"]:
-        raise ValueError("texto_busca vazio no snapshot.")
-    if report["knowledge_status"] != {"HISTORICO_NAO_VALIDADO": report["rows"]}:
-        raise ValueError("status_conhecimento invalido no snapshot.")
-
-
-def write_safe_report(path: str | Path, report: dict) -> None:
-    atomic_json(Path(path), report)
