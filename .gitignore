@@ -27,3 +27,10 @@ artifacts/
 embeddings/
 logs/
 reports/
+
+# Corporate data must stay outside Git
+base_ti_preparada.csv
+**/base_ti_preparada.csv
+**/documents.jsonl
+**/embeddings.npy
+phase-2-data/
