@@ -1,0 +1,30 @@
+name: Phase 1 formatter cleanup once
+
+on:
+  push:
+    branches:
+      - phase-1-engine-implementation
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.event.head_commit.message == 'chore: cleanup phase1 formatter'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase-1-engine-implementation
+          fetch-depth: 0
+
+      - name: Remove temporary workflows
+        run: |
+          git rm -f .github/workflows/phase1-format-once.yml .github/workflows/phase1-cleanup-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: remove temporary phase 1 formatter workflows"
+          git push origin HEAD:phase-1-engine-implementation
