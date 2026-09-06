@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "name": "phase2-synthetic-v1",
+  "columns": [
+    "ticket_id",
+    "ticket_number",
+    "title",
+    "description",
+    "created_at",
+    "catalogo",
+    "area",
+    "item",
+    "mesa",
+    "texto_busca",
+    "texto_limitado",
+    "historico_atendimento",
+    "apontamento_ids",
+    "status_conhecimento"
+  ],
+  "expected": {
+    "rows": 3,
+    "with_history": 2,
+    "limited_texts": 1,
+    "raw_sha256": "54eab16c7bdd6d62c61b09d72620fb1063dec82faf850207393d0c5ba93a9f25",
+    "canonical_sha256": "0d7b9be9da871f016423d1d70188feb8920ceba166fc3a6f87d6d31f0cdcc591"
+  }
+}
