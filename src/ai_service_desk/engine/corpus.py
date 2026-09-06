@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from ai_service_desk.engine.data import load_corpus
-from ai_service_desk.engine.index import corpus_bytes, file_hash
+from ai_service_desk.engine.index import atomic_json, corpus_bytes, file_hash
 
 EXPECTED_COLUMNS = (
     "ticket_id",
@@ -140,3 +140,7 @@ def audit_corpus(
         validate_corpus_manifest(report, load_corpus_manifest(manifest_path))
         report["manifest_match"] = True
     return report
+
+
+def write_safe_report(path: str | Path, report: dict) -> None:
+    atomic_json(Path(path), report)
