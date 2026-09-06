@@ -4,6 +4,7 @@ import sys
 import time
 from pathlib import Path
 
+from ai_service_desk.engine.corpus import audit_corpus, write_safe_report
 from ai_service_desk.engine.data import load_corpus, prepare_tiflux
 from ai_service_desk.engine.index import atomic_json, build_index, import_legacy, load_index
 from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
@@ -25,6 +26,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     inspect = sub.add_parser("inspect")
     inspect.add_argument("--file", type=Path, required=True)
+
+    audit = sub.add_parser("audit")
+    audit.add_argument("--file", type=Path, required=True)
+    audit.add_argument("--manifest", type=Path, required=True)
+    audit.add_argument("--report", type=Path, required=True)
 
     show_index = sub.add_parser("show-index")
     show_index.add_argument("--index", type=Path, required=True)
@@ -73,6 +79,27 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Registros: {len(data)}")
             print("Colunas: " + ", ".join(data.columns))
             print("Nenhum texto de atendimento foi exibido. Nenhuma chamada de IA foi feita.")
+            return 0
+
+        if args.command == "audit":
+            report = audit_corpus(args.file, args.manifest)
+            write_safe_report(args.report, report)
+            summary = {
+                key: report[key]
+                for key in (
+                    "rows",
+                    "unique_ticket_ids",
+                    "empty_ticket_ids",
+                    "empty_search_texts",
+                    "with_history",
+                    "limited_texts",
+                    "raw_sha256",
+                    "canonical_sha256",
+                    "manifest_match",
+                )
+            }
+            print(json.dumps(summary, ensure_ascii=False, indent=2))
+            print("Auditoria por regras concluida. Nenhum conteudo de ticket foi exibido.")
             return 0
 
         if args.command == "show-index":
