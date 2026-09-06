@@ -8,6 +8,7 @@ from ai_service_desk.engine.corpus import audit_corpus, write_safe_report
 from ai_service_desk.engine.data import load_corpus, prepare_tiflux
 from ai_service_desk.engine.index import atomic_json, build_index, import_legacy, load_index
 from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
+from ai_service_desk.engine.real_smoke import run_real_smoke
 from ai_service_desk.engine.retrieval import RetrievalEngine, format_result
 from ai_service_desk.engine.smoke import run_validation
 
@@ -31,6 +32,14 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--file", type=Path, required=True)
     audit.add_argument("--manifest", type=Path, required=True)
     audit.add_argument("--report", type=Path, required=True)
+
+    real_smoke = sub.add_parser("real-smoke")
+    real_smoke.add_argument("--file", type=Path, required=True)
+    real_smoke.add_argument("--manifest", type=Path, required=True)
+    real_smoke.add_argument("--index", type=Path, required=True)
+    real_smoke.add_argument("--report", type=Path, required=True)
+    real_smoke.add_argument("--checkout", type=Path, required=True)
+    real_smoke.add_argument("--url", default=DEFAULT_URL)
 
     show_index = sub.add_parser("show-index")
     show_index.add_argument("--index", type=Path, required=True)
@@ -101,6 +110,25 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(summary, ensure_ascii=False, indent=2))
             print("Auditoria por regras concluida. Nenhum conteudo de ticket foi exibido.")
             return 0
+
+        if args.command == "real-smoke":
+            report = run_real_smoke(
+                args.file,
+                args.manifest,
+                args.index,
+                args.report,
+                args.url,
+                args.checkout,
+            )
+            prefix = "REAL CORPUS SMOKE OK" if report["ok"] else "REAL CORPUS SMOKE REQUER REVISAO"
+            rows = report.get("corpus", {}).get("rows", report.get("index", {}).get("rows", 0))
+            shape = report.get("index", {}).get("shape", [0, 0])
+            print(prefix)
+            print(f"Registros auditados: {rows}")
+            print(f"Vetores validados: {shape[0]} x {shape[1]}")
+            print(f"Casos sinteticos: {len(report.get('queries', []))}")
+            print("Relatorio agregado local: " + str(args.report))
+            return 0 if report["ok"] else 1
 
         if args.command == "show-index":
             _, _, state = load_index(args.index)
