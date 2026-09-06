@@ -29,6 +29,12 @@ jobs:
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Identity: $identity"
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- PowerShell: $($PSVersionTable.PSVersion)"
 
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          check-latest: true
+
       - name: Verify Python
         shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
