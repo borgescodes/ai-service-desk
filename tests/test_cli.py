@@ -26,6 +26,7 @@ def test_help_runs_without_ollama() -> None:
     assert "validate" in result.stdout
     assert "search" in result.stdout
     assert "audit" in result.stdout
+    assert "real-smoke" in result.stdout
 
 
 def test_inspect_uses_synthetic_fixture_without_history() -> None:
@@ -151,3 +152,53 @@ def test_audit_writes_aggregate_report_without_ollama(tmp_path: Path, monkeypatc
     assert "1001" not in report_text
     assert "Falha CIGAM" not in stdout.getvalue()
     assert "1001" not in stdout.getvalue()
+
+
+def test_real_smoke_forwards_external_paths(tmp_path: Path, monkeypatch) -> None:
+    captured: dict = {}
+    external = tmp_path / "external"
+    checkout = tmp_path / "repo"
+    external.mkdir()
+    checkout.mkdir()
+
+    def fake_run(corpus, manifest, index, report, base_url, checkout_path):
+        captured.update(
+            corpus=corpus,
+            manifest=manifest,
+            index=index,
+            report=report,
+            base_url=base_url,
+            checkout=checkout_path,
+        )
+        Path(report).write_text('{"ok": true}', encoding="utf-8")
+        return {"ok": True, "index": {"rows": 3, "shape": [3, 4]}, "queries": []}
+
+    monkeypatch.setattr(cli, "run_real_smoke", fake_run, raising=False)
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        code = cli.main(
+            [
+                "real-smoke",
+                "--file",
+                str(external / "corpus.csv"),
+                "--manifest",
+                "tests/fixtures/phase2_corpus_manifest.json",
+                "--index",
+                str(external / "index"),
+                "--report",
+                str(external / "report.json"),
+                "--checkout",
+                str(checkout),
+            ]
+        )
+
+    assert code == 0
+    assert captured["base_url"] == "http://127.0.0.1:11434"
+    assert Path(captured["corpus"]) == external / "corpus.csv"
+    assert Path(captured["index"]) == external / "index"
+    assert Path(captured["report"]) == external / "report.json"
+    assert Path(captured["checkout"]) == checkout
+    output = stdout.getvalue()
+    assert "REAL CORPUS SMOKE OK" in output
+    assert "Falha CIGAM" not in output
+    assert "ticket" not in output.lower()
