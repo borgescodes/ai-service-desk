@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+
 from ai_service_desk.engine.corpus import audit_corpus, ensure_external_path
 
 FIXTURE = Path("tests/fixtures/phase2_corpus.csv")
