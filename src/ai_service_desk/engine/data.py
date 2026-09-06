@@ -113,7 +113,9 @@ def prepare_tiflux(
     ticket_required = {"id", "ticket_number", "title", "description", "is_closed", "status_name"}
     appointment_required = {"id", "ticket_id", "description"}
     if not ticket_required <= set(ticket_data.columns):
-        raise ValueError("CSV de tickets nao tem as colunas Tiflux esperadas (separador: tabulacao).")
+        raise ValueError(
+            "CSV de tickets nao tem as colunas Tiflux esperadas (separador: tabulacao)."
+        )
     if not appointment_required <= set(appointment_data.columns):
         raise ValueError("CSV de apontamentos nao tem as colunas esperadas.")
     for data in (ticket_data, appointment_data):
@@ -130,9 +132,9 @@ def prepare_tiflux(
         "mensagens_genericas_removidas": 0,
     }
     names = _name_pattern(ticket_data, appointment_data)
-    closed = ticket_data.is_closed.str.lower().eq("true") & ~ticket_data.status_name.str.lower().str.contains(
-        "cancel", regex=False
-    )
+    closed = ticket_data.is_closed.str.lower().eq(
+        "true"
+    ) & ~ticket_data.status_name.str.lower().str.contains("cancel", regex=False)
     report["excluidos_abertos_ou_cancelados"] = int((~closed).sum())
     ticket_data = ticket_data.loc[closed].copy()
 

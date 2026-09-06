@@ -127,7 +127,9 @@ def main(argv: list[str] | None = None) -> int:
 
             def progress(done: int, total: int) -> None:
                 elapsed = time.perf_counter() - started
-                print(f"{done}/{total} registros salvos | {elapsed:.1f}s nesta execucao", flush=True)
+                print(
+                    f"{done}/{total} registros salvos | {elapsed:.1f}s nesta execucao", flush=True
+                )
 
             state = build_index(data, args.index, embedder, args.batch_size, progress)
             print(f"Indice pronto: ({state['rows']}, {state['dimensions']}) | {args.index}")

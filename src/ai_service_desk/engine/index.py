@@ -19,9 +19,7 @@ RECIPE = "texto_busca-plain-v1"
 
 def atomic_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(
-        prefix=path.name + ".", suffix=".tmp", dir=path.parent
-    )
+    descriptor, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(data, handle, ensure_ascii=False, indent=2, allow_nan=False)
@@ -116,7 +114,8 @@ def build_index(
             state = json.loads(manifest_path.read_text(encoding="utf-8"))
             if any(state.get(key) != value for key, value in expected.items()):
                 raise ValueError(
-                    "Indice pertence a outro corpus, modelo ou configuracao. Use outra pasta de indice."
+                    "Indice pertence a outro corpus, modelo ou configuracao. "
+                    "Use outra pasta de indice."
                 )
             if not documents_path.exists() or file_hash(documents_path) != source_hash:
                 raise ValueError("Metadados alterados no indice.")
@@ -127,14 +126,14 @@ def build_index(
             if matrix.shape != (len(data), dimensions):
                 raise ValueError("Matriz parcial com dimensoes incorretas.")
             for batch in state.get("batches", []):
-                actual = hashlib.sha256(
-                    matrix[batch["start"] : batch["end"]].tobytes()
-                ).hexdigest()
+                actual = hashlib.sha256(matrix[batch["start"] : batch["end"]].tobytes()).hexdigest()
                 if actual != batch["sha256"]:
                     raise ValueError("Lote salvo esta corrompido. Use outro indice.")
         else:
             if matrix_path.exists() or documents_path.exists():
-                raise ValueError("Pasta de indice contem arquivos sem manifesto. Use uma nova pasta.")
+                raise ValueError(
+                    "Pasta de indice contem arquivos sem manifesto. Use uma nova pasta."
+                )
             documents_path.write_bytes(raw)
             matrix = np.lib.format.open_memmap(
                 matrix_path,

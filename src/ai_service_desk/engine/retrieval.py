@@ -31,9 +31,7 @@ def _contains_name(text: str, name: str) -> bool:
     normalized_name = normalize_text(name)
     if not normalized_name:
         return False
-    return bool(
-        re.search(rf"(?<!\w){re.escape(normalized_name)}(?!\w)", normalize_text(text))
-    )
+    return bool(re.search(rf"(?<!\w){re.escape(normalized_name)}(?!\w)", normalize_text(text)))
 
 
 def _term_mask(data: pd.DataFrame, columns: tuple[str, ...], terms: tuple[str, ...]) -> np.ndarray:
@@ -129,9 +127,7 @@ def retrieve(
         "total_documents": len(data),
         "best_score": None,
         "candidates": [],
-        "warnings": [
-            "Historicos nao validados. Similaridade nao e probabilidade nem autorizacao."
-        ],
+        "warnings": ["Historicos nao validados. Similaridade nao e probabilidade nem autorizacao."],
         "timings": {},
     }
     if len(explicit_systems(text)) > 1:
@@ -226,12 +222,14 @@ def format_result(result: dict, show_history: bool = False) -> str:
         lines.append(f"Melhor score no contexto: {result['best_score']:.4f}")
     if result["status"] == "CONTEXTO_AMBIGUO":
         lines.append(
-            "Qual dos sistemas e o alvo deste atendimento? Nenhum historico sera usado como procedimento."
+            "Qual dos sistemas e o alvo deste atendimento? "
+            "Nenhum historico sera usado como procedimento."
         )
     elif not result["candidates"]:
         lines.append("Nenhum historico suficientemente semelhante foi encontrado.")
         lines.append(
-            "Proxima etapa sugerida: coletar mais informacoes ou encaminhar a um tecnico. Nada foi executado."
+            "Proxima etapa sugerida: coletar mais informacoes ou "
+            "encaminhar a um tecnico. Nada foi executado."
         )
     else:
         lines.append(
@@ -277,7 +275,9 @@ class RetrievalEngine:
             self.manifest["model"] != embedder.model
             or self.manifest["model_digest"] != embedder.digest
         ):
-            raise ValueError("Modelo de consulta diferente do modelo do indice. Gere indice compativel.")
+            raise ValueError(
+                "Modelo de consulta diferente do modelo do indice. Gere indice compativel."
+            )
         if self.manifest["dimensions"] != embedder.dimensions:
             raise ValueError("Dimensoes do modelo diferentes do indice.")
         self.client = client

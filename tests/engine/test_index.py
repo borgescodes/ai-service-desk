@@ -41,7 +41,9 @@ def corpus() -> pd.DataFrame:
     )
 
 
-def test_build_and_load_preserve_alignment_and_manifest(tmp_path: Path, corpus: pd.DataFrame) -> None:
+def test_build_and_load_preserve_alignment_and_manifest(
+    tmp_path: Path, corpus: pd.DataFrame
+) -> None:
     embedder = FakeEmbedder()
     state = build_index(corpus, tmp_path / "index", embedder, batch_size=2)
     data, matrix, loaded = load_index(tmp_path / "index")
@@ -145,7 +147,9 @@ def test_import_legacy_rejects_different_vectors(tmp_path: Path, corpus: pd.Data
         import_legacy(source, tmp_path / "new", embedder)
 
 
-def test_document_hash_and_recipe_tampering_are_refused(tmp_path: Path, corpus: pd.DataFrame) -> None:
+def test_document_hash_and_recipe_tampering_are_refused(
+    tmp_path: Path, corpus: pd.DataFrame
+) -> None:
     root = tmp_path / "index"
     build_index(corpus, root, FakeEmbedder(), batch_size=2)
     documents = root / "documents.jsonl"

@@ -58,9 +58,7 @@ def data() -> pd.DataFrame:
 
 @pytest.fixture
 def matrix() -> np.ndarray:
-    return np.asarray(
-        [[0.8, 0.6], [0.6, 0.8], [0.5, 0.8660254], [1, 0]], dtype=np.float32
-    )
+    return np.asarray([[0.8, 0.6], [0.6, 0.8], [0.5, 0.8660254], [1, 0]], dtype=np.float32)
 
 
 @pytest.fixture
@@ -167,7 +165,9 @@ class FakeClient:
     def chat(self, payload: dict) -> dict:
         return {
             "message": {
-                "content": '{"intent":"ERRO_SISTEMA","system":"CIGAM","entities":{},"confidence":0.9}'
+                "content": (
+                    '{"intent":"ERRO_SISTEMA","system":"CIGAM","entities":{},"confidence":0.9}'
+                )
             }
         }
 

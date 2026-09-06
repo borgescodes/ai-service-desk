@@ -3,7 +3,7 @@
 import platform
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -39,7 +39,7 @@ def run_validation(
     report: dict = {
         "schema_version": 1,
         "ok": False,
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
         "environment": {
             "python": sys.version.split()[0],
             "platform": platform.platform(),

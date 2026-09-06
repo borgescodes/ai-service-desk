@@ -40,7 +40,9 @@ def test_load_corpus_rejects_duplicate_empty_and_missing_values(tmp_path: Path) 
 
 
 def test_clean_text_removes_html_scripts_and_controls() -> None:
-    assert clean_text('<p>Falha &amp; teste</p><script>alert(1)</script>\x1b[31m') == "Falha & teste"
+    assert (
+        clean_text("<p>Falha &amp; teste</p><script>alert(1)</script>\x1b[31m") == "Falha & teste"
+    )
 
 
 def test_sanitize_masks_contacts_but_preserves_system_name() -> None:
@@ -107,8 +109,18 @@ def test_prepare_orders_notes_filters_status_scope_and_sensitive(tmp_path: Path)
         },
     ]
     notes = [
-        {"id": "11", "ticket_id": "1", "created_at": "2026-08-02", "description": "Segundo apontamento"},
-        {"id": "10", "ticket_id": "1", "created_at": "2026-08-01", "description": "Primeiro apontamento"},
+        {
+            "id": "11",
+            "ticket_id": "1",
+            "created_at": "2026-08-02",
+            "description": "Segundo apontamento",
+        },
+        {
+            "id": "10",
+            "ticket_id": "1",
+            "created_at": "2026-08-01",
+            "description": "Primeiro apontamento",
+        },
         {"id": "12", "ticket_id": "999", "created_at": "2026-08-01", "description": "Orfao"},
     ]
     t = write_csv(tmp_path / "tickets.csv", tickets, "\t")
@@ -133,9 +145,7 @@ def test_prepare_removes_generic_notes_and_limits_search_text(tmp_path: Path) ->
             "status_name": "closed",
         }
     ]
-    notes = [
-        {"id": "1", "ticket_id": "1", "description": "resolvido", "created_at": "2026-01-01"}
-    ]
+    notes = [{"id": "1", "ticket_id": "1", "description": "resolvido", "created_at": "2026-01-01"}]
     data, report = prepare_tiflux(
         write_csv(tmp_path / "t.csv", tickets, "\t"),
         write_csv(tmp_path / "a.csv", notes, "\t"),

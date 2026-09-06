@@ -52,12 +52,16 @@ class OllamaClient:
                 "o checkpoint foi preservado."
             ) from exc
         except requests.ConnectionError as exc:
-            raise OllamaError("Ollama local nao respondeu. Abra o Ollama e confira ollama ps.") from exc
+            raise OllamaError(
+                "Ollama local nao respondeu. Abra o Ollama e confira ollama ps."
+            ) from exc
         except requests.RequestException as exc:
             raise OllamaError("Falha de comunicacao com o Ollama local.") from exc
         if 300 <= response.status_code < 400:
             response.close()
-            raise OllamaError("Redirecionamento bloqueado. Nenhum dado sera enviado a outro endereco.")
+            raise OllamaError(
+                "Redirecionamento bloqueado. Nenhum dado sera enviado a outro endereco."
+            )
         if not 200 <= response.status_code < 300:
             status = response.status_code
             response.close()

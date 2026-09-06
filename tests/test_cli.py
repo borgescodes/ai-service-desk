@@ -100,7 +100,9 @@ def test_validate_forwards_arguments_and_exit_code(tmp_path: Path, monkeypatch) 
     assert str(captured["corpus"]).endswith("engine_smoke_corpus.csv")
 
 
-def test_context_json_without_query_fails_before_client_creation(tmp_path: Path, monkeypatch) -> None:
+def test_context_json_without_query_fails_before_client_creation(
+    tmp_path: Path, monkeypatch
+) -> None:
     class ForbiddenClient:
         def __init__(self, *args, **kwargs):
             raise AssertionError("client should not be created")
