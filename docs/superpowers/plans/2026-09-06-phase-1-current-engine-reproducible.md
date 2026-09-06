@@ -376,7 +376,9 @@ def normalize_matrix(matrix: object) -> np.ndarray:
 
 ```python
 """Core engine for the AI Service Desk."""
+
 from ai_service_desk.engine.types import TicketClassification
+
 __all__ = ["TicketClassification"]
 ```
 
@@ -802,6 +804,7 @@ Todos os nomes de comando ficam em inglês. `inspect` exige `--file`. `show-inde
 
 ```python
 from ai_service_desk.cli import main
+
 raise SystemExit(main())
 ```
 
