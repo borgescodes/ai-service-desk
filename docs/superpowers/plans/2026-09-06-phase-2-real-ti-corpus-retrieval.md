@@ -181,7 +181,9 @@ RISK_PATTERNS = {
     "ipv4": re.compile(r"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)"),
     "cpf": re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b"),
     "phone": re.compile(r"(?<!\w)(?:\+55\s*)?\(?\d{2}\)?\s*9?\d{4}[- ]\d{4}(?!\d)"),
-    "sensitive_term": re.compile(r"\b(senha|password|passwd|credencia\w*|token|secret|api[ _-]?key)\b", re.I),
+    "sensitive_term": re.compile(
+        r"\b(senha|password|passwd|credencia\w*|token|secret|api[ _-]?key)\b", re.I
+    ),
 }
 
 
@@ -232,7 +234,10 @@ def audit_corpus(corpus_path: str | Path, manifest_path: str | Path | None = Non
         "limited_texts": int(limited.sum()),
         "knowledge_status": {
             str(key): int(value)
-            for key, value in data["status_conhecimento"].value_counts(dropna=False).to_dict().items()
+            for key, value in data["status_conhecimento"]
+            .value_counts(dropna=False)
+            .to_dict()
+            .items()
         },
         "raw_sha256": raw_hash,
         "canonical_sha256": canonical_hash,
@@ -694,14 +699,21 @@ def test_real_smoke_forwards_external_paths(tmp_path: Path, monkeypatch) -> None
         return {"ok": True, "index": {"rows": 3}, "queries": []}
 
     monkeypatch.setattr(cli, "run_real_smoke", fake_run)
-    code = cli.main([
-        "real-smoke",
-        "--file", str(tmp_path / "external" / "corpus.csv"),
-        "--manifest", "tests/fixtures/phase2_corpus_manifest.json",
-        "--index", str(tmp_path / "external" / "index"),
-        "--report", str(tmp_path / "external" / "report.json"),
-        "--checkout", str(tmp_path / "repo"),
-    ])
+    code = cli.main(
+        [
+            "real-smoke",
+            "--file",
+            str(tmp_path / "external" / "corpus.csv"),
+            "--manifest",
+            "tests/fixtures/phase2_corpus_manifest.json",
+            "--index",
+            str(tmp_path / "external" / "index"),
+            "--report",
+            str(tmp_path / "external" / "report.json"),
+            "--checkout",
+            str(tmp_path / "repo"),
+        ]
+    )
     assert code == 0
     assert captured["base_url"] == "http://127.0.0.1:11434"
 ```
