@@ -1,0 +1,51 @@
+name: Phase 1 engine smoke push
+
+on:
+  push:
+    branches:
+      - phase-1-engine-implementation
+
+permissions:
+  contents: read
+
+jobs:
+  engine-smoke:
+    name: Windows engine smoke
+    runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: phase-1-engine-implementation
+
+      - name: Verify Python 3.14
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+          Write-Host "Python: $version"
+          if (-not $version.StartsWith("3.14.")) {
+            throw "Engine smoke requires Python 3.14.x. Found $version"
+          }
+
+      - name: Install project
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Validate official engine
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $index = Join-Path $env:RUNNER_TEMP "ai-service-desk-engine-$env:GITHUB_RUN_ID"
+          $report = Join-Path $env:RUNNER_TEMP "ai-service-desk-engine-$env:GITHUB_RUN_ID.json"
+          python -m ai_service_desk validate `
+            --file tests/fixtures/engine_smoke_corpus.csv `
+            --index $index `
+            --report $report `
+            --url http://127.0.0.1:11434
+          Get-Content $report
