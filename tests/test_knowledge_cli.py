@@ -51,9 +51,7 @@ def test_knowledge_search_threshold_defaults_to_065() -> None:
     assert args.threshold == 0.65
 
 
-def test_knowledge_validate_does_not_create_ollama_client(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_knowledge_validate_does_not_create_ollama_client(tmp_path: Path, monkeypatch) -> None:
     class ForbiddenClient:
         def __init__(self, *args, **kwargs):
             raise AssertionError("knowledge-validate must not create Ollama client")
