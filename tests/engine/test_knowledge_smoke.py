@@ -3,9 +3,7 @@ from pathlib import Path
 from ai_service_desk.engine import knowledge_smoke
 
 
-def test_knowledge_smoke_report_is_aggregate_and_content_free(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_knowledge_smoke_report_is_aggregate_and_content_free(tmp_path: Path, monkeypatch) -> None:
     results = {
         "cigam-access": {
             "status": "KNOWLEDGE_FOUND",
