@@ -73,8 +73,8 @@ def run_knowledge_smoke(
         "ok": False,
         "cases": [],
         "privacy": {
-            "query_text_included": False,
-            "answer_text_included": False,
+            "raw_text_included": False,
+            "approved_content_included": False,
             "corporate_data_included": False,
         },
     }
