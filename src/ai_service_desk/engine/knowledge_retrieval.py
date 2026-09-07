@@ -174,9 +174,7 @@ class KnowledgeEngine:
     def available_systems(self, intent: str) -> tuple[str, ...]:
         values = {
             str(value)
-            for value in self.df.loc[
-                self.df["intent"].astype(str).eq(intent), "system"
-            ].tolist()
+            for value in self.df.loc[self.df["intent"].astype(str).eq(intent), "system"].tolist()
         }
         return tuple(sorted(values))
 
