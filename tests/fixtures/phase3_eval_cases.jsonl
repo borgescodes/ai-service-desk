@@ -1,0 +1,28 @@
+{"id":"cigam-erro-01","query":"O CIGAM fecha quando tento faturar uma nota de exemplo.","expected_intent":"ERRO_SISTEMA","expected_system":"CIGAM","relevant_ticket_ids":["SYN-CIG-01"],"must_abstain":false}
+{"id":"cigam-erro-02","query":"No CIGAM aparece uma falha ao faturar.","expected_intent":"ERRO_SISTEMA","expected_system":"CIGAM","relevant_ticket_ids":["SYN-CIG-01"],"must_abstain":false}
+{"id":"cigam-acesso-01","query":"Nao consigo acessar o CIGAM com meu usuario de exemplo.","expected_intent":"PROBLEMA_ACESSO","expected_system":"CIGAM","relevant_ticket_ids":["SYN-CIG-02"],"must_abstain":false}
+{"id":"cigam-rotina-01","query":"Preciso liberar a rotina 1024 no CIGAM.","expected_intent":"LIBERACAO_ROTINA","expected_system":"CIGAM","relevant_ticket_ids":["SYN-CIG-03"],"must_abstain":false}
+{"id":"siagri-erro-01","query":"O SIAGRI trava ao salvar um pedido de exemplo.","expected_intent":"ERRO_SISTEMA","expected_system":"SIAGRI","relevant_ticket_ids":["SYN-SIA-01"],"must_abstain":false}
+{"id":"siagri-erro-02","query":"No SIAGRI ocorre erro ao salvar pedido.","expected_intent":"ERRO_SISTEMA","expected_system":"SIAGRI","relevant_ticket_ids":["SYN-SIA-01"],"must_abstain":false}
+{"id":"siagri-acesso-01","query":"Estou sem acesso ao SIAGRI.","expected_intent":"PROBLEMA_ACESSO","expected_system":"SIAGRI","relevant_ticket_ids":["SYN-SIA-02"],"must_abstain":false}
+{"id":"printer-01","query":"A impressora de exemplo nao imprime e a fila fica presa.","expected_intent":"PROBLEMA_IMPRESSAO","expected_system":"","relevant_ticket_ids":["SYN-PRN-01"],"must_abstain":false}
+{"id":"printer-02","query":"Mando imprimir mas o documento fica na fila.","expected_intent":"PROBLEMA_IMPRESSAO","expected_system":"","relevant_ticket_ids":["SYN-PRN-01"],"must_abstain":false}
+{"id":"scanner-01","query":"O scanner da impressora nao digitaliza.","expected_intent":"PROBLEMA_IMPRESSAO","expected_system":"","relevant_ticket_ids":["SYN-PRN-02"],"must_abstain":false}
+{"id":"network-01","query":"Meu computador de exemplo esta sem internet na rede cabeada.","expected_intent":"PROBLEMA_REDE","expected_system":"","relevant_ticket_ids":["SYN-NET-01"],"must_abstain":false}
+{"id":"network-02","query":"A internet caiu neste computador de exemplo.","expected_intent":"PROBLEMA_REDE","expected_system":"","relevant_ticket_ids":["SYN-NET-01"],"must_abstain":false}
+{"id":"vpn-01","query":"A VPN de exemplo desconecta durante o acesso remoto.","expected_intent":"PROBLEMA_REDE","expected_system":"","relevant_ticket_ids":["SYN-NET-02"],"must_abstain":false}
+{"id":"software-01","query":"Preciso instalar um editor PDF de exemplo.","expected_intent":"INSTALACAO_SOFTWARE","expected_system":"","relevant_ticket_ids":["SYN-SW-01"],"must_abstain":false}
+{"id":"software-02","query":"Quero instalar um compactador de arquivos de exemplo.","expected_intent":"INSTALACAO_SOFTWARE","expected_system":"","relevant_ticket_ids":["SYN-SW-02"],"must_abstain":false}
+{"id":"outlook-erro-01","query":"O Outlook de exemplo nao recebe mensagens.","expected_intent":"ERRO_SISTEMA","expected_system":"OUTLOOK","relevant_ticket_ids":["SYN-OFF-01"],"must_abstain":false}
+{"id":"outlook-orientacao-01","query":"Como configurar uma assinatura de exemplo no Outlook?","expected_intent":"ORIENTACAO","expected_system":"OUTLOOK","relevant_ticket_ids":["SYN-ORI-01"],"must_abstain":false}
+{"id":"hardware-01","query":"O mouse de exemplo parou de responder.","expected_intent":"OUTRO","expected_system":"","relevant_ticket_ids":["SYN-GEN-01"],"must_abstain":false}
+{"id":"unknown-01","query":"O sistema XYZ travou ao abrir um exemplo.","expected_intent":"ERRO_SISTEMA","expected_system":"XYZ","relevant_ticket_ids":[],"must_abstain":true,"expected_status":"SEM_CONTEXTO"}
+{"id":"unknown-02","query":"No sistema ABCD aparece um erro de exemplo.","expected_intent":"ERRO_SISTEMA","expected_system":"ABCD","relevant_ticket_ids":[],"must_abstain":true,"expected_status":"SEM_CONTEXTO"}
+{"id":"ambiguous-01","query":"CIGAM e SIAGRI apresentam erro no mesmo exemplo.","expected_intent":"ERRO_SISTEMA","expected_system":"","relevant_ticket_ids":[],"must_abstain":true,"expected_status":"CONTEXTO_AMBIGUO"}
+{"id":"ambiguous-02","query":"O erro aparece tanto no SIAGRI quanto no CIGAM.","expected_intent":"ERRO_SISTEMA","expected_system":"","relevant_ticket_ids":[],"must_abstain":true,"expected_status":"CONTEXTO_AMBIGUO"}
+{"id":"weak-01","query":"O projetor da sala ficticia esta com imagem tremendo.","expected_intent":"OUTRO","expected_system":"","relevant_ticket_ids":[],"must_abstain":true,"expected_status":"SEM_EVIDENCIA"}
+{"id":"weak-02","query":"O teclado de exemplo esta com uma tecla solta.","expected_intent":"OUTRO","expected_system":"","relevant_ticket_ids":[],"must_abstain":true,"expected_status":"SEM_EVIDENCIA"}
+{"id":"weak-03","query":"Preciso de orientacao sobre um equipamento que nao existe no corpus sintetico.","expected_intent":"ORIENTACAO","expected_system":"","relevant_ticket_ids":[],"must_abstain":true,"expected_status":"SEM_EVIDENCIA"}
+{"id":"cigam-strict-01","query":"Somente o CIGAM apresenta erro de exemplo.","expected_intent":"ERRO_SISTEMA","expected_system":"CIGAM","relevant_ticket_ids":["SYN-CIG-01"],"must_abstain":false}
+{"id":"siagri-strict-01","query":"Somente o SIAGRI apresenta erro de exemplo.","expected_intent":"ERRO_SISTEMA","expected_system":"SIAGRI","relevant_ticket_ids":["SYN-SIA-01"],"must_abstain":false}
+{"id":"printer-strict-01","query":"A impressora nao imprime um documento de exemplo.","expected_intent":"PROBLEMA_IMPRESSAO","expected_system":"","relevant_ticket_ids":["SYN-PRN-01"],"must_abstain":false}
