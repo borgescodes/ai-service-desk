@@ -106,7 +106,8 @@ def _contains_alias(text: str, alias: str) -> bool:
 def _candidate_matches_system(candidate: dict, system: str) -> bool:
     aliases = SYSTEM_ALIASES.get(system, (system,))
     combined = " ".join(
-        str(candidate.get(key, "")) for key in ("catalogo", "area", "item", "title", "texto_busca")
+        str(candidate.get(key, ""))
+        for key in ("catalogo", "area", "item", "title", "texto_busca")
     )
     return any(_contains_alias(combined, alias) for alias in aliases)
 
@@ -257,7 +258,12 @@ def run_demo_smoke(
     subset_report = json.loads(Path(subset_report_path).read_text(encoding="utf-8"))
     rows = subset_report.get("selected_rows")
     canonical_hash = subset_report.get("subset_canonical_sha256")
-    if not isinstance(rows, int) or rows <= 0 or not isinstance(canonical_hash, str) or not canonical_hash:
+    if (
+        not isinstance(rows, int)
+        or rows <= 0
+        or not isinstance(canonical_hash, str)
+        or not canonical_hash
+    ):
         raise ValueError("Relatorio agregado do subset de demo invalido.")
     return _run_smoke(
         corpus_path,
