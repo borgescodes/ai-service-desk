@@ -9,6 +9,9 @@ from ai_service_desk.engine.validation import normalize_text
 MAX_USER_TURNS = 3
 MAX_CLARIFICATIONS = 2
 
+_GENERIC_HELP_TEXTS = {"preciso de ajuda"}
+_PROBLEM_NON_ANSWER_TEXTS = {"nao sei explicar"}
+
 
 @dataclass(frozen=True)
 class TriageState:
@@ -71,22 +74,40 @@ def _parse_system_correction(text: str) -> tuple[str, str] | None:
     return old, new
 
 
+def _normalized_short_text(message: str) -> str:
+    return normalize_text(message).strip().strip(".!?")
+
+
+def _is_known_insufficient_problem(state: TriageState, message: str) -> bool:
+    normalized = _normalized_short_text(message)
+    if state.pending_field == "problem":
+        return normalized in _PROBLEM_NON_ANSWER_TEXTS
+    if not state.pending_field:
+        return normalized in _GENERIC_HELP_TEXTS
+    return False
+
+
 def _is_short_system_reply(
     message: str,
     pending_field: str,
     classification: TicketClassification,
+    prior_system: str = "",
 ) -> bool:
     if pending_field != "system":
         return False
     if _parse_system_correction(message) is not None:
         return True
-    normalized = normalize_text(message).strip().strip(".!?")
+    normalized = _normalized_short_text(message)
     if _canonical_for_exact_alias(normalized) is not None:
         return True
     literal = normalize_text(classification.system).strip()
-    if not literal:
-        return False
-    return normalized == literal or normalized == f"sistema {literal}"
+    if literal and (normalized == literal or normalized == f"sistema {literal}"):
+        return True
+    prior_literal = normalize_text(prior_system).strip()
+    return bool(
+        prior_literal
+        and (normalized == prior_literal or normalized == f"sistema {prior_literal}")
+    )
 
 
 def _analyze_turn(
@@ -98,8 +119,15 @@ def _analyze_turn(
     systems = tuple(explicit_systems(message))
     if correction is not None:
         kind = "SYSTEM_CORRECTION"
-    elif _is_short_system_reply(message, state.pending_field, classification):
+    elif _is_short_system_reply(
+        message,
+        state.pending_field,
+        classification,
+        state.system,
+    ):
         kind = "SYSTEM_SLOT"
+    elif _is_known_insufficient_problem(state, message):
+        kind = "INSUFFICIENT_PROBLEM"
     else:
         kind = "SUBSTANTIVE"
     return TurnEvidence(kind, systems, correction, classification)
@@ -109,18 +137,21 @@ def _system_from_slot(
     message: str,
     classification: TicketClassification,
     evidence: TurnEvidence,
+    prior_system: str = "",
 ) -> str:
     if evidence.correction is not None:
         return evidence.correction[1]
     canonical = _canonical_for_exact_alias(message)
     if canonical is not None:
         return canonical
-    normalized = normalize_text(message).strip().strip(".!?")
+    normalized = _normalized_short_text(message)
     if normalized.startswith("sistema "):
         normalized = normalized.removeprefix("sistema ").strip()
     literal = classification.system.strip()
     if literal and normalize_text(literal) == normalized:
         return literal
+    if prior_system and normalize_text(prior_system).strip() == normalized:
+        return prior_system
     return ""
 
 
@@ -142,7 +173,22 @@ def _merge_turn(
     if evidence.kind == "SYSTEM_SLOT":
         return replace(
             state,
-            system=_system_from_slot(message, classification, evidence),
+            system=_system_from_slot(
+                message,
+                classification,
+                evidence,
+                state.system,
+            ),
+            pending_field="",
+        )
+
+    if evidence.kind == "INSUFFICIENT_PROBLEM":
+        return replace(
+            state,
+            problem_text=message.strip(),
+            intent="OUTRO",
+            entities={},
+            confidence=classification.confidence,
             pending_field="",
         )
 
