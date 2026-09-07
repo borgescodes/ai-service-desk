@@ -44,12 +44,18 @@ def test_demo_retrieval_workflow_is_manual_local_and_non_exporting() -> None:
         "X64",
         "ai-service-desk",
         "ollama",
+        "python -m ai_service_desk audit",
+        "--manifest docs/data/phase-2-corpus-v1.json",
         "python -m ai_service_desk demo-subset",
         "python -m ai_service_desk demo-smoke",
         "C:\\ai-service-desk-data\\phase-2\\demo",
         "--per-group 40",
     ):
         assert required in text
+
+    assert text.index("python -m ai_service_desk audit") < text.index(
+        "python -m ai_service_desk demo-subset"
+    )
 
     for forbidden in ("upload-artifact", "Get-Content", "--show-history"):
         assert forbidden not in text
