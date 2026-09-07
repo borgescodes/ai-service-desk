@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import math
 import re
+from pathlib import Path
 
 import numpy as np
 
@@ -180,6 +182,39 @@ def build_real_smoke_report(corpus: dict, index: dict, queries: list[dict]) -> d
     }
 
 
+def _run_smoke(
+    corpus_path,
+    index_directory,
+    report_path,
+    base_url,
+    checkout,
+    expected: dict,
+    corpus_report: dict,
+) -> dict:
+    client = OllamaClient(base_url)
+    try:
+        embedder = LocalEmbedder(client)
+        client.model_info("qwen3.5:4b")
+        data = load_corpus(corpus_path)
+        build_index(data, index_directory, embedder)
+        engine = RetrievalEngine(index_directory, client, embedder, THRESHOLD)
+        index_expected = {
+            "rows": expected["rows"],
+            "dimensions": embedder.dimensions,
+            "model": embedder.model,
+            "model_digest": embedder.digest,
+            "recipe": "texto_busca-plain-v1",
+            "source_hash": expected["canonical_sha256"],
+        }
+        index_report = validate_real_index(index_directory, index_expected)
+        query_report = run_safe_queries(engine, REAL_SMOKE_CASES)
+        report = build_real_smoke_report(corpus_report, index_report, query_report)
+        write_safe_report(report_path, report)
+        return report
+    finally:
+        client.close()
+
+
 def run_real_smoke(
     corpus_path,
     manifest_path,
@@ -191,28 +226,45 @@ def run_real_smoke(
     corpus_path = ensure_external_path(corpus_path, checkout)
     index_directory = ensure_external_path(index_directory, checkout)
     report_path = ensure_external_path(report_path, checkout)
-
     corpus_report = audit_corpus(corpus_path, manifest_path)
     manifest = load_corpus_manifest(manifest_path)
-    client = OllamaClient(base_url)
-    try:
-        embedder = LocalEmbedder(client)
-        client.model_info("qwen3.5:4b")
-        data = load_corpus(corpus_path)
-        build_index(data, index_directory, embedder)
-        engine = RetrievalEngine(index_directory, client, embedder, THRESHOLD)
-        expected = {
+    return _run_smoke(
+        corpus_path,
+        index_directory,
+        report_path,
+        base_url,
+        checkout,
+        {
             "rows": manifest["expected"]["rows"],
-            "dimensions": embedder.dimensions,
-            "model": embedder.model,
-            "model_digest": embedder.digest,
-            "recipe": "texto_busca-plain-v1",
-            "source_hash": manifest["expected"]["canonical_sha256"],
-        }
-        index_report = validate_real_index(index_directory, expected)
-        query_report = run_safe_queries(engine, REAL_SMOKE_CASES)
-        report = build_real_smoke_report(corpus_report, index_report, query_report)
-        write_safe_report(report_path, report)
-        return report
-    finally:
-        client.close()
+            "canonical_sha256": manifest["expected"]["canonical_sha256"],
+        },
+        corpus_report,
+    )
+
+
+def run_demo_smoke(
+    corpus_path,
+    subset_report_path,
+    index_directory,
+    report_path,
+    base_url,
+    checkout,
+) -> dict:
+    corpus_path = ensure_external_path(corpus_path, checkout)
+    subset_report_path = ensure_external_path(subset_report_path, checkout)
+    index_directory = ensure_external_path(index_directory, checkout)
+    report_path = ensure_external_path(report_path, checkout)
+    subset_report = json.loads(Path(subset_report_path).read_text(encoding="utf-8"))
+    rows = subset_report.get("selected_rows")
+    canonical_hash = subset_report.get("subset_canonical_sha256")
+    if not isinstance(rows, int) or rows <= 0 or not isinstance(canonical_hash, str) or not canonical_hash:
+        raise ValueError("Relatorio agregado do subset de demo invalido.")
+    return _run_smoke(
+        corpus_path,
+        index_directory,
+        report_path,
+        base_url,
+        checkout,
+        {"rows": rows, "canonical_sha256": canonical_hash},
+        {"rows": rows, "manifest_match": True},
+    )
