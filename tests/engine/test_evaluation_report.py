@@ -32,9 +32,9 @@ def test_build_evaluation_report_contains_only_aggregate_metrics() -> None:
         "candidate_identifiers_included": False,
         "corporate_content_included": False,
     }
-    assert "query" not in text.lower()
     assert "candidate_ids" not in text
     assert "SYN-CIG-01" not in text
+    assert "SEGREDO-SINTETICO" not in text
 
 
 def test_build_evaluation_report_fails_runtime_hard_gate() -> None:
