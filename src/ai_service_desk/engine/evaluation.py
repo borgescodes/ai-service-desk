@@ -13,6 +13,9 @@ from ai_service_desk.engine.classification import (
     SYSTEM_ALIASES,
     classify_ticket,
 )
+from ai_service_desk.engine.corpus import ensure_external_path, write_safe_report
+from ai_service_desk.engine.index import load_index
+from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
 from ai_service_desk.engine.retrieval import retrieve
 from ai_service_desk.engine.validation import normalize_text
 
@@ -37,6 +40,7 @@ HARD_GATE_KEYS = (
     "unknown_system_failures",
 )
 RUNTIME_THRESHOLD = 0.65
+DEFAULT_EVALUATION_THRESHOLDS = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80]
 
 
 def _validate_case(case: object, seen_ids: set[str]) -> dict:
@@ -377,3 +381,68 @@ def calibration_decision(recommendation: float | None, has_real_gold: bool) -> d
         "reason": "real_gold_requires_explicit_change",
         "synthetic_recommendation": recommendation,
     }
+
+
+def build_evaluation_report(
+    metrics_by_threshold: dict[float, dict],
+    recommendation: float | None,
+    has_real_gold: bool = False,
+) -> dict:
+    runtime_metrics = metrics_by_threshold.get(RUNTIME_THRESHOLD, {})
+    hard_gates_ok = all(
+        key in runtime_metrics and runtime_metrics[key] == 0 for key in HARD_GATE_KEYS
+    )
+    execution_ok = runtime_metrics.get("execution_failures") == 0
+    thresholds = {
+        f"{float(threshold):.2f}": dict(metrics)
+        for threshold, metrics in sorted(metrics_by_threshold.items())
+    }
+    return {
+        "version": 1,
+        "benchmark": "phase3-synthetic-v1",
+        "ok": bool(hard_gates_ok and execution_ok),
+        "cases": int(runtime_metrics.get("cases", 0)),
+        "thresholds": thresholds,
+        "synthetic_recommendation": recommendation,
+        "calibration": calibration_decision(recommendation, has_real_gold),
+        "privacy": {
+            "query_text_included": False,
+            "candidate_identifiers_included": False,
+            "corporate_content_included": False,
+        },
+    }
+
+
+def run_evaluation(
+    index_directory,
+    cases_path,
+    report_path,
+    base_url,
+    checkout,
+) -> dict:
+    index_directory = ensure_external_path(index_directory, checkout)
+    report_path = ensure_external_path(report_path, checkout)
+    cases = load_evaluation_cases(cases_path)
+    client = OllamaClient(base_url)
+    try:
+        embedder = LocalEmbedder(client)
+        client.model_info("qwen3.5:4b")
+        data, matrix, manifest = load_index(index_directory)
+        if manifest["model"] != embedder.model or manifest["model_digest"] != embedder.digest:
+            raise ValueError("Modelo de avaliacao diferente do modelo do indice.")
+        if manifest["dimensions"] != embedder.dimensions:
+            raise ValueError("Dimensoes do modelo diferentes do indice de avaliacao.")
+        metrics = evaluate_thresholds(
+            data,
+            matrix,
+            client,
+            embedder,
+            cases,
+            DEFAULT_EVALUATION_THRESHOLDS,
+        )
+        recommendation = recommend_synthetic_threshold(metrics)
+        report = build_evaluation_report(metrics, recommendation, has_real_gold=False)
+        write_safe_report(report_path, report)
+        return report
+    finally:
+        client.close()
