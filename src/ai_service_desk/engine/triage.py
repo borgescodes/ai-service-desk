@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ai_service_desk.engine.classification import SYSTEM_ALIASES, explicit_systems
 from ai_service_desk.engine.types import TicketClassification
@@ -102,3 +102,75 @@ def _analyze_turn(
     else:
         kind = "SUBSTANTIVE"
     return TurnEvidence(kind, systems, correction, classification)
+
+
+def _system_from_slot(
+    message: str,
+    classification: TicketClassification,
+    evidence: TurnEvidence,
+) -> str:
+    if evidence.correction is not None:
+        return evidence.correction[1]
+    canonical = _canonical_for_exact_alias(message)
+    if canonical is not None:
+        return canonical
+    normalized = normalize_text(message).strip().strip(".!?")
+    if normalized.startswith("sistema "):
+        normalized = normalized.removeprefix("sistema ").strip()
+    literal = classification.system.strip()
+    if literal and normalize_text(literal) == normalized:
+        return literal
+    return ""
+
+
+def _merge_turn(
+    state: TriageState,
+    message: str,
+    evidence: TurnEvidence,
+) -> TriageState:
+    classification = evidence.classification
+
+    if evidence.kind == "SYSTEM_CORRECTION":
+        assert evidence.correction is not None
+        return replace(
+            state,
+            system=evidence.correction[1],
+            pending_field="" if state.pending_field == "system" else state.pending_field,
+        )
+
+    if evidence.kind == "SYSTEM_SLOT":
+        return replace(
+            state,
+            system=_system_from_slot(message, classification, evidence),
+            pending_field="",
+        )
+
+    explicit = evidence.explicit_systems
+    if len(explicit) == 1:
+        next_system = explicit[0]
+    elif len(explicit) > 1:
+        next_system = ""
+    else:
+        next_system = state.system
+
+    if state.pending_field == "problem" and classification.intent == "OUTRO":
+        return replace(
+            state,
+            problem_text=message.strip(),
+            intent=classification.intent,
+            system=next_system,
+            entities=dict(classification.entities),
+            confidence=classification.confidence,
+            pending_field="",
+        )
+
+    return replace(
+        state,
+        problem_text=message.strip(),
+        intent=classification.intent,
+        system=next_system,
+        entities=dict(classification.entities),
+        confidence=classification.confidence,
+        pending_field="",
+        asked_fields=(),
+    )
