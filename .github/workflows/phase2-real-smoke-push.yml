@@ -1,0 +1,50 @@
+name: Phase 2 real corpus smoke push
+
+on:
+  push:
+    branches:
+      - phase-2-real-corpus
+
+permissions:
+  contents: read
+
+jobs:
+  real-corpus-smoke:
+    name: Windows real corpus smoke
+    runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: phase-2-real-corpus
+
+      - name: Verify Python 3.14
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+          Write-Host "Python: $version"
+          if (-not $version.StartsWith("3.14.")) {
+            throw "Real corpus smoke requires Python 3.14.x. Found $version"
+          }
+
+      - name: Install project
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Validate real corpus and retrieval
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ai_service_desk real-smoke `
+            --file "C:\ai-service-desk-data\phase-2\corpus\base_ti_preparada.csv" `
+            --manifest docs/data/phase-2-corpus-v1.json `
+            --index "C:\ai-service-desk-data\phase-2\index" `
+            --report "C:\ai-service-desk-data\phase-2\reports\real-corpus-smoke.json" `
+            --checkout "$env:GITHUB_WORKSPACE" `
+            --url http://127.0.0.1:11434
