@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from ai_service_desk.engine import knowledge_smoke
@@ -76,7 +75,9 @@ def test_knowledge_smoke_report_is_aggregate_and_content_free(
     assert "KB-SYN-CIGAM-ACCESS-001" in raw
 
 
-def test_knowledge_smoke_marks_wrong_cross_system_result_failed(tmp_path: Path, monkeypatch) -> None:
+def test_knowledge_smoke_marks_wrong_cross_system_result_failed(
+    tmp_path: Path, monkeypatch
+) -> None:
     class FakeClient:
         def __init__(self, url: str) -> None:
             pass
