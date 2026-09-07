@@ -41,6 +41,12 @@ def _canonical_hash(data: pd.DataFrame) -> str:
     return hashlib.sha256(corpus_bytes(data)).hexdigest()
 
 
+def _stable_source_hash(data: pd.DataFrame) -> str:
+    order = data["ticket_id"].astype(str).map(_stable_hash)
+    stable = data.assign(_demo_hash=order).sort_values("_demo_hash").drop(columns="_demo_hash")
+    return _canonical_hash(stable.reset_index(drop=True))
+
+
 def build_demo_subset(data: pd.DataFrame, per_group: int = 40) -> tuple[pd.DataFrame, dict]:
     if not isinstance(per_group, int) or not 1 <= per_group <= 100:
         raise ValueError("per_group deve estar entre 1 e 100.")
@@ -90,7 +96,7 @@ def build_demo_subset(data: pd.DataFrame, per_group: int = 40) -> tuple[pd.DataF
         "selected_rows": int(len(subset)),
         "per_group": int(per_group),
         "groups": group_counts,
-        "source_canonical_sha256": _canonical_hash(data),
+        "source_canonical_sha256": _stable_source_hash(data),
         "subset_canonical_sha256": _canonical_hash(subset),
     }
     return subset, report
