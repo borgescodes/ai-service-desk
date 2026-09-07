@@ -1,9 +1,19 @@
 import json
+from dataclasses import asdict
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import pytest
 
-from ai_service_desk.engine.evaluation import compute_metrics, load_evaluation_cases
+from ai_service_desk.engine import evaluation
+from ai_service_desk.engine.evaluation import (
+    calibration_decision,
+    compute_metrics,
+    evaluate_thresholds,
+    load_evaluation_cases,
+    recommend_synthetic_threshold,
+)
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "phase3_eval_cases.jsonl"
@@ -198,3 +208,157 @@ def test_compute_metrics_counts_execution_failure_without_crashing() -> None:
 def test_compute_metrics_rejects_invalid_k() -> None:
     with pytest.raises(ValueError, match="k"):
         compute_metrics([], [], k=0)
+
+
+class _CountingClient:
+    def __init__(self) -> None:
+        self.chat_calls = 0
+
+    def chat(self, payload: dict) -> dict:
+        self.chat_calls += 1
+        return {
+            "message": {
+                "content": json.dumps(
+                    {
+                        "intent": "OUTRO",
+                        "system": "",
+                        "entities": {},
+                        "confidence": 0.5,
+                    }
+                )
+            }
+        }
+
+
+class _CountingEmbedder:
+    def __init__(self) -> None:
+        self.text_count = 0
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        self.text_count += len(texts)
+        return np.asarray([[1.0, 0.0] for _ in texts], dtype=np.float32)
+
+
+def test_threshold_sweep_reuses_classification_and_embedding(monkeypatch) -> None:
+    cases = [
+        {
+            "id": "found",
+            "query": "Caso sintetico encontrado.",
+            "expected_intent": "OUTRO",
+            "expected_system": "",
+            "relevant_ticket_ids": ["SYN-1"],
+            "must_abstain": False,
+        },
+        {
+            "id": "abstain",
+            "query": "Caso sintetico para abstencao.",
+            "expected_intent": "OUTRO",
+            "expected_system": "",
+            "relevant_ticket_ids": [],
+            "must_abstain": True,
+            "expected_status": "SEM_EVIDENCIA",
+        },
+    ]
+    data = pd.DataFrame(
+        [
+            {
+                "ticket_id": "SYN-1",
+                "title": "Documento sintetico",
+                "texto_busca": "caso sintetico",
+            }
+        ]
+    )
+    matrix = np.asarray([[1.0, 0.0]], dtype=np.float32)
+    client = _CountingClient()
+    embedder = _CountingEmbedder()
+    retrieve_calls: list[float] = []
+
+    def fake_retrieve(data, matrix, query, classification, text, threshold, top_k):
+        del data, matrix, query, top_k
+        retrieve_calls.append(threshold)
+        if "abstencao" in text:
+            return {
+                "status": "SEM_EVIDENCIA",
+                "classification": asdict(classification),
+                "candidates": [],
+            }
+        return {
+            "status": "ENCONTRADOS",
+            "classification": asdict(classification),
+            "candidates": [
+                {
+                    "ticket_id": "SYN-1",
+                    "title": "Documento sintetico",
+                    "catalogo": "",
+                    "area": "",
+                    "item": "",
+                    "texto_busca": "caso sintetico",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(evaluation, "retrieve", fake_retrieve)
+    report = evaluate_thresholds(
+        data,
+        matrix,
+        client,
+        embedder,
+        cases,
+        thresholds=[0.60, 0.65],
+    )
+
+    assert client.chat_calls == len(cases)
+    assert embedder.text_count == len(cases)
+    assert retrieve_calls == [0.60, 0.65, 0.60, 0.65]
+    assert set(report) == {0.60, 0.65}
+    assert report[0.65]["hit_at_3"] == 1.0
+    assert report[0.65]["correct_abstention_rate"] == 1.0
+
+
+def test_recommend_synthetic_threshold_applies_hard_gates_and_ordering() -> None:
+    metrics = {
+        0.55: {
+            "correct_abstention_rate": 1.0,
+            "hit_at_3": 1.0,
+            "mrr": 1.0,
+            "system_leakage_count": 1,
+            "unsafe_accept_count": 0,
+            "ambiguous_context_failures": 0,
+            "unknown_system_failures": 0,
+        },
+        0.65: {
+            "correct_abstention_rate": 1.0,
+            "hit_at_3": 0.9,
+            "mrr": 0.8,
+            "system_leakage_count": 0,
+            "unsafe_accept_count": 0,
+            "ambiguous_context_failures": 0,
+            "unknown_system_failures": 0,
+        },
+        0.70: {
+            "correct_abstention_rate": 1.0,
+            "hit_at_3": 0.8,
+            "mrr": 0.9,
+            "system_leakage_count": 0,
+            "unsafe_accept_count": 0,
+            "ambiguous_context_failures": 0,
+            "unknown_system_failures": 0,
+        },
+    }
+    assert recommend_synthetic_threshold(metrics) == 0.65
+
+
+def test_calibration_holds_runtime_threshold_without_real_gold() -> None:
+    decision = calibration_decision(0.60, has_real_gold=False)
+    assert decision == {
+        "decision": "HOLD",
+        "runtime_threshold": 0.65,
+        "reason": "no_real_labeled_gold_set",
+        "synthetic_recommendation": 0.60,
+    }
+
+
+def test_calibration_never_auto_changes_threshold_with_real_gold() -> None:
+    decision = calibration_decision(0.60, has_real_gold=True)
+    assert decision["decision"] == "REVIEW_REQUIRED"
+    assert decision["runtime_threshold"] == 0.65
