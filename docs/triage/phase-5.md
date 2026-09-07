@@ -53,6 +53,16 @@ A precedencia e:
 
 Quando uma nova descricao substitui o problema, entities antigas sao descartadas. Um system previamente resolvido e preservado apenas quando a nova descricao nao fornece nova evidencia de system.
 
+### Salvaguardas deterministicas confirmadas na homologacao Dell
+
+A homologacao real mostrou duas situacoes em que uma classificacao plausivel do LLM nao pode substituir o contexto ja resolvido pela maquina de estados.
+
+Quando `pending_field=system` e `state.system` ja e nao vazio, repetir exatamente `<state.system>` ou `sistema <state.system>` permanece resposta slot-only mesmo se a classificacao do turno omitir `system`. Isso nao infere outro sistema e nao usa fuzzy matching.
+
+Para o smoke aprovado, somente as formas normalizadas exatas `preciso de ajuda` e `nao sei explicar` sao tratadas deterministicamente como contexto de problema insuficiente. A primeira vale sem pending field; a segunda vale somente quando `pending_field=problem`. Nao existe parser generico, lista aberta de sinonimos ou segunda classificacao.
+
+O contrato normativo detalhado dessas duas salvaguardas esta em `docs/superpowers/specs/2026-09-07-phase-5-homologation-addendum.md`.
+
 ## Limites
 
 ```text
