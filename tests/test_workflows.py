@@ -3,6 +3,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "real-corpus-smoke.yml"
 DEMO_WORKFLOW = ROOT / ".github" / "workflows" / "demo-retrieval-smoke.yml"
+PHASE3_WORKFLOW = ROOT / ".github" / "workflows" / "phase3-evaluation.yml"
 
 
 def test_real_corpus_workflow_is_manual_local_and_non_exporting() -> None:
@@ -56,6 +57,32 @@ def test_demo_retrieval_workflow_is_manual_local_and_non_exporting() -> None:
     assert text.index("python -m ai_service_desk audit") < text.index(
         "python -m ai_service_desk demo-subset"
     )
+
+    for forbidden in ("upload-artifact", "Get-Content", "--show-history"):
+        assert forbidden not in text
+
+
+def test_phase3_evaluation_workflow_is_manual_local_and_non_exporting() -> None:
+    assert PHASE3_WORKFLOW.exists()
+    text = PHASE3_WORKFLOW.read_text(encoding="utf-8")
+
+    for required in (
+        "workflow_dispatch:",
+        "target_ref:",
+        "report_path:",
+        "self-hosted",
+        "Windows",
+        "X64",
+        "ai-service-desk",
+        "ollama",
+        "python -m ai_service_desk index",
+        "python -m ai_service_desk evaluate",
+        "tests/fixtures/phase3_eval_corpus.csv",
+        "tests/fixtures/phase3_eval_cases.jsonl",
+        "C:\\ai-service-desk-data\\phase-3\\reports",
+        "http://127.0.0.1:11434",
+    ):
+        assert required in text
 
     for forbidden in ("upload-artifact", "Get-Content", "--show-history"):
         assert forbidden not in text

@@ -26,3 +26,11 @@ O projeto não avança apenas porque uma fase parece funcional. A transição ex
 Para a competição, a Fase 2A é o gate de retrieval. Após sua homologação, o trabalho de produto pode seguir para as fases seguintes sem aguardar a conclusão da Fase 2B.
 
 A Fase 2B continua válida como evidência adicional de escala, integridade e retomada do índice completo. Ela não substitui a avaliação e calibração estatística da Fase 3.
+
+## Fase 3: regra de calibração
+
+A Fase 3 usa um benchmark sintético versionado para regressão e um sweep reproduzível de thresholds. Essas métricas não representam precisão, recall, cobertura ou taxa de automação sobre os 240 tickets da demo ou sobre o corpus completo de 15.542 tickets.
+
+O threshold de runtime permanece em `0.65` por decisão `HOLD` enquanto não existir um gold set corporativo real rotulado por humanos. Uma recomendação derivada apenas do benchmark sintético não altera o comportamento de produção.
+
+A saída da Fase 3 exige CI hospedado verde, hard gates de segurança zerados no threshold oficial, homologação no runner Dell com os modelos locais e revisão final do PR.

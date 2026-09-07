@@ -1,0 +1,15 @@
+ticket_id;ticket_number;title;texto_busca;catalogo;area;item;historico_atendimento
+SYN-CIG-01;SYN-CIG-01;CIGAM falha ao faturar;o cigam fecha ao faturar uma nota de exemplo;Sistemas;Cigam 11;Faturamento;procedimento sintetico de faturamento
+SYN-CIG-02;SYN-CIG-02;Acesso CIGAM;usuario de exemplo nao consegue acessar o cigam;Sistemas;Cigam 11;Acesso;permissao sintetica revisada
+SYN-CIG-03;SYN-CIG-03;Liberar rotina CIGAM;solicitacao ficticia para liberar rotina 1024 no cigam;Sistemas;Cigam 11;Liberar rotina;rotina sintetica revisada
+SYN-SIA-01;SYN-SIA-01;SIAGRI trava ao salvar;o siagri trava ao salvar um pedido ficticio;Sistemas;Siagri;Pedido;registro sintetico do siagri
+SYN-SIA-02;SYN-SIA-02;Acesso SIAGRI;usuario de exemplo sem acesso ao siagri;Sistemas;Siagri;Acesso;acesso sintetico revisado
+SYN-PRN-01;SYN-PRN-01;Impressora nao imprime;documento ficticio fica preso na fila e nao imprime;Impressoras;Impressora;Nao imprime;fila sintetica limpa
+SYN-PRN-02;SYN-PRN-02;Scanner nao digitaliza;o scanner da impressora de exemplo nao digitaliza;Impressoras;Impressora;Scanner;scanner sintetico reiniciado
+SYN-NET-01;SYN-NET-01;Sem internet;computador de exemplo esta sem internet na rede cabeada;Redes e internet;Infraestrutura;Sem conexao;cabo sintetico revisado
+SYN-NET-02;SYN-NET-02;VPN desconecta;a vpn de exemplo desconecta durante o acesso remoto;Redes e internet;VPN;Conexao;perfil sintetico revisado
+SYN-SW-01;SYN-SW-01;Instalar editor PDF;preciso instalar um editor pdf de exemplo no computador;Software;Instalacao;Aplicativo;instalacao sintetica autorizada
+SYN-SW-02;SYN-SW-02;Instalar compactador;preciso instalar um compactador de arquivos de exemplo;Software;Instalacao;Programa;instalacao sintetica revisada
+SYN-OFF-01;SYN-OFF-01;Outlook nao recebe;o outlook de exemplo nao recebe mensagens;Microsoft Office 365;Outlook;Email;perfil sintetico recriado
+SYN-ORI-01;SYN-ORI-01;Orientacao assinatura;como configurar uma assinatura de exemplo no outlook;Microsoft Office 365;Outlook;Orientacao;orientacao sintetica registrada
+SYN-GEN-01;SYN-GEN-01;Mouse sem resposta;o mouse de exemplo parou de responder;Hardware;Perifericos;Mouse;periferico sintetico revisado
