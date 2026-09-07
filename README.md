@@ -9,6 +9,8 @@ A Fase 2 foi dividida em dois trilhos:
 - **Fase 2A, gate da competição:** retrieval demonstrável sobre um subconjunto real, controlado e determinístico de 240 tickets.
 - **Fase 2B, evidência de escala:** auditoria e indexação do snapshot completo de 15.542 tickets, sem bloquear a evolução do produto.
 
+A Fase 3 adiciona avaliação reproduzível, sweep de thresholds e uma decisão conservadora de calibração. O benchmark versionado é sintético e serve como evidência de regressão, não como medida de precisão do corpus corporativo.
+
 Históricos recuperados são evidências não validadas. Eles não são soluções aprovadas e não autorizam ações.
 
 ## Requisitos
@@ -98,9 +100,20 @@ python -m ai_service_desk real-smoke `
   --url http://127.0.0.1:11434
 ```
 
+Executar o benchmark sintético e a decisão de calibração da Fase 3:
+
+```powershell
+python -m ai_service_desk evaluate `
+  --index <indice-sintetico-externo> `
+  --cases tests/fixtures/phase3_eval_cases.jsonl `
+  --report C:\ai-service-desk-data\phase-3\reports\phase3-evaluation.json `
+  --checkout (Get-Location) `
+  --url http://127.0.0.1:11434
+```
+
 Também estão disponíveis `show-index`, `prepare`, `index`, `import-legacy`, `search` e `validate`.
 
-`doctor`, `index`, `import-legacy`, `search`, `validate`, `demo-smoke` e `real-smoke` dependem do Ollama local. O cliente aceita somente HTTP em loopback e não baixa modelos automaticamente.
+`doctor`, `index`, `import-legacy`, `search`, `validate`, `demo-smoke`, `real-smoke` e `evaluate` dependem do Ollama local. O cliente aceita somente HTTP em loopback e não baixa modelos automaticamente.
 
 ## Fase 2A: demonstração da competição
 
@@ -123,13 +136,23 @@ Os cenários automáticos cobrem CIGAM, SIAGRI, impressão, sistema inexistente 
 
 O snapshot completo possui 15.542 tickets. Sua indexação continua válida como prova adicional de escala, integridade e retomada por checkpoint, mas não bloqueia interface, triagem conversacional ou demais funcionalidades voltadas à competição.
 
+## Fase 3: avaliação e calibração
+
+O benchmark `phase3-synthetic-v1` possui 28 consultas sintéticas com ground truth. Ele mede classificação, retrieval, abstinência, vazamento entre sistemas, falhas de contexto e latência.
+
+O sweep compara `0.50`, `0.55`, `0.60`, `0.65`, `0.70`, `0.75` e `0.80`, reutilizando a mesma classificação e o mesmo embedding de cada consulta. Os hard gates exigem zero vazamento de sistema, zero aceitação insegura e zero falhas nos casos de sistema desconhecido e contexto ambíguo.
+
+**As métricas sintéticas são evidência de regressão, não precisão no corpus real.** O threshold de runtime permanece em `0.65` com decisão `HOLD` porque ainda não existe um gold set corporativo real rotulado por humanos. Uma recomendação sintética não altera o runtime automaticamente.
+
+Detalhes de métricas, privacidade e homologação estão em `docs/evaluation/phase-3.md`.
+
 ## Dados
 
 Exports brutos do TiFlux, corpus corporativo real, subconjunto real da demo, embeddings, índices, logs e relatórios gerados ficam fora do Git. Os testes e o CI hospedado usam somente dados sintéticos.
 
 O snapshot v1 da Fase 2 é descrito por `docs/data/phase-2-corpus-v1.json`. O manifesto guarda somente schema, contagens e fingerprints seguros. `base_ti_preparada.csv`, `demo_subset.csv`, `documents.jsonl` e `embeddings.npy` não são versionados.
 
-O threshold `0.65` é comportamento legado reproduzido. Ele ainda não é um valor calibrado. Avaliação e calibração pertencem à Fase 3.
+O threshold `0.65` permanece oficial por decisão `HOLD` da Fase 3. Ele não é apresentado como probabilidade calibrada nem como evidência de precisão real enquanto não existir um gold set corporativo humano.
 
 ## CI e homologação
 
@@ -141,6 +164,7 @@ A homologação local é separada:
 - `.github/workflows/engine-smoke.yml` valida o motor oficial ponta a ponta com corpus sintético.
 - `.github/workflows/demo-retrieval-smoke.yml` é o gate da Fase 2A e valida o subconjunto real de 240 registros no Dell sem publicar dados.
 - `.github/workflows/real-corpus-smoke.yml` valida o snapshot completo da Fase 2B como evidência adicional de escala.
+- `.github/workflows/phase3-evaluation.yml` executa o benchmark sintético, a decisão de calibração e as invariantes seguras da demo no Dell.
 
 Os workflows locais são manuais e executam no runner Windows homologado.
 
@@ -148,6 +172,7 @@ Os workflows locais são manuais e executam no runner Windows homologado.
 
 - Especificações: `docs/superpowers/specs/`
 - Planos: `docs/superpowers/plans/`
+- Avaliação e calibração: `docs/evaluation/phase-3.md`
 - Manifesto seguro da Fase 2: `docs/data/phase-2-corpus-v1.json`
 - Equivalência do motor 2.1: `docs/migration/engine-v2.1-equivalence.md`
 - Homologação local: `docs/environment/local-demo.md`
