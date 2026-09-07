@@ -153,9 +153,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.checkout,
             )
             prefix = (
-                "DEMO RETRIEVAL SMOKE OK"
-                if report["ok"]
-                else "DEMO RETRIEVAL SMOKE REQUER REVISAO"
+                "DEMO RETRIEVAL SMOKE OK" if report["ok"] else "DEMO RETRIEVAL SMOKE REQUER REVISAO"
             )
             shape = report.get("index", {}).get("shape", [0, 0])
             print(prefix)
