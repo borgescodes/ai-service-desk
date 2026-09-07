@@ -153,7 +153,11 @@ def compute_metrics(cases: list[dict], results: list[dict], k: int = 3) -> dict:
             if any(candidate in relevant for candidate in top_candidates):
                 hit_at_k += 1
             first_relevant_rank = next(
-                (position for position, candidate in enumerate(candidates, 1) if candidate in relevant),
+                (
+                    position
+                    for position, candidate in enumerate(candidates, 1)
+                    if candidate in relevant
+                ),
                 None,
             )
             if first_relevant_rank is not None:
