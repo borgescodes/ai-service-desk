@@ -27,6 +27,7 @@ def test_help_runs_without_ollama() -> None:
     assert "search" in result.stdout
     assert "audit" in result.stdout
     assert "real-smoke" in result.stdout
+    assert "demo-subset" in result.stdout
 
 
 def test_inspect_uses_synthetic_fixture_without_history() -> None:
@@ -152,6 +153,121 @@ def test_audit_writes_aggregate_report_without_ollama(tmp_path: Path, monkeypatc
     assert "1001" not in report_text
     assert "Falha CIGAM" not in stdout.getvalue()
     assert "1001" not in stdout.getvalue()
+
+
+def _write_demo_source(path: Path) -> None:
+    path.write_text(
+        "ticket_id;ticket_number;title;texto_busca\n"
+        "c1;1;CIGAM;Erro no CIGAM\n"
+        "s1;2;SIAGRI;Erro no SIAGRI\n"
+        "p1;3;Impressora;Impressora nao imprime\n"
+        "a1;4;Acesso;Problema de acesso\n"
+        "w1;5;Software;Instalar software\n"
+        "g1;6;Rede;Conexao instavel\n",
+        encoding="utf-8-sig",
+    )
+
+
+def test_demo_subset_writes_safe_external_files_without_ollama(tmp_path: Path, monkeypatch) -> None:
+    class ForbiddenClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("demo-subset must not create Ollama client")
+
+    monkeypatch.setattr(cli, "OllamaClient", ForbiddenClient)
+    checkout = tmp_path / "repo"
+    external = tmp_path / "external"
+    checkout.mkdir()
+    external.mkdir()
+    source = external / "source.csv"
+    output = external / "demo.csv"
+    report = external / "subset.json"
+    _write_demo_source(source)
+
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        code = cli.main(
+            [
+                "demo-subset",
+                "--file",
+                str(source),
+                "--output",
+                str(output),
+                "--report",
+                str(report),
+                "--checkout",
+                str(checkout),
+                "--per-group",
+                "1",
+            ]
+        )
+
+    assert code == 0
+    assert output.exists()
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["selected_rows"] == 6
+    assert payload["per_group"] == 1
+    text = stdout.getvalue()
+    assert "Erro no CIGAM" not in text
+    assert "c1" not in text
+
+
+def test_demo_subset_refuses_existing_output(tmp_path: Path) -> None:
+    checkout = tmp_path / "repo"
+    external = tmp_path / "external"
+    checkout.mkdir()
+    external.mkdir()
+    source = external / "source.csv"
+    output = external / "demo.csv"
+    report = external / "subset.json"
+    _write_demo_source(source)
+    output.write_text("existing", encoding="utf-8")
+
+    code = cli.main(
+        [
+            "demo-subset",
+            "--file",
+            str(source),
+            "--output",
+            str(output),
+            "--report",
+            str(report),
+            "--checkout",
+            str(checkout),
+            "--per-group",
+            "1",
+        ]
+    )
+
+    assert code == 1
+    assert output.read_text(encoding="utf-8") == "existing"
+
+
+def test_demo_subset_refuses_output_inside_checkout(tmp_path: Path) -> None:
+    checkout = tmp_path / "repo"
+    external = tmp_path / "external"
+    checkout.mkdir()
+    external.mkdir()
+    source = external / "source.csv"
+    _write_demo_source(source)
+
+    code = cli.main(
+        [
+            "demo-subset",
+            "--file",
+            str(source),
+            "--output",
+            str(checkout / "demo.csv"),
+            "--report",
+            str(external / "subset.json"),
+            "--checkout",
+            str(checkout),
+            "--per-group",
+            "1",
+        ]
+    )
+
+    assert code == 1
+    assert not (checkout / "demo.csv").exists()
 
 
 def test_real_smoke_forwards_external_paths(tmp_path: Path, monkeypatch) -> None:
