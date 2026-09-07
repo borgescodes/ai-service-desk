@@ -5,6 +5,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "real-corpus-smoke.yml"
 DEMO_WORKFLOW = ROOT / ".github" / "workflows" / "demo-retrieval-smoke.yml"
 PHASE3_WORKFLOW = ROOT / ".github" / "workflows" / "phase3-evaluation.yml"
 PHASE4_WORKFLOW = ROOT / ".github" / "workflows" / "phase4-knowledge-smoke.yml"
+PHASE5_WORKFLOW = ROOT / ".github" / "workflows" / "phase5-triage-smoke.yml"
 
 
 def test_real_corpus_workflow_is_manual_local_and_non_exporting() -> None:
@@ -104,6 +105,30 @@ def test_phase4_knowledge_workflow_is_manual_local_and_non_exporting() -> None:
         "python -m ai_service_desk knowledge-index",
         "python -m ai_service_desk knowledge-smoke",
         "knowledge/phase4_synthetic_faq.jsonl",
+        "http://127.0.0.1:11434",
+    ):
+        assert required in text
+
+    for forbidden in ("upload-artifact", "Get-Content", "--show-history"):
+        assert forbidden not in text
+
+
+def test_phase5_triage_workflow_is_manual_local_and_non_exporting() -> None:
+    assert PHASE5_WORKFLOW.exists()
+    text = PHASE5_WORKFLOW.read_text(encoding="utf-8")
+
+    for required in (
+        "workflow_dispatch:",
+        "target_ref:",
+        "self-hosted",
+        "Windows",
+        "X64",
+        "ai-service-desk",
+        "ollama",
+        "python -m ai_service_desk knowledge-index",
+        "python -m ai_service_desk triage-smoke",
+        "knowledge/phase4_synthetic_faq.jsonl",
+        "tests/fixtures/phase5_triage_conversations.jsonl",
         "http://127.0.0.1:11434",
     ):
         assert required in text
