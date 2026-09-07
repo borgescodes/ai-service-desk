@@ -55,20 +55,33 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: Prepare demo directory
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $demoRoot = "${{ inputs.demo_root }}"
+          if ("${{ inputs.rebuild }}" -eq "true" -and (Test-Path $demoRoot)) {
+            Remove-Item -Recurse -Force $demoRoot
+          }
+          New-Item -ItemType Directory -Force (Join-Path $demoRoot "reports") | Out-Null
+
+      - name: Audit source snapshot
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $auditReport = Join-Path "${{ inputs.demo_root }}" "reports\corpus-audit.json"
+          python -m ai_service_desk audit `
+            --file "${{ inputs.corpus_path }}" `
+            --manifest docs/data/phase-2-corpus-v1.json `
+            --report "$auditReport"
+
       - name: Prepare deterministic demo subset
         shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
           $ErrorActionPreference = "Stop"
           $demoRoot = "${{ inputs.demo_root }}"
           $subset = Join-Path $demoRoot "demo_subset.csv"
-          $reportDir = Join-Path $demoRoot "reports"
-          $subsetReport = Join-Path $reportDir "subset.json"
-
-          if ("${{ inputs.rebuild }}" -eq "true" -and (Test-Path $demoRoot)) {
-            Remove-Item -Recurse -Force $demoRoot
-          }
-
-          New-Item -ItemType Directory -Force $reportDir | Out-Null
+          $subsetReport = Join-Path $demoRoot "reports\subset.json"
 
           if ((Test-Path $subset) -xor (Test-Path $subsetReport)) {
             throw "Demo subset and aggregate report must exist together. Use rebuild=true."
