@@ -105,8 +105,7 @@ def _is_short_system_reply(
         return True
     prior_literal = normalize_text(prior_system).strip()
     return bool(
-        prior_literal
-        and (normalized == prior_literal or normalized == f"sistema {prior_literal}")
+        prior_literal and (normalized == prior_literal or normalized == f"sistema {prior_literal}")
     )
 
 
