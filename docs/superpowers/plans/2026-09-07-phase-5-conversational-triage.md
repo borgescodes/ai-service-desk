@@ -92,7 +92,9 @@
 Add a Phase 4 regression test using the existing fakes:
 
 ```python
-def test_search_and_search_classified_are_equivalent_for_same_classification(tmp_path: Path) -> None:
+def test_search_and_search_classified_are_equivalent_for_same_classification(
+    tmp_path: Path,
+) -> None:
     embedder = FakeEmbedder()
     root = tmp_path / "index"
     build_knowledge_index(write_source(tmp_path / "knowledge.jsonl"), root, embedder, batch_size=1)
@@ -257,7 +259,9 @@ def test_new_state_has_exact_small_schema() -> None:
     }
     assert MAX_USER_TURNS == 3
     assert MAX_CLARIFICATIONS == 2
-    assert not ({"transcript", "messages", "answer", "ticket_id", "score", "embedding"} & set(asdict(state)))
+    assert not (
+        {"transcript", "messages", "answer", "ticket_id", "score", "embedding"} & set(asdict(state))
+    )
 ```
 
 - [ ] **Step 2: Write failing conservative correction tests**
@@ -541,14 +545,20 @@ def test_substantive_replacement_discards_old_entities_and_changes_intent() -> N
 
 
 def test_new_explicit_system_replaces_old_system() -> None:
-    state = seeded_state(problem_text="Nao consigo acessar", intent="PROBLEMA_ACESSO", system="CIGAM")
+    state = seeded_state(
+        problem_text="Nao consigo acessar", intent="PROBLEMA_ACESSO", system="CIGAM"
+    )
     message = "na verdade o SIAGRI trava ao salvar"
-    evidence = _analyze_turn(state, message, TicketClassification("ERRO_SISTEMA", "SIAGRI", {}, 0.8))
+    evidence = _analyze_turn(
+        state, message, TicketClassification("ERRO_SISTEMA", "SIAGRI", {}, 0.8)
+    )
     assert _merge_turn(state, message, evidence).system == "SIAGRI"
 
 
 def test_multiple_explicit_systems_clear_old_system_without_correction() -> None:
-    state = seeded_state(problem_text="Nao consigo acessar", intent="PROBLEMA_ACESSO", system="CIGAM")
+    state = seeded_state(
+        problem_text="Nao consigo acessar", intent="PROBLEMA_ACESSO", system="CIGAM"
+    )
     message = "CIGAM e SIAGRI estao sem acesso"
     evidence = _analyze_turn(state, message, TicketClassification("PROBLEMA_ACESSO", "", {}, 0.8))
     assert _merge_turn(state, message, evidence).system == ""
@@ -918,7 +928,10 @@ def test_query_contains_only_problem_and_later_system_context() -> None:
 
 
 def test_query_does_not_duplicate_existing_system() -> None:
-    assert build_knowledge_query("Nao consigo acessar o CIGAM", "CIGAM") == "Nao consigo acessar o CIGAM"
+    assert (
+        build_knowledge_query("Nao consigo acessar o CIGAM", "CIGAM")
+        == "Nao consigo acessar o CIGAM"
+    )
 
 
 def test_query_removes_only_conflicting_known_alias_after_correction() -> None:
@@ -1362,7 +1375,10 @@ def load_triage_cases(path: str | Path) -> list[dict]:
             if not isinstance(case, dict):
                 raise ValueError("Caso de triagem deve ser objeto JSON.")
             keys = set(case)
-            if not REQUIRED_CASE_FIELDS <= keys or keys - REQUIRED_CASE_FIELDS - OPTIONAL_CASE_FIELDS:
+            if (
+                not REQUIRED_CASE_FIELDS <= keys
+                or keys - REQUIRED_CASE_FIELDS - OPTIONAL_CASE_FIELDS
+            ):
                 raise ValueError("Campos invalidos no caso de triagem.")
             name = case["case_name"]
             if not isinstance(name, str) or not name.strip() or name in seen:
