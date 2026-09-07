@@ -1,0 +1,79 @@
+name: Phase 4 knowledge smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Branch or SHA to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  phase4-knowledge-smoke:
+    name: Windows Phase 4 knowledge smoke
+    runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref }}
+
+      - name: Verify Python 3.14
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+          Write-Host "Python: $version"
+          if (-not $version.StartsWith("3.14.")) {
+            throw "Phase 4 knowledge smoke requires Python 3.14.x. Found $version"
+          }
+
+      - name: Install project
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Verify local models
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ai_service_desk doctor --url http://127.0.0.1:11434
+
+      - name: Validate synthetic knowledge source
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ai_service_desk knowledge-validate `
+            --file knowledge/phase4_synthetic_faq.jsonl
+
+      - name: Build approved synthetic knowledge index
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $index = Join-Path $env:RUNNER_TEMP "phase4-knowledge-$env:GITHUB_RUN_ID"
+          if (Test-Path $index) {
+            Remove-Item -Recurse -Force $index
+          }
+          python -m ai_service_desk knowledge-index `
+            --file knowledge/phase4_synthetic_faq.jsonl `
+            --index "$index" `
+            --batch-size 10 `
+            --url http://127.0.0.1:11434
+
+      - name: Run Phase 4 competition smoke
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $index = Join-Path $env:RUNNER_TEMP "phase4-knowledge-$env:GITHUB_RUN_ID"
+          $report = Join-Path $env:RUNNER_TEMP "phase4-knowledge-$env:GITHUB_RUN_ID.json"
+          python -m ai_service_desk knowledge-smoke `
+            --index "$index" `
+            --report "$report" `
+            --url http://127.0.0.1:11434
