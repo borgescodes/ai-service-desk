@@ -1,0 +1,66 @@
+name: Phase 2A demo push
+
+on:
+  push:
+    branches:
+      - phase-2-real-corpus
+
+permissions:
+  contents: read
+
+jobs:
+  demo-smoke:
+    name: Windows phase 2A demo smoke
+    runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: phase-2-real-corpus
+
+      - name: Verify Python 3.14
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+          Write-Host "Python: $version"
+          if (-not $version.StartsWith("3.14.")) {
+            throw "Phase 2A demo requires Python 3.14.x. Found $version"
+          }
+
+      - name: Install project
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Rebuild deterministic demo subset
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $demoRoot = "C:\ai-service-desk-data\phase-2\demo"
+          if (Test-Path $demoRoot) {
+            Remove-Item -Recurse -Force $demoRoot
+          }
+          python -m ai_service_desk demo-subset `
+            --file "C:\ai-service-desk-data\phase-2\corpus\base_ti_preparada.csv" `
+            --output "$demoRoot\demo_subset.csv" `
+            --report "$demoRoot\reports\subset.json" `
+            --checkout "$env:GITHUB_WORKSPACE" `
+            --per-group 40
+
+      - name: Validate demo retrieval
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $demoRoot = "C:\ai-service-desk-data\phase-2\demo"
+          python -m ai_service_desk demo-smoke `
+            --file "$demoRoot\demo_subset.csv" `
+            --subset-report "$demoRoot\reports\subset.json" `
+            --index "$demoRoot\index" `
+            --report "$demoRoot\reports\smoke.json" `
+            --checkout "$env:GITHUB_WORKSPACE" `
+            --url http://127.0.0.1:11434
