@@ -99,6 +99,26 @@ python -m ai_service_desk evaluate `
   --url http://127.0.0.1:11434
 ```
 
+## Homologação no Dell
+
+A homologação local de 7 de setembro de 2026 foi concluída no runner `ai-service-desk-dell` pelo run `34153579162`, usando Python 3.14.7, Ollama 0.33.3, `qwen3.5:4b` e `qwen3-embedding:0.6b`.
+
+No threshold oficial `0.65`, o benchmark sintético de 28 casos produziu os seguintes resultados agregados:
+
+| Métrica | Resultado |
+| --- | ---: |
+| Intent accuracy | 0.8571 |
+| System accuracy | 0.9643 |
+| Hit@3 | 0.8095 |
+| MRR | 0.8095 |
+| Correct abstention rate | 1.0000 |
+| System leakage count | 0 |
+| Execution failures | 0 |
+
+O sweep sintético recomendou `0.60`. Essa recomendação não altera o runtime. A decisão permanece `HOLD` em `0.65` porque não existe gold set corporativo real rotulado por humanos.
+
+Na mesma execução, o smoke seguro da Fase 2A foi concluído com sucesso sobre o índice real de 240 vetores por 1024 dimensões e seus cinco cenários operacionais. Esse resultado valida invariantes de segurança e operação, não precisão do corpus real.
+
 ## Critério para encerrar a Fase 3
 
 A fase só é considerada homologada quando:
