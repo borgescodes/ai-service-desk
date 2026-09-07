@@ -78,8 +78,7 @@ Create `evaluation.py` with validation for:
 OFFICIAL_STATUSES = {"ENCONTRADOS", "SEM_EVIDENCIA", "SEM_CONTEXTO", "CONTEXTO_AMBIGUO"}
 
 
-def load_evaluation_cases(path: str | Path) -> list[dict]:
-    ...
+def load_evaluation_cases(path: str | Path) -> list[dict]: ...
 ```
 
 Validate required fields, duplicate IDs, query length, official intents, statuses and `must_abstain=true` with no relevant IDs.
@@ -163,8 +162,7 @@ Expected failure: `compute_metrics` is missing.
 Implement:
 
 ```python
-def compute_metrics(cases: list[dict], results: list[dict], k: int = 3) -> dict:
-    ...
+def compute_metrics(cases: list[dict], results: list[dict], k: int = 3) -> dict: ...
 ```
 
 Return counts plus `intent_accuracy`, `system_accuracy`, `hit_at_1`, `hit_at_3`, `mrr`, `precision_at_3`, `correct_abstention_rate`, `unsafe_accept_count`, `system_leakage_count`, `p50_total_seconds`, `p95_total_seconds`, and `execution_failures`.
