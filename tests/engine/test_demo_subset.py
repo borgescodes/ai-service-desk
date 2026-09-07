@@ -1,7 +1,11 @@
+import importlib
+
 import pandas as pd
 import pytest
 
-from ai_service_desk.engine.demo_subset import DEMO_RECIPE, build_demo_subset
+
+def _module():
+    return importlib.import_module("ai_service_desk.engine.demo_subset")
 
 
 def _frame() -> pd.DataFrame:
@@ -27,11 +31,12 @@ def _frame() -> pd.DataFrame:
 
 
 def test_build_demo_subset_selects_six_unique_groups() -> None:
-    subset, report = build_demo_subset(_frame(), per_group=1)
+    module = _module()
+    subset, report = module.build_demo_subset(_frame(), per_group=1)
 
     assert len(subset) == 6
     assert subset["ticket_id"].is_unique
-    assert report["recipe"] == DEMO_RECIPE
+    assert report["recipe"] == module.DEMO_RECIPE
     assert report["selected_rows"] == 6
     assert report["groups"] == {
         "cigam": 1,
@@ -47,9 +52,10 @@ def test_build_demo_subset_selects_six_unique_groups() -> None:
 
 
 def test_build_demo_subset_is_reproducible_across_input_order() -> None:
+    module = _module()
     data = _frame()
-    first, first_report = build_demo_subset(data, per_group=1)
-    second, second_report = build_demo_subset(
+    first, first_report = module.build_demo_subset(data, per_group=1)
+    second, second_report = module.build_demo_subset(
         data.sample(frac=1, random_state=42).reset_index(drop=True),
         per_group=1,
     )
@@ -59,8 +65,9 @@ def test_build_demo_subset_is_reproducible_across_input_order() -> None:
 
 
 def test_build_demo_subset_rejects_insufficient_specific_group() -> None:
+    module = _module()
     data = _frame()
     data = data[~data["texto_busca"].str.contains("SIAGRI")].copy()
 
     with pytest.raises(ValueError, match="siagri"):
-        build_demo_subset(data, per_group=1)
+        module.build_demo_subset(data, per_group=1)
