@@ -247,7 +247,9 @@ def test_engine_ambiguous_context_does_not_embed(tmp_path: Path) -> None:
     assert embedder.calls == []
 
 
-def test_search_and_search_classified_are_equivalent_for_same_classification(tmp_path: Path) -> None:
+def test_search_and_search_classified_are_equivalent_for_same_classification(
+    tmp_path: Path,
+) -> None:
     embedder = FakeEmbedder()
     root = tmp_path / "index"
     build_knowledge_index(write_source(tmp_path / "knowledge.jsonl"), root, embedder, batch_size=1)
