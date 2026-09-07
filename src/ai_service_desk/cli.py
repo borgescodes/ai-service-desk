@@ -11,6 +11,7 @@ from ai_service_desk.engine.evaluation import run_evaluation
 from ai_service_desk.engine.index import atomic_json, build_index, import_legacy, load_index
 from ai_service_desk.engine.knowledge import build_knowledge_index, load_knowledge
 from ai_service_desk.engine.knowledge_retrieval import KnowledgeEngine, format_knowledge_result
+from ai_service_desk.engine.knowledge_smoke import run_knowledge_smoke
 from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
 from ai_service_desk.engine.real_smoke import run_demo_smoke, run_real_smoke
 from ai_service_desk.engine.retrieval import RetrievalEngine, format_result
@@ -81,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
     knowledge_search.add_argument("--query", required=True)
     knowledge_search.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
     knowledge_search.add_argument("--url", default=DEFAULT_URL)
+
+    knowledge_smoke = sub.add_parser("knowledge-smoke")
+    knowledge_smoke.add_argument("--index", type=Path, required=True)
+    knowledge_smoke.add_argument("--report", type=Path, required=True)
+    knowledge_smoke.add_argument("--url", default=DEFAULT_URL)
 
     show_index = sub.add_parser("show-index")
     show_index.add_argument("--index", type=Path, required=True)
@@ -242,6 +248,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{status}: {counts[status]}")
             print("Nenhum answer foi exibido. Nenhuma chamada de IA foi feita.")
             return 0
+
+        if args.command == "knowledge-smoke":
+            report = run_knowledge_smoke(args.index, args.report, args.url)
+            print("KNOWLEDGE SMOKE OK" if report["ok"] else "KNOWLEDGE SMOKE REQUER REVISAO")
+            print(f"Casos sinteticos: {len(report.get('cases', []))}")
+            print("Relatorio agregado local: " + str(args.report))
+            return 0 if report["ok"] else 1
 
         if args.command == "show-index":
             _, _, state = load_index(args.index)
