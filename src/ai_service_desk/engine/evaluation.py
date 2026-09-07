@@ -249,8 +249,7 @@ def _contains_alias(text: str, alias: str) -> bool:
 def _candidate_matches_system(candidate: dict, system: str) -> bool:
     aliases = SYSTEM_ALIASES.get(system, (system,))
     combined = " ".join(
-        str(candidate.get(key, ""))
-        for key in ("catalogo", "area", "item", "title", "texto_busca")
+        str(candidate.get(key, "")) for key in ("catalogo", "area", "item", "title", "texto_busca")
     )
     return any(_contains_alias(combined, alias) for alias in aliases)
 
@@ -296,9 +295,7 @@ def evaluate_thresholds(
             preparation_seconds = time.perf_counter() - preparation_start
         except Exception as exc:
             for threshold in threshold_values:
-                results_by_threshold[threshold].append(
-                    {"id": case_id, "error": type(exc).__name__}
-                )
+                results_by_threshold[threshold].append({"id": case_id, "error": type(exc).__name__})
             continue
 
         for threshold in threshold_values:
@@ -338,9 +335,7 @@ def evaluate_thresholds(
                     }
                 )
             except Exception as exc:
-                results_by_threshold[threshold].append(
-                    {"id": case_id, "error": type(exc).__name__}
-                )
+                results_by_threshold[threshold].append({"id": case_id, "error": type(exc).__name__})
 
     return {
         threshold: compute_metrics(cases, results_by_threshold[threshold])
