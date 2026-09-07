@@ -9,6 +9,8 @@ from ai_service_desk.engine.data import load_corpus, prepare_tiflux
 from ai_service_desk.engine.demo_subset import build_demo_subset
 from ai_service_desk.engine.evaluation import run_evaluation
 from ai_service_desk.engine.index import atomic_json, build_index, import_legacy, load_index
+from ai_service_desk.engine.knowledge import build_knowledge_index, load_knowledge
+from ai_service_desk.engine.knowledge_retrieval import KnowledgeEngine, format_knowledge_result
 from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
 from ai_service_desk.engine.real_smoke import run_demo_smoke, run_real_smoke
 from ai_service_desk.engine.retrieval import RetrievalEngine, format_result
@@ -64,6 +66,21 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--report", type=Path, required=True)
     evaluate.add_argument("--checkout", type=Path, required=True)
     evaluate.add_argument("--url", default=DEFAULT_URL)
+
+    knowledge_validate = sub.add_parser("knowledge-validate")
+    knowledge_validate.add_argument("--file", type=Path, required=True)
+
+    knowledge_index = sub.add_parser("knowledge-index")
+    knowledge_index.add_argument("--file", type=Path, required=True)
+    knowledge_index.add_argument("--index", type=Path, required=True)
+    knowledge_index.add_argument("--batch-size", type=int, default=10)
+    knowledge_index.add_argument("--url", default=DEFAULT_URL)
+
+    knowledge_search = sub.add_parser("knowledge-search")
+    knowledge_search.add_argument("--index", type=Path, required=True)
+    knowledge_search.add_argument("--query", required=True)
+    knowledge_search.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
+    knowledge_search.add_argument("--url", default=DEFAULT_URL)
 
     show_index = sub.add_parser("show-index")
     show_index.add_argument("--index", type=Path, required=True)
@@ -215,6 +232,17 @@ def main(argv: list[str] | None = None) -> int:
             print("Relatorio agregado local: " + str(args.report))
             return 0 if report["ok"] else 1
 
+        if args.command == "knowledge-validate":
+            articles = load_knowledge(args.file)
+            counts = {status: 0 for status in ("APPROVED", "DRAFT", "RETIRED")}
+            for article in articles:
+                counts[article["status"]] += 1
+            print(f"Total: {len(articles)}")
+            for status in ("APPROVED", "DRAFT", "RETIRED"):
+                print(f"{status}: {counts[status]}")
+            print("Nenhum answer foi exibido. Nenhuma chamada de IA foi feita.")
+            return 0
+
         if args.command == "show-index":
             _, _, state = load_index(args.index)
             safe = {
@@ -261,6 +289,23 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         embedder = LocalEmbedder(client)
+        if args.command == "knowledge-index":
+            provenance = build_knowledge_index(
+                args.file,
+                args.index,
+                embedder,
+                batch_size=args.batch_size,
+            )
+            print("Knowledge index: APPROVED_KNOWLEDGE")
+            print(f"Artigos APPROVED indexados: {provenance['rows']}")
+            return 0
+
+        if args.command == "knowledge-search":
+            engine = KnowledgeEngine(args.index, client, embedder, args.threshold)
+            result = engine.search(args.query)
+            print(format_knowledge_result(result))
+            return 0
+
         if args.command == "index":
             data = load_corpus(args.file)
             started = time.perf_counter()
