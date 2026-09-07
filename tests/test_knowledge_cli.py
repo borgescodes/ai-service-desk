@@ -41,6 +41,7 @@ def test_help_lists_knowledge_commands() -> None:
     assert "knowledge-validate" in help_text
     assert "knowledge-index" in help_text
     assert "knowledge-search" in help_text
+    assert "knowledge-smoke" in help_text
 
 
 def test_knowledge_search_threshold_defaults_to_065() -> None:
@@ -194,3 +195,33 @@ def test_knowledge_search_prints_literal_answer(tmp_path: Path, monkeypatch) -> 
         )
     assert code == 0
     assert stdout.getvalue() == literal + "\n\n"
+
+
+def test_knowledge_smoke_delegates_without_creating_extra_client(
+    tmp_path: Path, monkeypatch
+) -> None:
+    captured: dict = {}
+
+    class ForbiddenClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("CLI must delegate smoke client lifecycle")
+
+    def fake_smoke(index, report, url):
+        captured.update(index=index, report=report, url=url)
+        return {"ok": True, "cases": [{"passed": True}] * 5}
+
+    monkeypatch.setattr(cli, "OllamaClient", ForbiddenClient)
+    monkeypatch.setattr(cli, "run_knowledge_smoke", fake_smoke)
+    report = tmp_path / "smoke.json"
+    code = cli.main(
+        [
+            "knowledge-smoke",
+            "--index",
+            str(tmp_path / "index"),
+            "--report",
+            str(report),
+        ]
+    )
+    assert code == 0
+    assert captured["report"] == report
+    assert captured["url"] == "http://127.0.0.1:11434"
