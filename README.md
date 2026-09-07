@@ -11,6 +11,8 @@ A Fase 2 foi dividida em dois trilhos:
 
 A Fase 3 adiciona avaliação reproduzível, sweep de thresholds e uma decisão conservadora de calibração. O benchmark versionado é sintético e serve como evidência de regressão, não como medida de precisão do corpus corporativo.
 
+A Fase 4 adiciona uma base de conhecimento aprovada e separada do histórico. Somente artigos `APPROVED`, com provenance `APPROVED_KNOWLEDGE` válida, podem produzir orientação oficial. A resposta vem literalmente do campo `answer` aprovado.
+
 Históricos recuperados são evidências não validadas. Eles não são soluções aprovadas e não autorizam ações.
 
 ## Requisitos
@@ -111,9 +113,44 @@ python -m ai_service_desk evaluate `
   --url http://127.0.0.1:11434
 ```
 
+Validar a FAQ sintética da Fase 4 sem chamar Ollama:
+
+```powershell
+python -m ai_service_desk knowledge-validate `
+  --file knowledge/phase4_synthetic_faq.jsonl
+```
+
+Criar um índice exclusivamente de conhecimento aprovado:
+
+```powershell
+python -m ai_service_desk knowledge-index `
+  --file knowledge/phase4_synthetic_faq.jsonl `
+  --index C:\ai-service-desk-data\phase-4\index `
+  --url http://127.0.0.1:11434
+```
+
+Consultar a base aprovada:
+
+```powershell
+python -m ai_service_desk knowledge-search `
+  --index C:\ai-service-desk-data\phase-4\index `
+  --query "Nao consigo acessar o CIGAM" `
+  --threshold 0.65 `
+  --url http://127.0.0.1:11434
+```
+
+Executar o smoke sintético da Fase 4:
+
+```powershell
+python -m ai_service_desk knowledge-smoke `
+  --index C:\ai-service-desk-data\phase-4\index `
+  --report C:\ai-service-desk-data\phase-4\reports\smoke.json `
+  --url http://127.0.0.1:11434
+```
+
 Também estão disponíveis `show-index`, `prepare`, `index`, `import-legacy`, `search` e `validate`.
 
-`doctor`, `index`, `import-legacy`, `search`, `validate`, `demo-smoke`, `real-smoke` e `evaluate` dependem do Ollama local. O cliente aceita somente HTTP em loopback e não baixa modelos automaticamente.
+`doctor`, `index`, `import-legacy`, `search`, `validate`, `demo-smoke`, `real-smoke`, `evaluate`, `knowledge-index`, `knowledge-search` e `knowledge-smoke` dependem do Ollama local. `knowledge-validate` é offline. O cliente aceita somente HTTP em loopback e não baixa modelos automaticamente.
 
 ## Fase 2A: demonstração da competição
 
@@ -146,6 +183,18 @@ O sweep compara `0.50`, `0.55`, `0.60`, `0.65`, `0.70`, `0.75` e `0.80`, reutili
 
 Detalhes de métricas, privacidade e homologação estão em `docs/evaluation/phase-3.md`.
 
+## Fase 4: FAQ e base de conhecimento
+
+A base de conhecimento possui schema próprio e não assume semanticamente o modelo de tickets. `build_index` e `load_index` são usados somente como infraestrutura interna por meio de uma projeção encapsulada.
+
+Somente `APPROVED` entra no índice. `DRAFT` e `RETIRED` nunca produzem orientação oficial. Todo índice consultável precisa de `knowledge-provenance.json` com domínio `APPROVED_KNOWLEDGE` e hashes compatíveis com o manifesto. Um índice histórico, um sidecar ausente ou qualquer divergência são rejeitados de forma fail-closed.
+
+O retrieval exige compatibilidade exata de sistema e intent, não faz fallback entre contextos e mantém o threshold `0.65`. Contexto ambíguo, sistema desconhecido e baixa evidência resultam em abstinência.
+
+Quando uma FAQ aprovada é encontrada, o sistema devolve literalmente o `answer` armazenado. O LLM não reescreve nem inventa procedimento nesta fase.
+
+A fixture `knowledge/phase4_synthetic_faq.jsonl` é 100% fictícia e os detalhes operacionais estão em `docs/knowledge/phase-4.md`.
+
 ## Dados
 
 Exports brutos do TiFlux, corpus corporativo real, subconjunto real da demo, embeddings, índices, logs e relatórios gerados ficam fora do Git. Os testes e o CI hospedado usam somente dados sintéticos.
@@ -165,6 +214,7 @@ A homologação local é separada:
 - `.github/workflows/demo-retrieval-smoke.yml` é o gate da Fase 2A e valida o subconjunto real de 240 registros no Dell sem publicar dados.
 - `.github/workflows/real-corpus-smoke.yml` valida o snapshot completo da Fase 2B como evidência adicional de escala.
 - `.github/workflows/phase3-evaluation.yml` executa o benchmark sintético, a decisão de calibração e as invariantes seguras da demo no Dell.
+- `.github/workflows/phase4-knowledge-smoke.yml` valida a FAQ sintética aprovada e as invariantes fail-closed da Fase 4 no Dell.
 
 Os workflows locais são manuais e executam no runner Windows homologado.
 
@@ -173,6 +223,7 @@ Os workflows locais são manuais e executam no runner Windows homologado.
 - Especificações: `docs/superpowers/specs/`
 - Planos: `docs/superpowers/plans/`
 - Avaliação e calibração: `docs/evaluation/phase-3.md`
+- FAQ e base de conhecimento: `docs/knowledge/phase-4.md`
 - Manifesto seguro da Fase 2: `docs/data/phase-2-corpus-v1.json`
 - Equivalência do motor 2.1: `docs/migration/engine-v2.1-equivalence.md`
 - Homologação local: `docs/environment/local-demo.md`
