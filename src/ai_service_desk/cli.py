@@ -7,6 +7,7 @@ from pathlib import Path
 from ai_service_desk.engine.corpus import audit_corpus, ensure_external_path, write_safe_report
 from ai_service_desk.engine.data import load_corpus, prepare_tiflux
 from ai_service_desk.engine.demo_subset import build_demo_subset
+from ai_service_desk.engine.evaluation import run_evaluation
 from ai_service_desk.engine.index import atomic_json, build_index, import_legacy, load_index
 from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
 from ai_service_desk.engine.real_smoke import run_demo_smoke, run_real_smoke
@@ -56,6 +57,13 @@ def build_parser() -> argparse.ArgumentParser:
     real_smoke.add_argument("--report", type=Path, required=True)
     real_smoke.add_argument("--checkout", type=Path, required=True)
     real_smoke.add_argument("--url", default=DEFAULT_URL)
+
+    evaluate = sub.add_parser("evaluate")
+    evaluate.add_argument("--index", type=Path, required=True)
+    evaluate.add_argument("--cases", type=Path, required=True)
+    evaluate.add_argument("--report", type=Path, required=True)
+    evaluate.add_argument("--checkout", type=Path, required=True)
+    evaluate.add_argument("--url", default=DEFAULT_URL)
 
     show_index = sub.add_parser("show-index")
     show_index.add_argument("--index", type=Path, required=True)
@@ -178,6 +186,34 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Registros auditados: {rows}")
             print(f"Vetores validados: {shape[0]} x {shape[1]}")
             print(f"Casos sinteticos: {len(report.get('queries', []))}")
+            print("Relatorio agregado local: " + str(args.report))
+            return 0 if report["ok"] else 1
+
+        if args.command == "evaluate":
+            report = run_evaluation(
+                args.index,
+                args.cases,
+                args.report,
+                args.url,
+                args.checkout,
+            )
+            calibration = report.get("calibration", {})
+            runtime_key = f"{float(calibration.get('runtime_threshold', DEFAULT_THRESHOLD)):.2f}"
+            runtime = report.get("thresholds", {}).get(runtime_key, {})
+            print("Avaliacao Fase 3 OK" if report["ok"] else "Avaliacao Fase 3 REQUER REVISAO")
+            print(f"Casos: {report.get('cases', 0)}")
+            print(f"Intent accuracy: {float(runtime.get('intent_accuracy', 0.0)):.4f}")
+            print(f"System accuracy: {float(runtime.get('system_accuracy', 0.0)):.4f}")
+            print(f"Hit@3: {float(runtime.get('hit_at_3', 0.0)):.4f}")
+            print(f"MRR: {float(runtime.get('mrr', 0.0)):.4f}")
+            print(
+                "Correct abstention rate: "
+                f"{float(runtime.get('correct_abstention_rate', 0.0)):.4f}"
+            )
+            print(f"System leakage count: {int(runtime.get('system_leakage_count', 0))}")
+            print("Synthetic recommendation: " + str(report.get("synthetic_recommendation")))
+            print("Calibration decision: " + str(calibration.get("decision", "")))
+            print(f"Runtime threshold: {float(calibration.get('runtime_threshold', 0.65)):.2f}")
             print("Relatorio agregado local: " + str(args.report))
             return 0 if report["ok"] else 1
 
