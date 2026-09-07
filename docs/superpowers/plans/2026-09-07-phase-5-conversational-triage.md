@@ -4,33 +4,33 @@
 
 **Goal:** Add a short, deterministic, multi-turn triage state machine that gathers only missing context and then reuses Phase 4 APPROVED knowledge retrieval without changing existing Phase 1 to 4 behavior.
 
-**Architecture:** Extend `KnowledgeEngine` additively with `search_classified()` and `available_systems()`, then add a pure `TriageState` plus `TriageEngine.step(state, message) -> (new_state, result)`. The triage layer classifies each user message at most once, performs deterministic state merge and clarification rules, and calls the existing Phase 4 retrieval only after context is sufficient. It never reads knowledge index internals directly, never uses historical retrieval as official guidance, and never persists transcript or approved answers in state.
+**Architecture:** Extend `KnowledgeEngine` additively with `search_classified()` and `available_systems()`, then add a pure `TriageState` plus `TriageEngine.step(state, message) -> (new_state, result)`. The triage layer classifies each accepted user message at most once, applies deterministic merge and stop rules, and calls Phase 4 retrieval only after context is sufficient. It never reads knowledge index internals directly, never uses historical retrieval as official guidance, and never persists transcript or approved answers in state.
 
-**Tech Stack:** Python 3.14, dataclasses, existing `classify_ticket`, existing `KnowledgeEngine`, NumPy/Pandas only through existing knowledge retrieval, argparse CLI, pytest, Ruff, GitHub Actions on the existing Dell self-hosted Windows/Ollama runner.
+**Tech Stack:** Python 3.14, dataclasses, existing `classify_ticket`, existing `KnowledgeEngine`, argparse, pytest, Ruff, GitHub Actions, Dell self-hosted Windows/Ollama runner.
 
 **Spec:** `docs/superpowers/specs/2026-09-07-phase-5-conversational-triage-design.md`
 
 ## Global Constraints
 
-- Base implementation from `main` commit `491e5dd5f79dec8ff9a192a4929b48209956be3a`; approved Phase 5 spec head is `a540c1707663d3d86693085046e4c2099d386e39`.
+- Base implementation is `main` at `491e5dd5f79dec8ff9a192a4929b48209956be3a`; approved spec head is `a540c1707663d3d86693085046e4c2099d386e39`.
 - `KnowledgeEngine.search(text)` remains public and behaviorally backward compatible.
-- `KnowledgeEngine.search_classified(text, classification)` is strictly additive and must reuse the same Phase 4 gates and result contract.
-- `KnowledgeEngine.available_systems(intent)` is the only availability interface the triage layer may use. `TriageEngine` must not read `KnowledgeEngine.df`, `documents.jsonl`, embeddings, manifest, provenance, or matrix internals.
+- `KnowledgeEngine.search_classified(text, classification)` is strictly additive and reuses the same Phase 4 gates, embedding path, threshold, and result contract.
+- `KnowledgeEngine.available_systems(intent)` is the only knowledge-availability interface the triage layer may use. `TriageEngine` must not read `KnowledgeEngine.df`, `documents.jsonl`, embeddings, manifest, provenance, or matrix internals.
 - `MAX_USER_TURNS = 3` and `MAX_CLARIFICATIONS = 2` exactly.
-- The third accepted user turn is processed fully and may return `KNOWLEDGE_FOUND`; a fourth turn is rejected before classification.
-- Each user message is classified at most once. No second classification occurs when entering knowledge retrieval.
-- Merge precedence and state-reset rules must follow the approved spec exactly.
-- System correction parsing is conservative and only recognizes an unambiguous `nao e <known canonical alias>, e <known canonical alias>` structure.
-- `confidence` is metadata only and never gates transitions.
-- The knowledge query contains only current user-provided `problem_text` plus resolved user-provided system context when needed. Never add intent labels, knowledge tags, synonyms, titles, answers, historical text, or semantic booster phrases.
-- Knowledge threshold remains exactly `0.65`; triage has no alternate threshold.
+- Turn 3 is processed fully and may return `KNOWLEDGE_FOUND`; turn 4 is rejected before classification.
+- Each accepted user message is classified at most once. Entering knowledge must not classify again.
+- Merge precedence and state-reset rules follow the approved spec exactly.
+- System correction parsing is conservative and only accepts an unambiguous `nao e <known alias>, e <known alias>` structure with exactly two distinct known canonical systems and no third system.
+- `confidence` is metadata only and never affects a transition.
+- Knowledge query text contains only current user-provided `problem_text` plus resolved user-provided system context when needed. No intent labels, knowledge tags, synonyms, titles, answers, historical text, or semantic booster phrases may be added.
+- Threshold remains exactly `0.65`; triage has no threshold parameter or override.
 - `TriageState` never stores transcript, assistant messages, knowledge answer, article text, embeddings, scores, historical ticket content, historical `ticket_id`, or chain-of-thought.
 - Only `APPROVED` knowledge may produce official guidance. DRAFT and RETIRED content never appears as a response.
-- All new fixtures and conversations committed to Git are synthetic.
+- All new committed fixtures and conversations are synthetic.
 - No ticket creation, playbooks, policy engine, machine execution, frontend, database, global session cache, or persistence layer in Phase 5.
 - Do not modify `src/ai_service_desk/engine/classification.py`, `src/ai_service_desk/engine/retrieval.py`, or `src/ai_service_desk/engine/index.py` unless a reproducible blocking test is first documented with technical cause, smallest possible change, and regression risk. The approved design expects no such changes.
-- `src/ai_service_desk/engine/knowledge.py` should also remain unchanged unless a reproducible blocker proves otherwise.
-- The 177 tests present at the Phase 5 base remain a mandatory regression gate, in addition to all new Phase 5 tests.
+- `src/ai_service_desk/engine/knowledge.py` also remains unchanged unless a reproducible blocker proves otherwise.
+- All 177 pre-Phase-5 tests remain a mandatory regression gate, in addition to all new Phase 5 tests.
 
 ## File Map
 
@@ -40,40 +40,40 @@
 - Add `available_systems(intent)`.
 
 **Create** `src/ai_service_desk/engine/triage.py`
-- Own `TriageState`, limits, conservative system correction parsing, deterministic message categorization, state merge, query construction, transition decisions, and `TriageEngine`.
+- Own `TriageState`, limits, current-turn evidence, conservative system correction parsing, deterministic message categorization, state merge, query construction, transition decisions, and `TriageEngine`.
 
 **Create** `src/ai_service_desk/engine/triage_smoke.py`
-- Execute the 10 approved synthetic multi-turn scenarios and write only safe aggregate metadata.
+- Load and execute the 10 approved synthetic multi-turn cases and write only safe aggregate metadata.
 
 **Modify** `src/ai_service_desk/cli.py`
-- Add only the Phase 5 smoke entrypoint needed for local homologation. Do not add a persistent chat/session store.
+- Add only the `triage-smoke` homologation entrypoint. No persistent chat/session store.
 
 **Create** `tests/engine/test_triage.py`
-- Unit-test state, merge precedence, correction parsing, limits, query construction, transitions, session isolation, and knowledge handoff using deterministic control doubles.
+- Unit-test state, parser, merge precedence, availability decisions, limits, query construction, session isolation, terminal behavior, and knowledge handoff with deterministic control doubles.
 
 **Modify** `tests/engine/test_knowledge_retrieval.py`
-- Prove `search()` compatibility and the new availability interface.
+- Prove `search()` compatibility and `available_systems()` behavior.
 
 **Create** `tests/engine/test_triage_smoke.py`
-- Prove smoke report privacy and 10-case execution using fakes.
+- Prove fixture validation, 10-case execution, isolation, and report privacy using fakes.
 
 **Create** `tests/test_triage_cli.py`
-- Prove CLI wiring and safe output without requiring real Ollama.
+- Prove CLI parser/delegation/safe output without real Ollama.
 
 **Create** `tests/fixtures/phase5_triage_conversations.jsonl`
-- Store only the 10 approved synthetic conversations and expected statuses/reasons/knowledge IDs.
+- Store only the 10 approved synthetic conversations and expected outcomes.
 
 **Create** `.github/workflows/phase5-triage-smoke.yml`
-- Manual Dell/Ollama homologation using only synthetic knowledge and synthetic conversations.
+- Manual Dell/Ollama homologation using only synthetic knowledge and conversations.
 
 **Modify** `tests/test_workflows.py`
-- Enforce manual/self-hosted/loopback/non-exporting workflow policy.
+- Enforce manual, self-hosted, loopback, non-exporting workflow policy.
 
 **Create** `docs/triage/phase-5.md`
-- Operational description of state, limits, privacy, and local smoke.
+- Operational Phase 5 contract and smoke instructions.
 
 **Modify** `README.md`
-- Add Phase 5 summary and commands without changing prior phase semantics.
+- Add Phase 5 summary and command without changing prior phase semantics.
 
 ---
 
@@ -84,12 +84,12 @@
 - Test: `tests/engine/test_knowledge_retrieval.py`
 
 **Interfaces:**
-- Consumes: existing `KnowledgeEngine.search(text: str) -> dict`, `retrieve_knowledge(...)`, `classify_ticket(...)`, and validated APPROVED knowledge already loaded into `self.df`.
+- Consumes: existing `KnowledgeEngine.search(text: str) -> dict`, `retrieve_knowledge(...)`, `classify_ticket(...)`, validated APPROVED data loaded by `KnowledgeEngine`.
 - Produces: `KnowledgeEngine.search_classified(text: str, classification: TicketClassification) -> dict` and `KnowledgeEngine.available_systems(intent: str) -> tuple[str, ...]`.
 
-- [ ] **Step 1: Write failing equivalence and availability tests**
+- [ ] **Step 1: Write failing equivalence tests**
 
-Add focused tests that use the existing `FakeClient`, `FakeEmbedder`, and synthetic knowledge source. The equivalence test must ensure the old entrypoint still classifies exactly once while the new entrypoint classifies zero times and produces the same result for the same `TicketClassification`.
+Add a Phase 4 regression test using the existing fakes:
 
 ```python
 def test_search_and_search_classified_are_equivalent_for_same_classification(tmp_path: Path) -> None:
@@ -100,31 +100,32 @@ def test_search_and_search_classified_are_equivalent_for_same_classification(tmp
 
     client = FakeClient(system="CIGAM", intent="PROBLEMA_ACESSO")
     engine = KnowledgeEngine(root, client, embedder)
-    expected_classification = TicketClassification("PROBLEMA_ACESSO", "CIGAM", {}, 0.9)
+    expected = TicketClassification("PROBLEMA_ACESSO", "CIGAM", {}, 0.9)
 
     via_search = engine.search("Nao consigo acessar o CIGAM")
-    calls_after_search = client.chat_calls
-    embedder.calls.clear()
+    assert client.chat_calls == 1
 
-    via_classified = engine.search_classified(
-        "Nao consigo acessar o CIGAM",
-        expected_classification,
-    )
+    embedder.calls.clear()
+    via_classified = engine.search_classified("Nao consigo acessar o CIGAM", expected)
 
     assert via_classified == via_search
-    assert calls_after_search == 1
     assert client.chat_calls == 1
     assert len(embedder.calls) == 1
+```
 
+- [ ] **Step 2: Write failing availability tests**
 
-def test_available_systems_returns_sorted_unique_metadata_only(tmp_path: Path) -> None:
+Add a local test helper that builds a valid APPROVED index with multiple synthetic articles, then assert deterministic unique system metadata only:
+
+```python
+def test_available_systems_is_sorted_unique_and_intent_scoped(tmp_path: Path) -> None:
     engine = build_engine_with_articles(
         tmp_path,
         [
-            article(system="SIAGRI", intent="PROBLEMA_ACESSO", knowledge_id="KB-S1"),
-            article(system="CIGAM", intent="PROBLEMA_ACESSO", knowledge_id="KB-C1"),
-            article(system="CIGAM", intent="PROBLEMA_ACESSO", knowledge_id="KB-C2"),
-            article(system="", intent="PROBLEMA_IMPRESSAO", knowledge_id="KB-P1"),
+            article(knowledge_id="KB-S1", system="SIAGRI", intent="PROBLEMA_ACESSO"),
+            article(knowledge_id="KB-C1", system="CIGAM", intent="PROBLEMA_ACESSO"),
+            article(knowledge_id="KB-C2", system="CIGAM", intent="PROBLEMA_ACESSO"),
+            article(knowledge_id="KB-P1", system="", intent="PROBLEMA_IMPRESSAO"),
         ],
     )
 
@@ -133,9 +134,9 @@ def test_available_systems_returns_sorted_unique_metadata_only(tmp_path: Path) -
     assert engine.available_systems("ORIENTACAO") == ()
 ```
 
-If convenient, add a tiny local test helper `build_engine_with_articles()` in this test module only. Do not move production data access into triage.
+The helper stays in the test module. No production triage code receives `df` or document rows.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [ ] **Step 3: Run focused tests and verify RED**
 
 Run:
 
@@ -143,15 +144,15 @@ Run:
 pytest tests/engine/test_knowledge_retrieval.py -q
 ```
 
-Expected: existing tests pass, new tests fail because `search_classified` and `available_systems` do not exist yet.
+Expected: old tests pass and the new tests fail because the two new methods do not exist.
 
-- [ ] **Step 3: Implement the smallest additive KnowledgeEngine change**
+- [ ] **Step 4: Implement the smallest additive seam**
 
-Refactor only the class methods. Preserve `retrieve_knowledge()` and all gates unchanged.
+Keep `retrieve_knowledge()`, `_eligible_pool()`, `_base_result()`, threshold defaults, result shape, and reasons unchanged. Change only the `KnowledgeEngine` class:
 
 ```python
 class KnowledgeEngine:
-    # existing __init__ unchanged
+    # __init__ stays unchanged
 
     def available_systems(self, intent: str) -> tuple[str, ...]:
         values = {
@@ -181,9 +182,7 @@ class KnowledgeEngine:
         return self.search_classified(text, classification)
 ```
 
-Do not change `_eligible_pool`, `retrieve_knowledge`, `format_knowledge_result`, threshold defaults, result shape, or reasons.
-
-- [ ] **Step 4: Run the Phase 4 knowledge retrieval tests and verify GREEN**
+- [ ] **Step 5: Run Phase 4 retrieval tests and verify GREEN**
 
 Run:
 
@@ -191,9 +190,9 @@ Run:
 pytest tests/engine/test_knowledge_retrieval.py -q
 ```
 
-Expected: all existing Phase 4 retrieval tests plus the new equivalence/availability tests pass.
+Expected: all Phase 4 retrieval tests plus new seam tests pass.
 
-- [ ] **Step 5: Run the broader Phase 4 knowledge regression gate**
+- [ ] **Step 6: Run the broader Phase 4 knowledge regression gate**
 
 Run:
 
@@ -201,9 +200,9 @@ Run:
 pytest tests/engine/test_knowledge.py tests/engine/test_knowledge_retrieval.py tests/engine/test_knowledge_smoke.py tests/test_knowledge_cli.py -q
 ```
 
-Expected: all Phase 4 knowledge tests pass unchanged.
+Expected: all prior knowledge tests pass without changed expectations.
 
-- [ ] **Step 6: Commit the additive seam**
+- [ ] **Step 7: Commit the additive seam**
 
 ```bash
 git add src/ai_service_desk/engine/knowledge_retrieval.py tests/engine/test_knowledge_retrieval.py
@@ -219,20 +218,23 @@ git commit -m "feat: add classified knowledge search seam"
 - Create: `tests/engine/test_triage.py`
 
 **Interfaces:**
-- Consumes: `TicketClassification`, `SYSTEM_ALIASES`, `explicit_systems`, and `normalize_text`.
-- Produces: `TriageState`, `TurnEvidence`, `MAX_USER_TURNS`, `MAX_CLARIFICATIONS`, `new_triage_state(session_id)`, `_parse_system_correction(text)`, `_is_short_system_reply(...)`, and `_analyze_turn(...)`.
+- Consumes: `TicketClassification`, `SYSTEM_ALIASES`, `explicit_systems`, `normalize_text`.
+- Produces: `TriageState`, `TurnEvidence`, `MAX_USER_TURNS`, `MAX_CLARIFICATIONS`, `new_triage_state(session_id)`, `_parse_system_correction(text)`, `_is_short_system_reply(...)`, `_analyze_turn(...)`.
 
-- [ ] **Step 1: Write failing state contract tests**
-
-Start `tests/engine/test_triage.py` with tests proving the state is small, serializable, session-bound, and excludes forbidden data by schema rather than convention.
+- [ ] **Step 1: Write failing state-schema and limit tests**
 
 ```python
 from dataclasses import asdict
 
+import pytest
+
+from ai_service_desk.engine.types import TicketClassification
 from ai_service_desk.engine.triage import (
     MAX_CLARIFICATIONS,
     MAX_USER_TURNS,
-    TriageState,
+    _analyze_turn,
+    _is_short_system_reply,
+    _parse_system_correction,
     new_triage_state,
 )
 
@@ -253,17 +255,12 @@ def test_new_state_has_exact_small_schema() -> None:
         "pending_field": "",
         "asked_fields": (),
     }
-    serialized_keys = set(asdict(state))
-    for forbidden in ("transcript", "messages", "answer", "ticket_id", "score", "embedding"):
-        assert forbidden not in serialized_keys
-
-
-def test_phase5_limits_are_exact() -> None:
     assert MAX_USER_TURNS == 3
     assert MAX_CLARIFICATIONS == 2
+    assert not ({"transcript", "messages", "answer", "ticket_id", "score", "embedding"} & set(asdict(state)))
 ```
 
-- [ ] **Step 2: Write failing conservative correction parser tests**
+- [ ] **Step 2: Write failing conservative correction tests**
 
 ```python
 def test_correction_parser_accepts_only_unique_known_alias_pair() -> None:
@@ -281,16 +278,14 @@ def test_correction_parser_accepts_only_unique_known_alias_pair() -> None:
         "prefiro SIAGRI",
     ],
 )
-def test_correction_parser_rejects_ambiguous_or_unknown_language(text: str) -> None:
+def test_correction_parser_rejects_ambiguous_unknown_or_vague_language(text: str) -> None:
     assert _parse_system_correction(text) is None
 ```
 
-- [ ] **Step 3: Write failing short-system categorization tests**
-
-The helper must treat a slot reply as slot-only only while `pending_field == "system"` and under the exact cases in the spec.
+- [ ] **Step 3: Write failing slot-only categorization tests**
 
 ```python
-def test_short_system_reply_is_slot_only_for_known_alias() -> None:
+def test_short_known_system_reply_is_slot_only_only_when_system_is_pending() -> None:
     classification = TicketClassification("OUTRO", "CIGAM", {}, 0.4)
     assert _is_short_system_reply("CIGAM", "system", classification)
     assert not _is_short_system_reply("CIGAM", "", classification)
@@ -300,7 +295,19 @@ def test_short_unknown_literal_reply_can_remain_slot_only() -> None:
     classification = TicketClassification("OUTRO", "XYZ", {}, 0.4)
     assert _is_short_system_reply("XYZ", "system", classification)
     assert _is_short_system_reply("sistema XYZ", "system", classification)
+
+
+def test_correction_has_precedence_over_multiple_explicit_systems() -> None:
+    state = new_triage_state("session-a")
+    state = dataclasses.replace(state, pending_field="system")
+    classification = TicketClassification("OUTRO", "", {}, 0.3)
+    evidence = _analyze_turn(state, "Nao e CIGAM, e SIAGRI", classification)
+    assert evidence.kind == "SYSTEM_CORRECTION"
+    assert evidence.explicit_systems == ("CIGAM", "SIAGRI")
+    assert evidence.correction == ("CIGAM", "SIAGRI")
 ```
+
+Add `import dataclasses` in the test file for the last test.
 
 - [ ] **Step 4: Run focused tests and verify RED**
 
@@ -310,15 +317,15 @@ Run:
 pytest tests/engine/test_triage.py -q
 ```
 
-Expected: import or attribute failures because the triage module does not exist yet.
+Expected: import/attribute failures because the triage module does not exist.
 
 - [ ] **Step 5: Implement the state and transient evidence types**
 
-Create `src/ai_service_desk/engine/triage.py` with the exact persisted state fields from the spec and a separate non-persisted `TurnEvidence` for current-turn ambiguity/correction facts.
+Create only imports used in this gate:
 
 ```python
-from dataclasses import dataclass, replace
-from typing import Callable
+import re
+from dataclasses import dataclass
 
 from ai_service_desk.engine.classification import SYSTEM_ALIASES, explicit_systems
 from ai_service_desk.engine.types import TicketClassification
@@ -358,30 +365,60 @@ def new_triage_state(session_id: str) -> TriageState:
     return TriageState(1, session_id, "ACTIVE", 0, 0, "", "", "", {}, 0.0, "", ())
 ```
 
-Keep `TurnEvidence` transient only. It must never be nested inside `TriageState` or serialized into smoke reports.
+- [ ] **Step 6: Implement exact alias and correction helpers**
 
-- [ ] **Step 6: Implement exact alias matching and correction parsing**
-
-Build a canonical exact-alias map from existing `SYSTEM_ALIASES`. Match full normalized alias tokens only. Do not accept unknown systems in the correction parser.
+Use full normalized alias equality, never fuzzy matching:
 
 ```python
 def _canonical_for_exact_alias(value: str) -> str | None:
-    wanted = normalize_text(value).strip()
+    wanted = normalize_text(value).strip().strip(".!?")
     matches = {
         canonical
         for canonical, aliases in SYSTEM_ALIASES.items()
         if wanted in {normalize_text(canonical), *(normalize_text(alias) for alias in aliases)}
     }
     return next(iter(matches)) if len(matches) == 1 else None
+
+
+_CORRECTION_RE = re.compile(r"^nao\s+e\s+(.+?)\s*,?\s+e\s+(.+?)\s*[.!?]?$", re.IGNORECASE)
+
+
+def _parse_system_correction(text: str) -> tuple[str, str] | None:
+    normalized = normalize_text(text).strip()
+    match = _CORRECTION_RE.fullmatch(normalized)
+    if not match:
+        return None
+    old = _canonical_for_exact_alias(match.group(1))
+    new = _canonical_for_exact_alias(match.group(2))
+    systems = tuple(explicit_systems(text))
+    if old is None or new is None or old == new:
+        return None
+    if len(systems) != 2 or set(systems) != {old, new}:
+        return None
+    return old, new
 ```
 
-Use one conservative regex for normalized `nao e A, e B` structure, then require both captured values to resolve uniquely via `_canonical_for_exact_alias` and require the full message to contain no third explicit known system.
-
-- [ ] **Step 7: Implement deterministic message categorization**
-
-`_analyze_turn()` receives the single `TicketClassification` already produced for the message. It must not call an LLM.
+- [ ] **Step 7: Implement slot-only and turn categorization**
 
 ```python
+def _is_short_system_reply(
+    message: str,
+    pending_field: str,
+    classification: TicketClassification,
+) -> bool:
+    if pending_field != "system":
+        return False
+    if _parse_system_correction(message) is not None:
+        return True
+    normalized = normalize_text(message).strip().strip(".!?")
+    if _canonical_for_exact_alias(normalized) is not None:
+        return True
+    literal = normalize_text(classification.system).strip()
+    if not literal:
+        return False
+    return normalized == literal or normalized == f"sistema {literal}"
+
+
 def _analyze_turn(
     state: TriageState,
     message: str,
@@ -406,7 +443,7 @@ Run:
 pytest tests/engine/test_triage.py -q
 ```
 
-Expected: all state, limit, correction-parser, and message-categorization tests pass.
+Expected: state, limit, correction-parser, slot-only, and categorization tests pass.
 
 - [ ] **Step 9: Commit the state foundation**
 
@@ -424,10 +461,19 @@ git commit -m "feat: add phase 5 triage state foundation"
 - Modify: `tests/engine/test_triage.py`
 
 **Interfaces:**
-- Consumes: `TriageState`, `TurnEvidence`, and exactly one classification per accepted turn.
-- Produces: `_merge_turn(state: TriageState, message: str, evidence: TurnEvidence) -> TriageState` with spec-defined precedence and reset behavior.
+- Consumes: `TriageState`, `TurnEvidence`, one classification already produced for the accepted turn.
+- Produces: `_system_from_slot(...)` and `_merge_turn(state, message, evidence) -> TriageState`.
 
-- [ ] **Step 1: Write failing tests for system correction and short slot replies**
+- [ ] **Step 1: Add a deterministic state factory to tests**
+
+```python
+def seeded_state(**changes) -> TriageState:
+    return dataclasses.replace(new_triage_state("session-a"), **changes)
+```
+
+Import `TriageState`, `_merge_turn`, and `_system_from_slot` for the new tests.
+
+- [ ] **Step 2: Write failing tests for correction and slot preservation**
 
 ```python
 def test_system_correction_changes_only_system() -> None:
@@ -435,15 +481,15 @@ def test_system_correction_changes_only_system() -> None:
         pending_field="system",
         problem_text="Nao consigo acessar",
         intent="PROBLEMA_ACESSO",
-        system="",
         entities={"filial": "003"},
         confidence=0.81,
     )
-    classification = TicketClassification("OUTRO", "", {}, 0.2)
-    evidence = _analyze_turn(state, "Nao e CIGAM, e SIAGRI", classification)
-
+    evidence = _analyze_turn(
+        state,
+        "Nao e CIGAM, e SIAGRI",
+        TicketClassification("OUTRO", "", {}, 0.2),
+    )
     merged = _merge_turn(state, "Nao e CIGAM, e SIAGRI", evidence)
-
     assert merged.system == "SIAGRI"
     assert merged.problem_text == state.problem_text
     assert merged.intent == state.intent
@@ -459,13 +505,8 @@ def test_short_system_reply_preserves_substantive_context() -> None:
         entities={"filial": "003"},
         confidence=0.81,
     )
-    evidence = _analyze_turn(
-        state,
-        "CIGAM",
-        TicketClassification("OUTRO", "CIGAM", {}, 0.3),
-    )
+    evidence = _analyze_turn(state, "CIGAM", TicketClassification("OUTRO", "CIGAM", {}, 0.3))
     merged = _merge_turn(state, "CIGAM", evidence)
-
     assert merged.system == "CIGAM"
     assert merged.intent == "PROBLEMA_ACESSO"
     assert merged.problem_text == "Nao consigo acessar"
@@ -473,7 +514,7 @@ def test_short_system_reply_preserves_substantive_context() -> None:
     assert merged.confidence == 0.81
 ```
 
-- [ ] **Step 2: Write failing tests for substantive replacement and stale-entity removal**
+- [ ] **Step 3: Write failing tests for substantive replacement**
 
 ```python
 def test_substantive_replacement_discards_old_entities_and_changes_intent() -> None:
@@ -483,41 +524,55 @@ def test_substantive_replacement_discards_old_entities_and_changes_intent() -> N
         system="CIGAM",
         entities={"filial": "003", "rotina": "1024"},
         confidence=0.91,
+        asked_fields=("system",),
     )
-    classification = TicketClassification("ERRO_SISTEMA", "", {"equipamento": "PC-1"}, 0.76)
-    evidence = _analyze_turn(state, "na verdade o sistema trava ao salvar", classification)
-
+    evidence = _analyze_turn(
+        state,
+        "na verdade o sistema trava ao salvar",
+        TicketClassification("ERRO_SISTEMA", "", {"equipamento": "PC-1"}, 0.76),
+    )
     merged = _merge_turn(state, "na verdade o sistema trava ao salvar", evidence)
-
     assert merged.problem_text == "na verdade o sistema trava ao salvar"
     assert merged.intent == "ERRO_SISTEMA"
     assert merged.entities == {"equipamento": "PC-1"}
     assert merged.confidence == 0.76
     assert merged.system == "CIGAM"
     assert merged.asked_fields == ()
+
+
+def test_new_explicit_system_replaces_old_system() -> None:
+    state = seeded_state(problem_text="Nao consigo acessar", intent="PROBLEMA_ACESSO", system="CIGAM")
+    message = "na verdade o SIAGRI trava ao salvar"
+    evidence = _analyze_turn(state, message, TicketClassification("ERRO_SISTEMA", "SIAGRI", {}, 0.8))
+    assert _merge_turn(state, message, evidence).system == "SIAGRI"
+
+
+def test_multiple_explicit_systems_clear_old_system_without_correction() -> None:
+    state = seeded_state(problem_text="Nao consigo acessar", intent="PROBLEMA_ACESSO", system="CIGAM")
+    message = "CIGAM e SIAGRI estao sem acesso"
+    evidence = _analyze_turn(state, message, TicketClassification("PROBLEMA_ACESSO", "", {}, 0.8))
+    assert _merge_turn(state, message, evidence).system == ""
 ```
 
-Also test that an explicit new SIAGRI replaces old CIGAM, while multiple explicit systems without a valid correction clear `system`.
-
-- [ ] **Step 3: Write failing test for unresolved `pending_field=problem` anti-loop behavior**
+- [ ] **Step 4: Write failing anti-loop merge test for `pending_field=problem`**
 
 ```python
-def test_vague_problem_reply_does_not_clear_problem_asked_marker() -> None:
+def test_vague_problem_reply_preserves_problem_asked_marker() -> None:
     state = seeded_state(
         pending_field="problem",
         asked_fields=("problem",),
         problem_text="Preciso de ajuda",
         intent="OUTRO",
     )
-    classification = TicketClassification("OUTRO", "", {}, 0.8)
-    evidence = _analyze_turn(state, "Nao sei explicar", classification)
-    merged = _merge_turn(state, "Nao sei explicar", evidence)
-
+    message = "Nao sei explicar"
+    evidence = _analyze_turn(state, message, TicketClassification("OUTRO", "", {}, 0.8))
+    merged = _merge_turn(state, message, evidence)
     assert merged.intent == "OUTRO"
-    assert "problem" in merged.asked_fields
+    assert merged.problem_text == message
+    assert merged.asked_fields == ("problem",)
 ```
 
-- [ ] **Step 4: Run merge tests and verify RED**
+- [ ] **Step 5: Run merge tests and verify RED**
 
 Run:
 
@@ -525,13 +580,32 @@ Run:
 pytest tests/engine/test_triage.py -q
 ```
 
-Expected: new merge tests fail because `_merge_turn` is not implemented.
+Expected: new tests fail because merge helpers do not exist.
 
-- [ ] **Step 5: Implement merge precedence exactly as the spec**
+- [ ] **Step 6: Implement slot resolution and merge precedence**
 
-Use `dataclasses.replace()` and keep turn counters outside merge so the function only merges semantic state.
+Add `replace` to the production dataclass import in this task.
 
 ```python
+def _system_from_slot(
+    message: str,
+    classification: TicketClassification,
+    evidence: TurnEvidence,
+) -> str:
+    if evidence.correction is not None:
+        return evidence.correction[1]
+    canonical = _canonical_for_exact_alias(message)
+    if canonical is not None:
+        return canonical
+    normalized = normalize_text(message).strip().strip(".!?")
+    if normalized.startswith("sistema "):
+        normalized = normalized.removeprefix("sistema ").strip()
+    literal = classification.system.strip()
+    if literal and normalize_text(literal) == normalized:
+        return literal
+    return ""
+
+
 def _merge_turn(state: TriageState, message: str, evidence: TurnEvidence) -> TriageState:
     classification = evidence.classification
 
@@ -581,13 +655,9 @@ def _merge_turn(state: TriageState, message: str, evidence: TurnEvidence) -> Tri
     )
 ```
 
-The implementation must preserve the existing `asked_fields` for an unresolved problem reply, and clear `asked_fields` only when a usable new substantive context is established. Adjust the branch above accordingly rather than relying on later code to repair it.
+The unresolved `pending_field="problem"` branch intentionally omits `asked_fields`, so `dataclasses.replace()` preserves the existing `("problem",)` marker. A usable substantive replacement takes the final branch and starts a new context by clearing `asked_fields`.
 
-- [ ] **Step 6: Add explicit tests for merge precedence order**
-
-Prove that correction wins over the fact that `explicit_systems()` sees two systems, and that a short system slot never changes intent/entities even if its classification says `OUTRO`.
-
-- [ ] **Step 7: Run all triage merge tests and verify GREEN**
+- [ ] **Step 7: Run all merge tests and verify GREEN**
 
 Run:
 
@@ -595,9 +665,9 @@ Run:
 pytest tests/engine/test_triage.py -q
 ```
 
-Expected: all current triage state/parser/merge tests pass.
+Expected: state/parser/merge tests pass.
 
-- [ ] **Step 8: Commit the merge rules**
+- [ ] **Step 8: Commit merge rules**
 
 ```bash
 git add src/ai_service_desk/engine/triage.py tests/engine/test_triage.py
@@ -613,23 +683,34 @@ git commit -m "feat: add deterministic triage state merge"
 - Modify: `tests/engine/test_triage.py`
 
 **Interfaces:**
-- Consumes: `KnowledgeEngine.available_systems(intent)`, `KnowledgeEngine.search_classified(text, classification)`, `TriageState`, merge helpers, and one injected classifier callable.
-- Produces: `build_knowledge_query(problem_text: str, system: str) -> str`, `TriageEngine(session_id, knowledge_engine, classifier)`, `TriageEngine.initial_state() -> TriageState`, and `TriageEngine.step(state, message) -> tuple[TriageState, dict]`.
+- Consumes: `KnowledgeEngine.available_systems(intent)`, `KnowledgeEngine.search_classified(text, classification)`, merged `TriageState`, one injected classifier callable.
+- Produces: `build_knowledge_query(problem_text, system) -> str`, `TriageEngine(session_id, knowledge_engine, classifier)`, `initial_state()`, `step(state, message) -> tuple[TriageState, dict]`.
 
-- [ ] **Step 1: Add deterministic control doubles for triage tests**
-
-In `tests/engine/test_triage.py`, define a fake knowledge engine that exposes only the public Phase 5 seam. This proves triage does not depend on `df` or index internals.
+- [ ] **Step 1: Add exact control doubles to tests**
 
 ```python
+class QueueClassifier:
+    def __init__(self, values: list[TicketClassification]):
+        self.values = list(values)
+        self.calls = 0
+
+    def __call__(self, text: str) -> TicketClassification:
+        self.calls += 1
+        if not self.values:
+            raise AssertionError("unexpected classifier call")
+        return self.values.pop(0)
+
+
 class FakeKnowledgeEngine:
-    def __init__(self, systems_by_intent: dict[str, tuple[str, ...]], result: dict | None = None):
+    def __init__(
+        self,
+        systems_by_intent: dict[str, tuple[str, ...]],
+        result: dict | None = None,
+    ):
         self.systems_by_intent = systems_by_intent
         self.result = result or {
             "status": "KNOWLEDGE_FOUND",
             "reason": "MATCH",
-            "threshold": 0.65,
-            "score": 0.9,
-            "classification": {},
             "knowledge": {
                 "knowledge_id": "KB-SYN-CIGAM-ACCESS-001",
                 "title": "Acesso sintetico",
@@ -640,47 +721,58 @@ class FakeKnowledgeEngine:
             },
         }
         self.search_calls: list[tuple[str, TicketClassification]] = []
+        self.availability_calls: list[str] = []
 
     def available_systems(self, intent: str) -> tuple[str, ...]:
+        self.availability_calls.append(intent)
         return self.systems_by_intent.get(intent, ())
 
     def search_classified(self, text: str, classification: TicketClassification) -> dict:
         self.search_calls.append((text, classification))
         return self.result
+
+
+def make_engine(
+    classifications: list[TicketClassification],
+    systems_by_intent: dict[str, tuple[str, ...]],
+    result: dict | None = None,
+    session_id: str = "session-a",
+):
+    classifier = QueueClassifier(classifications)
+    knowledge = FakeKnowledgeEngine(systems_by_intent, result)
+    return TriageEngine(session_id, knowledge, classifier), classifier, knowledge
 ```
 
-Also use a classifier double with an explicit call counter and queued classifications so each accepted turn can assert exactly one call.
-
-- [ ] **Step 2: Write failing tests for missing context and availability rules**
-
-Cover all three availability contracts:
+- [ ] **Step 2: Write failing availability and missing-context tests**
 
 ```python
 def test_no_approved_knowledge_for_intent_abstains_without_system_question() -> None:
-    engine = make_triage(
-        classifications=[TicketClassification("ORIENTACAO", "", {}, 0.9)],
-        systems_by_intent={},
+    engine, _, knowledge = make_engine(
+        [TicketClassification("ORIENTACAO", "", {}, 0.9)],
+        {},
     )
     state, result = engine.step(engine.initial_state(), "Como faco algo ficticio?")
     assert result["status"] == "TRIAGE_ABSTAINED"
     assert result["reason"] == "NO_APPROVED_KNOWLEDGE_FOR_INTENT"
     assert state.status == "ABSTAINED"
+    assert knowledge.search_calls == []
 
 
-def test_generic_knowledge_does_not_require_system() -> None:
-    engine = make_triage(
-        classifications=[TicketClassification("PROBLEMA_IMPRESSAO", "", {}, 0.9)],
-        systems_by_intent={"PROBLEMA_IMPRESSAO": ("",)},
+def test_generic_knowledge_does_not_require_missing_system() -> None:
+    engine, _, knowledge = make_engine(
+        [TicketClassification("PROBLEMA_IMPRESSAO", "", {}, 0.9)],
+        {"PROBLEMA_IMPRESSAO": ("",)},
     )
     state, result = engine.step(engine.initial_state(), "A impressora ficticia nao imprime")
     assert result["status"] == "KNOWLEDGE_FOUND"
     assert state.clarification_count == 0
+    assert len(knowledge.search_calls) == 1
 
 
 def test_specific_only_knowledge_requires_system_once() -> None:
-    engine = make_triage(
-        classifications=[TicketClassification("PROBLEMA_ACESSO", "", {}, 0.9)],
-        systems_by_intent={"PROBLEMA_ACESSO": ("CIGAM", "SIAGRI")},
+    engine, _, knowledge = make_engine(
+        [TicketClassification("PROBLEMA_ACESSO", "", {}, 0.9)],
+        {"PROBLEMA_ACESSO": ("CIGAM", "SIAGRI")},
     )
     state, result = engine.step(engine.initial_state(), "Nao consigo acessar")
     assert result == {
@@ -691,54 +783,135 @@ def test_specific_only_knowledge_requires_system_once() -> None:
     }
     assert state.pending_field == "system"
     assert state.asked_fields == ("system",)
+    assert knowledge.search_calls == []
 ```
 
-- [ ] **Step 3: Write failing tests for ambiguity and unknown-system transitions**
-
-Cover:
-- initial `CIGAM e SIAGRI` -> `NEEDS_CLARIFICATION / AMBIGUOUS_SYSTEM`;
-- unresolved ambiguity after opportunity -> terminal `TRIAGE_ABSTAINED / AMBIGUOUS_SYSTEM`;
-- initial XYZ -> `NEEDS_CLARIFICATION / UNKNOWN_SYSTEM`;
-- second XYZ -> terminal `TRIAGE_ABSTAINED / UNKNOWN_SYSTEM`;
-- known system absent from availability is not replaced or re-asked and is passed to Phase 4, allowing `SYSTEM_MISMATCH` to surface.
-
-- [ ] **Step 4: Write failing tests for turn and clarification limits**
+- [ ] **Step 3: Write failing ambiguity, unknown, and mismatch tests**
 
 ```python
-def test_third_turn_is_processed_and_can_find_knowledge() -> None:
-    engine = make_three_turn_engine()
+def test_ambiguous_system_gets_one_clarification_then_terminal_if_still_ambiguous() -> None:
+    engine, _, _ = make_engine(
+        [
+            TicketClassification("PROBLEMA_ACESSO", "", {}, 0.9),
+            TicketClassification("PROBLEMA_ACESSO", "", {}, 0.9),
+        ],
+        {"PROBLEMA_ACESSO": ("CIGAM", "SIAGRI")},
+    )
+    state, first = engine.step(engine.initial_state(), "CIGAM e SIAGRI estao sem acesso")
+    assert (first["status"], first["reason"]) == ("NEEDS_CLARIFICATION", "AMBIGUOUS_SYSTEM")
+    state, second = engine.step(state, "CIGAM e SIAGRI")
+    assert (second["status"], second["reason"]) == ("TRIAGE_ABSTAINED", "AMBIGUOUS_SYSTEM")
+    assert state.status == "ABSTAINED"
+
+
+def test_unknown_system_gets_one_correction_opportunity_then_terminal() -> None:
+    engine, _, _ = make_engine(
+        [
+            TicketClassification("PROBLEMA_ACESSO", "XYZ", {}, 0.9),
+            TicketClassification("OUTRO", "XYZ", {}, 0.2),
+        ],
+        {"PROBLEMA_ACESSO": ("CIGAM", "SIAGRI")},
+    )
+    state, first = engine.step(engine.initial_state(), "O sistema XYZ esta sem acesso")
+    assert (first["status"], first["reason"]) == ("NEEDS_CLARIFICATION", "UNKNOWN_SYSTEM")
+    state, second = engine.step(state, "XYZ")
+    assert (second["status"], second["reason"]) == ("TRIAGE_ABSTAINED", "UNKNOWN_SYSTEM")
+
+
+def test_known_system_without_intent_coverage_is_delegated_to_phase4() -> None:
+    phase4 = {
+        "status": "NO_APPROVED_KNOWLEDGE",
+        "reason": "SYSTEM_MISMATCH",
+        "knowledge": None,
+    }
+    engine, _, knowledge = make_engine(
+        [TicketClassification("PROBLEMA_ACESSO", "TEAMS", {}, 0.9)],
+        {"PROBLEMA_ACESSO": ("CIGAM", "SIAGRI")},
+        phase4,
+    )
+    state, result = engine.step(engine.initial_state(), "Nao consigo acessar o TEAMS")
+    assert result["status"] == "TRIAGE_ABSTAINED"
+    assert result["reason"] == "SYSTEM_MISMATCH"
+    assert len(knowledge.search_calls) == 1
+    assert state.status == "ABSTAINED"
+```
+
+- [ ] **Step 4: Write failing turn and clarification limit tests**
+
+```python
+def test_third_turn_is_fully_processed_and_can_find_knowledge() -> None:
+    engine, classifier, _ = make_engine(
+        [
+            TicketClassification("OUTRO", "", {}, 0.8),
+            TicketClassification("PROBLEMA_ACESSO", "", {}, 0.8),
+            TicketClassification("OUTRO", "CIGAM", {}, 0.2),
+        ],
+        {"PROBLEMA_ACESSO": ("CIGAM", "SIAGRI")},
+    )
     state = engine.initial_state()
-
     state, first = engine.step(state, "Preciso de ajuda")
-    assert first["status"] == "NEEDS_CLARIFICATION"
-
     state, second = engine.step(state, "Nao consigo acessar")
-    assert second["status"] == "NEEDS_CLARIFICATION"
-
     state, third = engine.step(state, "CIGAM")
+    assert first["status"] == second["status"] == "NEEDS_CLARIFICATION"
     assert third["status"] == "KNOWLEDGE_FOUND"
     assert state.turn_count == 3
     assert state.status == "ANSWERED"
+    assert classifier.calls == 3
 
 
-def test_fourth_turn_is_rejected_before_classifier_call() -> None:
-    engine, classifier = make_engine_with_active_three_turn_state()
-    before = classifier.calls
+def test_fourth_turn_is_rejected_before_classification() -> None:
+    engine, classifier, _ = make_engine([], {})
+    state = dataclasses.replace(engine.initial_state(), turn_count=3)
     with pytest.raises(ValueError, match="turn"):
-        engine.step(active_state(turn_count=3), "quarta mensagem")
-    assert classifier.calls == before
+        engine.step(state, "quarta mensagem")
+    assert classifier.calls == 0
+
+
+def test_turn_three_that_would_need_another_question_abstains_with_max_turns() -> None:
+    engine, _, _ = make_engine(
+        [TicketClassification("PROBLEMA_ACESSO", "", {}, 0.8)],
+        {"PROBLEMA_ACESSO": ("CIGAM",)},
+    )
+    state = dataclasses.replace(engine.initial_state(), turn_count=2)
+    state, result = engine.step(state, "Nao consigo acessar")
+    assert result == {
+        "status": "TRIAGE_ABSTAINED",
+        "reason": "MAX_TURNS",
+        "question": None,
+        "knowledge": None,
+    }
+    assert state.status == "ABSTAINED"
+
+
+def test_third_clarification_is_never_emitted() -> None:
+    engine, _, _ = make_engine(
+        [TicketClassification("PROBLEMA_ACESSO", "", {}, 0.8)],
+        {"PROBLEMA_ACESSO": ("CIGAM",)},
+    )
+    state = dataclasses.replace(engine.initial_state(), clarification_count=2)
+    state, result = engine.step(state, "Nao consigo acessar")
+    assert result["status"] == "TRIAGE_ABSTAINED"
+    assert result["reason"] == "MAX_CLARIFICATIONS"
+    assert result["question"] is None
 ```
 
-Also test that if turn 3 still needs a question, the result is terminal `MAX_TURNS`, and if a third clarification would be required the result is terminal `MAX_CLARIFICATIONS`.
+- [ ] **Step 5: Write failing confidence-invariance tests**
 
-- [ ] **Step 5: Write failing tests proving `confidence` never changes transitions**
-
-Run the same missing-system and knowledge-found paths with confidence `0.01` and `0.99`. Assert identical status/reason/query behavior.
+```python
+@pytest.mark.parametrize("confidence", [0.01, 0.99])
+def test_confidence_does_not_change_missing_system_transition(confidence: float) -> None:
+    engine, _, _ = make_engine(
+        [TicketClassification("PROBLEMA_ACESSO", "", {}, confidence)],
+        {"PROBLEMA_ACESSO": ("CIGAM",)},
+    )
+    _, result = engine.step(engine.initial_state(), "Nao consigo acessar")
+    assert (result["status"], result["reason"]) == ("NEEDS_CLARIFICATION", "MISSING_SYSTEM")
+```
 
 - [ ] **Step 6: Write failing query-builder tests**
 
 ```python
-def test_query_does_not_add_intent_label_or_semantic_boosters() -> None:
+def test_query_contains_only_problem_and_later_system_context() -> None:
     query = build_knowledge_query("Nao consigo acessar", "CIGAM")
     assert query == "Nao consigo acessar\nCIGAM"
     assert "PROBLEMA_ACESSO" not in query
@@ -748,32 +921,86 @@ def test_query_does_not_duplicate_existing_system() -> None:
     assert build_knowledge_query("Nao consigo acessar o CIGAM", "CIGAM") == "Nao consigo acessar o CIGAM"
 
 
-def test_query_reconciles_only_conflicting_known_aliases_after_correction() -> None:
+def test_query_removes_only_conflicting_known_alias_after_correction() -> None:
     query = build_knowledge_query("CIGAM e SIAGRI estao sem acesso", "SIAGRI")
     assert "CIGAM" not in query
     assert query.count("SIAGRI") == 1
+    assert "estao sem acesso" in query
+    assert "PROBLEMA_ACESSO" not in query
+
+
+def test_query_does_not_remove_unknown_old_literal_or_add_boosters() -> None:
+    query = build_knowledge_query("O sistema XYZ esta sem acesso", "CIGAM")
+    assert "XYZ" in query
+    assert query.endswith("CIGAM")
     assert "PROBLEMA_ACESSO" not in query
 ```
 
-Do not add any stemming, synonym expansion, knowledge metadata, or classifier label to this helper.
-
-- [ ] **Step 7: Write failing single-turn vs two-turn knowledge equivalence test**
-
-Use one deterministic fake knowledge engine and assert both flows call `search_classified()` with `classification.system == "CIGAM"`, threshold remains owned by the fake result at `0.65`, and both return the same synthetic knowledge ID.
+- [ ] **Step 7: Write failing direct-vs-two-turn equivalence test**
 
 ```python
-assert direct_result["knowledge"]["knowledge_id"] == "KB-SYN-CIGAM-ACCESS-001"
-assert two_turn_result["knowledge"]["knowledge_id"] == "KB-SYN-CIGAM-ACCESS-001"
-assert fake_knowledge.search_calls[0][1].system == "CIGAM"
+def test_direct_and_two_turn_access_reach_same_approved_knowledge() -> None:
+    direct, _, direct_knowledge = make_engine(
+        [TicketClassification("PROBLEMA_ACESSO", "CIGAM", {}, 0.9)],
+        {"PROBLEMA_ACESSO": ("CIGAM", "SIAGRI")},
+    )
+    _, direct_result = direct.step(direct.initial_state(), "Nao consigo acessar o CIGAM")
+
+    two_turn, _, two_knowledge = make_engine(
+        [
+            TicketClassification("PROBLEMA_ACESSO", "", {}, 0.9),
+            TicketClassification("OUTRO", "CIGAM", {}, 0.2),
+        ],
+        {"PROBLEMA_ACESSO": ("CIGAM", "SIAGRI")},
+    )
+    state, first = two_turn.step(two_turn.initial_state(), "Nao consigo acessar")
+    assert first["status"] == "NEEDS_CLARIFICATION"
+    _, two_result = two_turn.step(state, "CIGAM")
+
+    assert direct_result["knowledge"]["knowledge_id"] == "KB-SYN-CIGAM-ACCESS-001"
+    assert two_result["knowledge"]["knowledge_id"] == "KB-SYN-CIGAM-ACCESS-001"
+    assert direct_knowledge.search_calls[0][1].system == "CIGAM"
+    assert two_knowledge.search_calls[0][1].system == "CIGAM"
 ```
 
-- [ ] **Step 8: Write failing session isolation and terminal-state tests**
+- [ ] **Step 8: Write failing session and terminal-state tests**
 
-Prove:
-- a `TriageEngine("session-a", ...)` rejects state with `session_id="session-b"` before classification;
-- two engines with interleaved states never affect each other;
-- `ANSWERED` and `ABSTAINED` states reject later `step()` calls before classification;
-- no global session dictionary exists in the triage module.
+```python
+def test_session_mismatch_is_rejected_before_classifier() -> None:
+    engine, classifier, _ = make_engine([], {}, session_id="session-a")
+    foreign = new_triage_state("session-b")
+    with pytest.raises(ValueError, match="session"):
+        engine.step(foreign, "mensagem")
+    assert classifier.calls == 0
+
+
+@pytest.mark.parametrize("terminal", ["ANSWERED", "ABSTAINED"])
+def test_terminal_state_cannot_be_reopened(terminal: str) -> None:
+    engine, classifier, _ = make_engine([], {})
+    state = dataclasses.replace(engine.initial_state(), status=terminal)
+    with pytest.raises(ValueError, match="terminal"):
+        engine.step(state, "outra mensagem")
+    assert classifier.calls == 0
+
+
+def test_two_sessions_do_not_share_state() -> None:
+    engine_a, _, _ = make_engine(
+        [TicketClassification("PROBLEMA_ACESSO", "", {}, 0.9)],
+        {"PROBLEMA_ACESSO": ("CIGAM",)},
+        session_id="session-a",
+    )
+    engine_b, _, _ = make_engine(
+        [TicketClassification("PROBLEMA_IMPRESSAO", "", {}, 0.9)],
+        {"PROBLEMA_IMPRESSAO": ("",)},
+        session_id="session-b",
+    )
+    state_a, _ = engine_a.step(engine_a.initial_state(), "Nao consigo acessar")
+    state_b, result_b = engine_b.step(engine_b.initial_state(), "A impressora nao imprime")
+    assert state_a.session_id == "session-a"
+    assert state_a.pending_field == "system"
+    assert state_b.session_id == "session-b"
+    assert result_b["status"] == "KNOWLEDGE_FOUND"
+```
 
 - [ ] **Step 9: Run transition tests and verify RED**
 
@@ -783,32 +1010,58 @@ Run:
 pytest tests/engine/test_triage.py -q
 ```
 
-Expected: new transition and engine tests fail because query/decision/engine methods are not implemented.
+Expected: new engine/query/transition tests fail because those functions do not exist yet.
 
-- [ ] **Step 10: Implement query construction with lexical system reconciliation only**
+- [ ] **Step 10: Implement lexical query construction exactly**
 
-Use existing `SYSTEM_ALIASES` and `normalize_text` only to detect exact conflicting known aliases. Preserve original problem text except exact alias-span removal and whitespace normalization required by that removal.
-
-Do not use intent or knowledge metadata in this function.
+Add `Callable` and `replace` only now if not already present. Use regular expressions only for exact known alias spans:
 
 ```python
+def _alias_values(canonical: str) -> tuple[str, ...]:
+    return (canonical, *SYSTEM_ALIASES.get(canonical, ()))
+
+
+def _contains_system_text(text: str, system: str) -> bool:
+    canonical = _canonical_for_exact_alias(system)
+    values = _alias_values(canonical) if canonical else (system,)
+    return any(
+        re.search(rf"(?<!\w){re.escape(value)}(?!\w)", text, flags=re.IGNORECASE)
+        for value in values
+        if value
+    )
+
+
+def _remove_conflicting_known_system_aliases(text: str, final_system: str) -> str:
+    final_canonical = _canonical_for_exact_alias(final_system)
+    result = text
+    if final_canonical is None:
+        return result.strip()
+    for canonical, aliases in SYSTEM_ALIASES.items():
+        if canonical == final_canonical:
+            continue
+        for value in sorted((canonical, *aliases), key=len, reverse=True):
+            result = re.sub(
+                rf"(?<!\w){re.escape(value)}(?!\w)",
+                "",
+                result,
+                flags=re.IGNORECASE,
+            )
+    return re.sub(r"\s+", " ", result).strip()
+
+
 def build_knowledge_query(problem_text: str, system: str) -> str:
     text = problem_text.strip()
     if not system:
         return text
-    # Keep final system if already explicitly present.
-    # Remove only exact known alias spans that resolve to a different canonical system.
     reconciled = _remove_conflicting_known_system_aliases(text, system)
-    if _text_contains_canonical_system(reconciled, system):
-        return reconciled.strip()
-    return reconciled.strip() + "\n" + system
+    if _contains_system_text(reconciled, system):
+        return reconciled
+    return reconciled + "\n" + system
 ```
 
-The implementation of `_remove_conflicting_known_system_aliases()` must be lexical and deterministic. It must never remove unknown literals or rewrite surrounding problem semantics.
+Do not normalize/rewrite the rest of the problem beyond whitespace created by exact alias removal.
 
-- [ ] **Step 11: Implement public-result helpers and clarification gate**
-
-Keep exactly three public statuses. A helper may centralize the output contract:
+- [ ] **Step 11: Implement exact public result and clarification helpers**
 
 ```python
 def _clarification(reason: str, question: str) -> dict:
@@ -827,13 +1080,65 @@ def _abstained(reason: str) -> dict:
         "question": None,
         "knowledge": None,
     }
+
+
+def _found(knowledge: dict) -> dict:
+    return {
+        "status": "KNOWLEDGE_FOUND",
+        "reason": "MATCH",
+        "question": None,
+        "knowledge": knowledge,
+    }
+
+
+def _mark_terminal(state: TriageState, status: str) -> TriageState:
+    return replace(state, status=status, pending_field="")
+
+
+def _ask_or_abstain(
+    state: TriageState,
+    field: str,
+    reason: str,
+    question: str,
+) -> tuple[TriageState, dict]:
+    if field in state.asked_fields:
+        repeated_reason = {
+            "MISSING_PROBLEM": "UNRESOLVED_PROBLEM",
+            "AMBIGUOUS_SYSTEM": "AMBIGUOUS_SYSTEM",
+            "UNKNOWN_SYSTEM": "UNKNOWN_SYSTEM",
+        }.get(reason, "MAX_CLARIFICATIONS")
+        terminal = _mark_terminal(state, "ABSTAINED")
+        return terminal, _abstained(repeated_reason)
+    if state.turn_count >= MAX_USER_TURNS:
+        terminal = _mark_terminal(state, "ABSTAINED")
+        return terminal, _abstained("MAX_TURNS")
+    if state.clarification_count >= MAX_CLARIFICATIONS:
+        terminal = _mark_terminal(state, "ABSTAINED")
+        return terminal, _abstained("MAX_CLARIFICATIONS")
+    asked = state.asked_fields + (field,)
+    next_state = replace(
+        state,
+        clarification_count=state.clarification_count + 1,
+        pending_field=field,
+        asked_fields=asked,
+    )
+    return next_state, _clarification(reason, question)
 ```
 
-When mapping a Phase 4 `NO_APPROVED_KNOWLEDGE` result, preserve its `reason` and keep `knowledge=None`. When mapping `KNOWLEDGE_FOUND`, pass the public Phase 4 knowledge object unchanged so the approved `answer` remains literal in the result but not in state.
+- [ ] **Step 12: Implement exact system-availability predicates**
 
-- [ ] **Step 12: Implement `TriageEngine.step()` in the exact decision order**
+```python
+def _known_alias_system(system: str) -> bool:
+    return bool(system and _canonical_for_exact_alias(system))
 
-Constructor:
+
+def _unknown_system(system: str, available: tuple[str, ...]) -> bool:
+    return bool(system) and not _known_alias_system(system) and system not in available
+```
+
+A known canonical system absent from `available` is not called unknown; it proceeds to Phase 4 so `SYSTEM_MISMATCH` can remain authoritative.
+
+- [ ] **Step 13: Implement `TriageEngine.step()` in the approved order**
 
 ```python
 class TriageEngine:
@@ -843,40 +1148,85 @@ class TriageEngine:
         knowledge_engine,
         classifier: Callable[[str], TicketClassification],
     ):
-        self.session_id = session_id
+        self.session_id = new_triage_state(session_id).session_id
         self.knowledge_engine = knowledge_engine
         self.classifier = classifier
 
     def initial_state(self) -> TriageState:
         return new_triage_state(self.session_id)
+
+    def step(self, state: TriageState, message: str) -> tuple[TriageState, dict]:
+        if state.session_id != self.session_id:
+            raise ValueError("session_id nao corresponde a esta triagem.")
+        if state.status != "ACTIVE":
+            raise ValueError("Estado terminal nao pode ser reaberto.")
+        if state.turn_count >= MAX_USER_TURNS:
+            raise ValueError("Limite de turnos atingido.")
+        if not isinstance(message, str) or not message.strip() or len(message) > 3000:
+            raise ValueError("Mensagem de triagem invalida.")
+
+        classification = self.classifier(message)
+        evidence = _analyze_turn(state, message, classification)
+        counted = replace(state, turn_count=state.turn_count + 1)
+        merged = _merge_turn(counted, message.strip(), evidence)
+
+        if not merged.problem_text or not merged.intent or merged.intent == "OUTRO":
+            return _ask_or_abstain(
+                merged,
+                "problem",
+                "MISSING_PROBLEM",
+                "O que esta acontecendo?",
+            )
+
+        available = self.knowledge_engine.available_systems(merged.intent)
+        if not available:
+            terminal = _mark_terminal(merged, "ABSTAINED")
+            return terminal, _abstained("NO_APPROVED_KNOWLEDGE_FOR_INTENT")
+
+        if len(evidence.explicit_systems) > 1 and evidence.correction is None:
+            return _ask_or_abstain(
+                merged,
+                "system",
+                "AMBIGUOUS_SYSTEM",
+                "Qual sistema esta com o problema?",
+            )
+
+        if _unknown_system(merged.system, available):
+            return _ask_or_abstain(
+                merged,
+                "system",
+                "UNKNOWN_SYSTEM",
+                "Qual e o sistema correto?",
+            )
+
+        if not merged.system and "" not in available:
+            return _ask_or_abstain(
+                merged,
+                "system",
+                "MISSING_SYSTEM",
+                "Qual sistema esta com o problema?",
+            )
+
+        query = build_knowledge_query(merged.problem_text, merged.system)
+        resolved = TicketClassification(
+            merged.intent,
+            merged.system,
+            dict(merged.entities),
+            merged.confidence,
+        )
+        result = self.knowledge_engine.search_classified(query, resolved)
+
+        if result["status"] == "KNOWLEDGE_FOUND":
+            terminal = _mark_terminal(merged, "ANSWERED")
+            return terminal, _found(dict(result["knowledge"]))
+
+        terminal = _mark_terminal(merged, "ABSTAINED")
+        return terminal, _abstained(str(result["reason"]))
 ```
 
-`step()` must enforce this sequence:
+This method must never call `classify_ticket` directly in addition to the injected classifier. Production creates the injected callable from existing `classify_ticket`; tests inject `QueueClassifier`.
 
-```text
-1. validate session match and ACTIVE state
-2. reject fourth turn before classifier
-3. call classifier exactly once
-4. analyze current turn without another LLM call
-5. increment accepted user turn
-6. merge semantic state using formal precedence
-7. if intent == OUTRO, clarify once or abstain
-8. call available_systems(intent)
-9. if (), abstain without system question
-10. treat explicit ambiguity/unknown system before generic-knowledge shortcut
-11. if specific-only knowledge and system missing, clarify once
-12. if a new question would require turn 4 -> MAX_TURNS
-13. if a new question would be clarification 3 -> MAX_CLARIFICATIONS
-14. build literal user-grounded knowledge query
-15. build TicketClassification from state
-16. call search_classified() exactly once
-17. map KNOWLEDGE_FOUND -> state ANSWERED
-18. map NO_APPROVED_KNOWLEDGE -> state ABSTAINED preserving reason
-```
-
-Use `replace()` to produce new immutable state values. Never add `answer` or the public knowledge object to state.
-
-- [ ] **Step 13: Run triage tests and verify GREEN**
+- [ ] **Step 14: Run all triage tests and verify GREEN**
 
 Run:
 
@@ -884,9 +1234,9 @@ Run:
 pytest tests/engine/test_triage.py -q
 ```
 
-Expected: all state, parser, merge, limits, query, transition, isolation, and knowledge-handoff tests pass.
+Expected: all state, parser, merge, availability, limit, query, isolation, terminal, and handoff tests pass.
 
-- [ ] **Step 14: Run Phase 4 plus triage regression together**
+- [ ] **Step 15: Run Phase 4 and triage together**
 
 Run:
 
@@ -894,9 +1244,9 @@ Run:
 pytest tests/engine/test_knowledge_retrieval.py tests/engine/test_triage.py -q
 ```
 
-Expected: Phase 4 compatibility tests and all triage tests pass in one process.
+Expected: both Phase 4 seam tests and Phase 5 triage tests pass in one process.
 
-- [ ] **Step 15: Commit the triage engine**
+- [ ] **Step 16: Commit the triage engine**
 
 ```bash
 git add src/ai_service_desk/engine/triage.py tests/engine/test_triage.py
@@ -905,7 +1255,7 @@ git commit -m "feat: add deterministic conversational triage"
 
 ---
 
-### Task 5: Add the 10 synthetic conversation fixtures and smoke runner
+### Task 5: Add the 10 synthetic conversations and smoke runner
 
 **Files:**
 - Create: `tests/fixtures/phase5_triage_conversations.jsonl`
@@ -913,12 +1263,10 @@ git commit -m "feat: add deterministic conversational triage"
 - Create: `tests/engine/test_triage_smoke.py`
 
 **Interfaces:**
-- Consumes: `TriageEngine`, `KnowledgeEngine`, `OllamaClient`, `LocalEmbedder`, and the existing Phase 4 synthetic knowledge index built outside this runner.
-- Produces: `run_triage_smoke(index, cases_path, report_path, base_url=...) -> dict` with aggregate-safe report fields only.
+- Consumes: `TriageEngine`, `KnowledgeEngine`, `classify_ticket`, `OllamaClient`, `LocalEmbedder`, existing Phase 4 synthetic APPROVED index.
+- Produces: `load_triage_cases(path) -> list[dict]` and `run_triage_smoke(index, cases_path, report_path, base_url=...) -> dict`.
 
-- [ ] **Step 1: Create the synthetic JSONL fixture contract**
-
-Use one JSON object per conversation. The file contains only synthetic user text and expected public outcomes.
+- [ ] **Step 1: Create the exact synthetic JSONL fixture**
 
 ```json
 {"case_name":"missing-system","turns":["Nao consigo acessar.","CIGAM"],"expected_status":"KNOWLEDGE_FOUND","expected_reason":"MATCH","expected_knowledge_id":"KB-SYN-CIGAM-ACCESS-001","expected_turn_count":2,"expected_clarification_count":1}
@@ -933,34 +1281,49 @@ Use one JSON object per conversation. The file contains only synthetic user text
 {"case_name":"anti-loop","turns":["Preciso de ajuda.","Nao sei explicar."],"expected_status":"TRIAGE_ABSTAINED","expected_reason":"UNRESOLVED_PROBLEM","expected_knowledge_id":null,"expected_turn_count":2,"expected_clarification_count":1}
 ```
 
-For `draft-only`, let the smoke accept any terminal Phase 4 no-approved reason but assert no knowledge ID and no answer are returned. Keep this fixture entirely synthetic.
+The `draft-only` case intentionally does not constrain `expected_reason`; Phase 5 may abstain before retrieval when there is no APPROVED article for the classified intent. It must assert only terminal abstention and no knowledge ID.
 
-- [ ] **Step 2: Write failing fixture-validation and report-privacy tests**
-
-In `tests/engine/test_triage_smoke.py`, verify exactly 10 unique cases, all required fields, and no forbidden report keys.
+- [ ] **Step 2: Write failing fixture-schema tests**
 
 ```python
-def test_smoke_report_contains_only_safe_aggregate_case_metadata(tmp_path: Path, monkeypatch) -> None:
+def test_phase5_fixture_has_exact_ten_unique_synthetic_cases() -> None:
+    cases = load_triage_cases(FIXTURE)
+    assert len(cases) == 10
+    assert len({case["case_name"] for case in cases}) == 10
+    assert all(1 <= len(case["turns"]) <= 3 for case in cases)
+    assert all(case["expected_status"] in {"KNOWLEDGE_FOUND", "TRIAGE_ABSTAINED"} for case in cases)
+```
+
+- [ ] **Step 3: Write failing report-privacy test**
+
+```python
+def test_smoke_report_contains_only_safe_case_metadata(tmp_path: Path, monkeypatch) -> None:
     report = run_fake_smoke(tmp_path, monkeypatch)
     assert report["ok"] is True
     assert len(report["cases"]) == 10
+    allowed = {
+        "case_name",
+        "expected_status",
+        "actual_status",
+        "reason",
+        "expected_knowledge_id",
+        "actual_knowledge_id",
+        "turn_count",
+        "clarification_count",
+        "passed",
+    }
     for case in report["cases"]:
-        assert set(case) <= {
-            "case_name",
-            "expected_status",
-            "actual_status",
-            "reason",
-            "expected_knowledge_id",
-            "actual_knowledge_id",
-            "turn_count",
-            "clarification_count",
-            "passed",
-        }
+        assert set(case) == allowed
         for forbidden in ("message", "messages", "turns", "transcript", "answer", "ticket_id"):
             assert forbidden not in case
+    assert report["privacy"] == {
+        "raw_text_included": False,
+        "approved_content_included": False,
+        "corporate_data_included": False,
+    }
 ```
 
-- [ ] **Step 3: Run smoke tests and verify RED**
+- [ ] **Step 4: Run smoke tests and verify RED**
 
 Run:
 
@@ -968,17 +1331,69 @@ Run:
 pytest tests/engine/test_triage_smoke.py -q
 ```
 
-Expected: fail because fixture/runner do not exist yet.
+Expected: fail because fixture and smoke module do not exist.
 
-- [ ] **Step 4: Implement fixture loading with strict synthetic schema**
-
-In `triage_smoke.py`, reject malformed or duplicate `case_name` rows. The loader may retain messages in memory for execution but must never copy them into the report.
-
-- [ ] **Step 5: Implement smoke execution and interleaved session case**
-
-For normal cases:
+- [ ] **Step 5: Implement strict fixture loading**
 
 ```python
+REQUIRED_CASE_FIELDS = {
+    "case_name",
+    "turns",
+    "expected_status",
+    "expected_knowledge_id",
+    "expected_turn_count",
+    "expected_clarification_count",
+}
+OPTIONAL_CASE_FIELDS = {"expected_reason", "requires_interleaved_control"}
+
+
+def load_triage_cases(path: str | Path) -> list[dict]:
+    source = Path(path)
+    rows: list[dict] = []
+    seen: set[str] = set()
+    with source.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            try:
+                case = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"JSON invalido na linha {line_number}.") from exc
+            if not isinstance(case, dict):
+                raise ValueError("Caso de triagem deve ser objeto JSON.")
+            keys = set(case)
+            if not REQUIRED_CASE_FIELDS <= keys or keys - REQUIRED_CASE_FIELDS - OPTIONAL_CASE_FIELDS:
+                raise ValueError("Campos invalidos no caso de triagem.")
+            name = case["case_name"]
+            if not isinstance(name, str) or not name.strip() or name in seen:
+                raise ValueError("case_name invalido ou duplicado.")
+            turns = case["turns"]
+            if not isinstance(turns, list) or not 1 <= len(turns) <= MAX_USER_TURNS:
+                raise ValueError("turns deve conter de 1 a 3 mensagens.")
+            if any(not isinstance(turn, str) or not turn.strip() for turn in turns):
+                raise ValueError("turn de triagem invalido.")
+            seen.add(name)
+            rows.append(case)
+    if len(rows) != 10:
+        raise ValueError("Smoke da Fase 5 exige exatamente 10 casos sinteticos.")
+    return rows
+```
+
+- [ ] **Step 6: Implement smoke execution and safe summarization**
+
+`run_triage_smoke()` owns the real client lifecycle, creates one validated `KnowledgeEngine`, and creates a fresh `TriageEngine`/state per case:
+
+```python
+client = OllamaClient(base_url)
+embedder = LocalEmbedder(client)
+knowledge = KnowledgeEngine(index, client, embedder)
+classifier = lambda text: classify_ticket(text, client.chat)
+```
+
+For a normal case:
+
+```python
+engine = TriageEngine(f"synthetic-{case['case_name']}", knowledge, classifier)
 state = engine.initial_state()
 result = None
 for message in case["turns"]:
@@ -987,14 +1402,12 @@ for message in case["turns"]:
         break
 ```
 
-For `requires_interleaved_control`, create session A and a separate session B engine/state. Between A's first and second turns, run the synthetic printing case in B and assert B does not alter A. Do not persist either transcript.
+For `requires_interleaved_control`, execute session A turn 1, then a separate session B generic-printing triage, then session A turn 2. Assert A's state fields are unchanged by B except for A's own second turn.
 
-- [ ] **Step 6: Build only safe report records**
-
-Each case record must contain only:
+Summarize only:
 
 ```python
-{
+summary = {
     "case_name": case["case_name"],
     "expected_status": case["expected_status"],
     "actual_status": result.get("status"),
@@ -1003,11 +1416,31 @@ Each case record must contain only:
     "actual_knowledge_id": (result.get("knowledge") or {}).get("knowledge_id"),
     "turn_count": state.turn_count,
     "clarification_count": state.clarification_count,
-    "passed": passed,
+    "passed": bool(passed),
 }
 ```
 
-Top-level privacy metadata should mirror the Phase 4 safe-report style and explicitly state that raw text, approved answer content, and corporate data are not included.
+`passed` compares status, optional expected reason, optional expected knowledge ID, expected turn count, and expected clarification count. Never place `turns`, queries, answer text, transcript, or article text in the report.
+
+Top-level report:
+
+```python
+report = {
+    "schema_version": 1,
+    "phase": 5,
+    "domain": "CONVERSATIONAL_TRIAGE",
+    "timestamp_utc": datetime.now(UTC).isoformat(),
+    "ok": False,
+    "cases": [],
+    "privacy": {
+        "raw_text_included": False,
+        "approved_content_included": False,
+        "corporate_data_included": False,
+    },
+}
+```
+
+Write with existing `atomic_json()` in `finally`, close the client, and set `ok` only when all 10 summaries pass.
 
 - [ ] **Step 7: Run smoke unit tests and verify GREEN**
 
@@ -1017,7 +1450,7 @@ Run:
 pytest tests/engine/test_triage_smoke.py -q
 ```
 
-Expected: all fixture validation, 10-case fake execution, session isolation, and privacy tests pass.
+Expected: fixture validation, fake 10-case execution, interleaved isolation, and report privacy tests pass.
 
 - [ ] **Step 8: Commit the synthetic smoke layer**
 
@@ -1038,12 +1471,11 @@ git commit -m "test: add phase 5 synthetic triage smoke"
 - Consumes: `run_triage_smoke(...)`.
 - Produces: `triage-smoke --index PATH --cases PATH --report PATH --url URL`.
 
-- [ ] **Step 1: Write failing parser/default tests**
+- [ ] **Step 1: Write failing parser/default test**
 
 ```python
 def test_triage_smoke_parser_requires_index_cases_and_report() -> None:
-    parser = build_parser()
-    args = parser.parse_args(
+    args = build_parser().parse_args(
         [
             "triage-smoke",
             "--index",
@@ -1061,9 +1493,7 @@ def test_triage_smoke_parser_requires_index_cases_and_report() -> None:
     assert args.url == DEFAULT_URL
 ```
 
-- [ ] **Step 2: Write failing CLI delegation and safe-output test**
-
-Patch `run_triage_smoke` to return a synthetic aggregate report. Assert the CLI prints only aggregate status, case count, and report path. It must not print fixture turns or approved answer text.
+- [ ] **Step 2: Write failing delegation/safe-output test**
 
 ```python
 def test_triage_smoke_cli_prints_only_safe_summary(monkeypatch, capsys, tmp_path: Path) -> None:
@@ -1088,6 +1518,7 @@ def test_triage_smoke_cli_prints_only_safe_summary(monkeypatch, capsys, tmp_path
     assert "TRIAGE SMOKE OK" in output
     assert "Casos sinteticos: 10" in output
     assert "answer" not in output.lower()
+    assert "Nao consigo acessar" not in output
 ```
 
 - [ ] **Step 3: Run CLI tests and verify RED**
@@ -1100,7 +1531,13 @@ pytest tests/test_triage_cli.py -q
 
 Expected: fail because `triage-smoke` is not registered.
 
-- [ ] **Step 4: Add the parser and command delegation**
+- [ ] **Step 4: Add parser and delegation**
+
+Add import:
+
+```python
+from ai_service_desk.engine.triage_smoke import run_triage_smoke
+```
 
 In `build_parser()`:
 
@@ -1112,7 +1549,7 @@ triage_smoke.add_argument("--report", type=Path, required=True)
 triage_smoke.add_argument("--url", default=DEFAULT_URL)
 ```
 
-In `main()`, place this beside the existing smoke/evaluation commands so `run_triage_smoke()` owns its Ollama client lifecycle, as `run_knowledge_smoke()` already does:
+Before generic `OllamaClient(args.url)` construction in `main()`:
 
 ```python
 if args.command == "triage-smoke":
@@ -1123,9 +1560,9 @@ if args.command == "triage-smoke":
     return 0 if report["ok"] else 1
 ```
 
-Do not add `--state`, `--transcript`, chat history persistence, or an interactive session store in Phase 5.
+Do not add `--state`, `--transcript`, interactive history, or persistent sessions.
 
-- [ ] **Step 5: Run CLI tests and verify GREEN**
+- [ ] **Step 5: Run triage CLI tests and verify GREEN**
 
 Run:
 
@@ -1133,7 +1570,7 @@ Run:
 pytest tests/test_triage_cli.py -q
 ```
 
-Expected: all triage CLI tests pass without real Ollama.
+Expected: pass without real Ollama.
 
 - [ ] **Step 6: Run all CLI regression tests**
 
@@ -1143,7 +1580,7 @@ Run:
 pytest tests/test_cli.py tests/test_knowledge_cli.py tests/test_triage_cli.py -q
 ```
 
-Expected: all previous CLI contracts remain green.
+Expected: all old and new CLI tests pass.
 
 - [ ] **Step 7: Commit CLI wiring**
 
@@ -1154,7 +1591,7 @@ git commit -m "feat: add phase 5 triage smoke CLI"
 
 ---
 
-### Task 7: Add Dell workflow and Phase 5 documentation last
+### Task 7: Add Dell workflow and documentation last
 
 **Files:**
 - Create: `.github/workflows/phase5-triage-smoke.yml`
@@ -1163,12 +1600,10 @@ git commit -m "feat: add phase 5 triage smoke CLI"
 - Modify: `README.md`
 
 **Interfaces:**
-- Consumes: `triage-smoke` CLI, existing Phase 4 synthetic FAQ, Phase 5 synthetic conversations, local Ollama.
+- Consumes: `triage-smoke`, existing Phase 4 synthetic FAQ, Phase 5 synthetic conversations, local Ollama.
 - Produces: manual Dell homologation gate and operator documentation.
 
-- [ ] **Step 1: Write failing workflow policy test before creating the workflow**
-
-Extend `tests/test_workflows.py`:
+- [ ] **Step 1: Write failing workflow policy test**
 
 ```python
 PHASE5_WORKFLOW = ROOT / ".github" / "workflows" / "phase5-triage-smoke.yml"
@@ -1192,11 +1627,11 @@ def test_phase5_triage_workflow_is_manual_local_and_non_exporting() -> None:
         "http://127.0.0.1:11434",
     ):
         assert required in text
-    for forbidden in ("upload-artifact", "Get-Content", "--show-history", "documents.jsonl", "embeddings.npy"):
+    for forbidden in ("upload-artifact", "Get-Content", "--show-history"):
         assert forbidden not in text
 ```
 
-- [ ] **Step 2: Run the workflow test and verify RED**
+- [ ] **Step 2: Run workflow test and verify RED**
 
 Run:
 
@@ -1204,11 +1639,9 @@ Run:
 pytest tests/test_workflows.py::test_phase5_triage_workflow_is_manual_local_and_non_exporting -q
 ```
 
-Expected: fail because `.github/workflows/phase5-triage-smoke.yml` does not exist.
+Expected: fail because the workflow does not exist.
 
-- [ ] **Step 3: Create the manual Dell workflow**
-
-Follow the Phase 4 pattern exactly where possible:
+- [ ] **Step 3: Create the complete manual workflow**
 
 ```yaml
 name: Phase 5 triage smoke
@@ -1229,20 +1662,71 @@ jobs:
     name: Windows Phase 5 triage smoke
     runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
     timeout-minutes: 20
+
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref }}
+
+      - name: Verify Python 3.14
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+          Write-Host "Python: $version"
+          if (-not $version.StartsWith("3.14.")) {
+            throw "Phase 5 triage smoke requires Python 3.14.x. Found $version"
+          }
+
+      - name: Install project
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Verify local models
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ai_service_desk doctor --url http://127.0.0.1:11434
+
+      - name: Validate synthetic knowledge
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ai_service_desk knowledge-validate `
+            --file knowledge/phase4_synthetic_faq.jsonl
+
+      - name: Build synthetic approved knowledge index
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $index = Join-Path $env:RUNNER_TEMP "phase5-knowledge-$env:GITHUB_RUN_ID"
+          if (Test-Path $index) { Remove-Item -Recurse -Force $index }
+          python -m ai_service_desk knowledge-index `
+            --file knowledge/phase4_synthetic_faq.jsonl `
+            --index "$index" `
+            --batch-size 10 `
+            --url http://127.0.0.1:11434
+
+      - name: Run Phase 5 triage smoke
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $index = Join-Path $env:RUNNER_TEMP "phase5-knowledge-$env:GITHUB_RUN_ID"
+          $report = Join-Path $env:RUNNER_TEMP "phase5-triage-$env:GITHUB_RUN_ID.json"
+          python -m ai_service_desk triage-smoke `
+            --index "$index" `
+            --cases tests/fixtures/phase5_triage_conversations.jsonl `
+            --report "$report" `
+            --url http://127.0.0.1:11434
 ```
 
-Required steps:
-1. checkout `inputs.target_ref`;
-2. verify Python 3.14;
-3. install `.[dev]`;
-4. run `doctor --url http://127.0.0.1:11434`;
-5. run `knowledge-validate --file knowledge/phase4_synthetic_faq.jsonl`;
-6. create a fresh index under `$env:RUNNER_TEMP` with `knowledge-index`;
-7. run `triage-smoke --index ... --cases tests/fixtures/phase5_triage_conversations.jsonl --report ... --url http://127.0.0.1:11434`.
+No artifact upload and no report-content printing.
 
-Never upload or print the report body. No `upload-artifact` or `Get-Content`.
-
-- [ ] **Step 4: Run workflow policy tests and verify GREEN**
+- [ ] **Step 4: Run all workflow policy tests and verify GREEN**
 
 Run:
 
@@ -1250,22 +1734,23 @@ Run:
 pytest tests/test_workflows.py -q
 ```
 
-Expected: all existing workflow policy tests plus the Phase 5 policy test pass.
+Expected: all old workflow tests plus Phase 5 pass.
 
-- [ ] **Step 5: Write Phase 5 operational documentation**
+- [ ] **Step 5: Create Phase 5 operational documentation**
 
-Create `docs/triage/phase-5.md` containing these concrete sections:
+`docs/triage/phase-5.md` must contain these exact topics:
 - purpose and non-goals;
-- exact `TriageState` persisted fields;
-- `MAX_USER_TURNS = 3` and `MAX_CLARIFICATIONS = 2` semantics;
-- three public statuses and terminal behavior;
-- `search_classified()`/`available_systems()` seam;
-- query constraints and unchanged `0.65` threshold;
+- exact persisted `TriageState` fields;
+- merge precedence summary;
+- `MAX_USER_TURNS = 3`, `MAX_CLARIFICATIONS = 2`, turn-3 semantics;
+- `NEEDS_CLARIFICATION`, `KNOWLEDGE_FOUND`, `TRIAGE_ABSTAINED` semantics;
+- `search_classified()` and `available_systems()` boundaries;
+- query restrictions and unchanged `0.65` threshold;
 - session isolation and caller-owned persistence;
-- synthetic smoke command;
-- privacy statement that transcript and answer are not persisted in triage state/report.
+- no transcript/answer persistence;
+- synthetic smoke instructions.
 
-Document the local smoke command exactly:
+Document this command exactly:
 
 ```powershell
 python -m ai_service_desk triage-smoke `
@@ -1275,11 +1760,11 @@ python -m ai_service_desk triage-smoke `
   --url http://127.0.0.1:11434
 ```
 
-- [ ] **Step 6: Update README without changing earlier phase claims**
+- [ ] **Step 6: Update README without changing prior phase claims**
 
-Add a short Phase 5 section describing short controlled multi-turn triage, APPROVED-only handoff, no ticket/action execution, and the `triage-smoke` command. Keep Phase 1 to 4 documentation intact.
+Add a concise Phase 5 section describing short controlled multi-turn triage, APPROVED-only handoff, no ticket/action execution, limits, and `triage-smoke`. Do not rewrite Phase 1 to 4 claims.
 
-- [ ] **Step 7: Run documentation-adjacent workflow/CLI tests**
+- [ ] **Step 7: Run documentation-adjacent tests**
 
 Run:
 
@@ -1298,19 +1783,17 @@ git commit -m "docs: add phase 5 triage homologation"
 
 ---
 
-### Task 8: Final regression, privacy review, hosted CI, and Dell homologation gate
+### Task 8: Final regression, privacy review, CI, and Dell homologation gate
 
 **Files:**
 - Review only all Phase 5 changed files.
-- Do not add implementation changes unless a failing verification demonstrates a defect and the fix follows TDD.
+- Any defect discovered here is fixed only by adding/reproducing a failing test first.
 
 **Interfaces:**
-- Consumes: completed Tasks 1 to 7.
-- Produces: evidence that Phase 5 is ready for review/homologation without merging.
+- Consumes: Tasks 1 to 7 complete.
+- Produces: evidence that Phase 5 is ready for user review without merge.
 
 - [ ] **Step 1: Run focused Phase 5 tests**
-
-Run:
 
 ```bash
 pytest tests/engine/test_knowledge_retrieval.py tests/engine/test_triage.py tests/engine/test_triage_smoke.py tests/test_triage_cli.py tests/test_workflows.py -q
@@ -1318,30 +1801,26 @@ pytest tests/engine/test_knowledge_retrieval.py tests/engine/test_triage.py test
 
 Expected: all focused tests pass.
 
-- [ ] **Step 2: Run Ruff lint and formatting checks**
-
-Run:
+- [ ] **Step 2: Run Ruff lint and formatting**
 
 ```bash
 ruff check .
 ruff format --check .
 ```
 
-Expected: no lint errors and all files already formatted.
+Expected: all checks pass.
 
-- [ ] **Step 3: Run the complete pytest regression suite**
-
-Run:
+- [ ] **Step 3: Run the complete regression suite**
 
 ```bash
 pytest -q
 ```
 
-Expected: all 177 pre-Phase-5 tests still pass plus all new Phase 5 tests. If total test count is below 177, stop and investigate test loss before proceeding.
+Expected: all 177 pre-Phase-5 tests still pass plus every new Phase 5 test. If total collection is below 177, stop and investigate test loss.
 
-- [ ] **Step 4: Review protected-file integrity**
+- [ ] **Step 4: Verify protected files are untouched**
 
-Compare the implementation branch against base `491e5dd5f79dec8ff9a192a4929b48209956be3a` and assert these paths are absent from the changed-file list:
+Compare branch against `491e5dd5f79dec8ff9a192a4929b48209956be3a`. These files must not appear in the diff:
 
 ```text
 src/ai_service_desk/engine/classification.py
@@ -1350,36 +1829,36 @@ src/ai_service_desk/engine/index.py
 src/ai_service_desk/engine/knowledge.py
 ```
 
-If any protected file changed, stop and require the blocker evidence mandated by the spec before continuing.
+If one changed, stop and document the required reproducible blocker, technical cause, minimal change, and regression risk before proceeding.
 
 - [ ] **Step 5: Perform explicit privacy and scope review**
 
-Inspect changed files and assert:
+Verify changed files contain:
 - no real corporate ticket text or identifiers;
-- no generated `documents.jsonl` or `embeddings.npy`;
-- no real index/report artifacts;
+- no generated `documents.jsonl`, `embeddings.npy`, real index, or real report artifacts;
 - no transcript persistence;
 - no `answer` field in `TriageState`;
-- no historical `ticket_id` in triage public results or smoke report;
+- no historical `ticket_id` in triage result/report;
 - no DRAFT/RETIRED answer path;
 - no global session store;
-- no ticket creation, playbook, policy, execution, or frontend code;
-- no threshold other than existing `0.65` in the Phase 5 path.
+- no ticket creation, playbook, policy, machine execution, or frontend code;
+- no triage threshold override and no threshold other than the existing knowledge `0.65` path.
 
-- [ ] **Step 6: Verify no second classification path**
+- [ ] **Step 6: Verify no second-classification path**
 
-Use tests plus code review to confirm:
-- each accepted `TriageEngine.step()` invokes its injected classifier once;
-- `search_classified()` never invokes `classify_ticket`;
-- `KnowledgeEngine.search()` still invokes `classify_ticket` once for existing callers.
+Use tests and code review to confirm:
+- each accepted `TriageEngine.step()` invokes the injected classifier exactly once;
+- turn 4, session mismatch, and terminal-state calls invoke it zero times;
+- `search_classified()` invokes no classifier;
+- existing `KnowledgeEngine.search()` still invokes `classify_ticket` once.
 
-- [ ] **Step 7: Push branch and use hosted CI as the authoritative full Python gate**
+- [ ] **Step 7: Open/update the Phase 5 PR and require hosted CI on the final head**
 
-Hosted CI must run on the final head and confirm Python 3.14, Ruff lint, Ruff format, and complete pytest success. Do not treat local reconstructed environments as a substitute for hosted CI.
+Hosted CI is authoritative for Python 3.14, Ruff lint, Ruff format, and full pytest. Record final head SHA and total test count. Do not treat an isolated reconstructed environment as a substitute.
 
-- [ ] **Step 8: Run the manual Dell Phase 5 smoke on the same final head**
+- [ ] **Step 8: Run Dell homologation on the same final head**
 
-Use `.github/workflows/phase5-triage-smoke.yml` or the equivalent manual PowerShell commands if workflow dispatch is unavailable before merge. Required evidence:
+Use `.github/workflows/phase5-triage-smoke.yml` or equivalent manual PowerShell commands if first-time workflow dispatch is unavailable before merge. Required evidence:
 
 ```text
 Python 3.14.x
@@ -1393,17 +1872,17 @@ TRIAGE SMOKE OK
 exit code 0
 ```
 
-Do not print or upload raw smoke report contents.
+Do not print or upload raw report contents.
 
-- [ ] **Step 9: Final review checkpoint before any merge**
+- [ ] **Step 9: Final review checkpoint before merge approval**
 
 Record:
 - final head SHA;
-- hosted CI result and total pytest count;
+- hosted CI result and full pytest count;
 - Dell smoke result;
 - changed-file list;
 - protected files unchanged;
-- no corporate data/helpers/generated index artifacts;
+- no corporate data, temporary helpers, generated index, or report artifacts;
 - PR open and unmerged.
 
-Stop for explicit user merge approval. Phase 5 must not be marked 100% or merged without that approval.
+Stop for explicit user approval. Do not merge and do not mark Phase 5 as 100% without that approval.
