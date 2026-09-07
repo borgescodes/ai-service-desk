@@ -1,0 +1,4 @@
+﻿ticket_id;ticket_number;title;description;created_at;catalogo;area;item;mesa;texto_busca;texto_limitado;historico_atendimento;apontamento_ids;status_conhecimento
+1;1001;Falha CIGAM;Erro sintetico;2026-01-01;Sistemas;CIGAM;ERP;TI;Assunto: Falha CIGAM Descricao: Erro sintetico;false;Atendimento sintetico sem dado real;10;HISTORICO_NAO_VALIDADO
+2;1002;Falha SIAGRI;Erro sintetico;2026-01-02;Sistemas;SIAGRI;ERP;TI;Assunto: Falha SIAGRI Descricao: Erro sintetico;false;;11;HISTORICO_NAO_VALIDADO
+3;1003;Impressora;Nao imprime;2026-01-03;Impressoras;Infra;Impressao;TI;Assunto: Impressora Descricao: Nao imprime;true;Orientacao sintetica;12;HISTORICO_NAO_VALIDADO

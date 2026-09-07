@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "name": "phase-2-corpus-v1",
+  "description": "Snapshot preparado do histórico de TI. Conteúdo corporativo permanece fora do Git.",
+  "columns": [
+    "ticket_id",
+    "ticket_number",
+    "title",
+    "description",
+    "created_at",
+    "catalogo",
+    "area",
+    "item",
+    "mesa",
+    "texto_busca",
+    "texto_limitado",
+    "historico_atendimento",
+    "apontamento_ids",
+    "status_conhecimento"
+  ],
+  "expected": {
+    "rows": 15542,
+    "with_history": 14472,
+    "limited_texts": 5,
+    "raw_sha256": "26b3ca70c91db22145cf16676c0d13a8b5c847e6303ee440a0806e395b6e12bb",
+    "canonical_sha256": "3159a3430abfd6091b84e0216cd4cf9e029817357d0109ad6bc244ff5f5ec448"
+  },
+  "knowledge_status": "HISTORICO_NAO_VALIDADO",
+  "privacy": {
+    "masking": "partial-rule-based",
+    "anonymization_claim": false,
+    "human_review_required_before_history_display": true
+  }
+}

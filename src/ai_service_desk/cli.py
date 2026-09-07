@@ -4,9 +4,12 @@ import sys
 import time
 from pathlib import Path
 
+from ai_service_desk.engine.corpus import audit_corpus, ensure_external_path, write_safe_report
 from ai_service_desk.engine.data import load_corpus, prepare_tiflux
+from ai_service_desk.engine.demo_subset import build_demo_subset
 from ai_service_desk.engine.index import atomic_json, build_index, import_legacy, load_index
 from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
+from ai_service_desk.engine.real_smoke import run_demo_smoke, run_real_smoke
 from ai_service_desk.engine.retrieval import RetrievalEngine, format_result
 from ai_service_desk.engine.smoke import run_validation
 
@@ -25,6 +28,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     inspect = sub.add_parser("inspect")
     inspect.add_argument("--file", type=Path, required=True)
+
+    audit = sub.add_parser("audit")
+    audit.add_argument("--file", type=Path, required=True)
+    audit.add_argument("--manifest", type=Path, required=True)
+    audit.add_argument("--report", type=Path, required=True)
+
+    demo_subset = sub.add_parser("demo-subset")
+    demo_subset.add_argument("--file", type=Path, required=True)
+    demo_subset.add_argument("--output", type=Path, required=True)
+    demo_subset.add_argument("--report", type=Path, required=True)
+    demo_subset.add_argument("--checkout", type=Path, required=True)
+    demo_subset.add_argument("--per-group", type=int, default=40)
+
+    demo_smoke = sub.add_parser("demo-smoke")
+    demo_smoke.add_argument("--file", type=Path, required=True)
+    demo_smoke.add_argument("--subset-report", type=Path, required=True)
+    demo_smoke.add_argument("--index", type=Path, required=True)
+    demo_smoke.add_argument("--report", type=Path, required=True)
+    demo_smoke.add_argument("--checkout", type=Path, required=True)
+    demo_smoke.add_argument("--url", default=DEFAULT_URL)
+
+    real_smoke = sub.add_parser("real-smoke")
+    real_smoke.add_argument("--file", type=Path, required=True)
+    real_smoke.add_argument("--manifest", type=Path, required=True)
+    real_smoke.add_argument("--index", type=Path, required=True)
+    real_smoke.add_argument("--report", type=Path, required=True)
+    real_smoke.add_argument("--checkout", type=Path, required=True)
+    real_smoke.add_argument("--url", default=DEFAULT_URL)
 
     show_index = sub.add_parser("show-index")
     show_index.add_argument("--index", type=Path, required=True)
@@ -74,6 +105,81 @@ def main(argv: list[str] | None = None) -> int:
             print("Colunas: " + ", ".join(data.columns))
             print("Nenhum texto de atendimento foi exibido. Nenhuma chamada de IA foi feita.")
             return 0
+
+        if args.command == "audit":
+            report = audit_corpus(args.file, args.manifest)
+            write_safe_report(args.report, report)
+            summary = {
+                key: report[key]
+                for key in (
+                    "rows",
+                    "unique_ticket_ids",
+                    "empty_ticket_ids",
+                    "empty_search_texts",
+                    "with_history",
+                    "limited_texts",
+                    "raw_sha256",
+                    "canonical_sha256",
+                    "manifest_match",
+                )
+            }
+            print(json.dumps(summary, ensure_ascii=False, indent=2))
+            print("Auditoria por regras concluida. Nenhum conteudo de ticket foi exibido.")
+            return 0
+
+        if args.command == "demo-subset":
+            source = ensure_external_path(args.file, args.checkout)
+            output = ensure_external_path(args.output, args.checkout)
+            report_path = ensure_external_path(args.report, args.checkout)
+            if output.exists():
+                raise ValueError("Subset de demo ja existe. Remova-o ou escolha outro --output.")
+            data = load_corpus(source)
+            subset, report = build_demo_subset(data, args.per_group)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            subset.to_csv(output, sep=";", encoding="utf-8-sig", index=False)
+            atomic_json(report_path, report)
+            print(f"Subset de demo: {report['selected_rows']} registros")
+            print(f"Registros por grupo: {report['per_group']}")
+            print("Relatorio agregado local: " + str(report_path))
+            return 0
+
+        if args.command == "demo-smoke":
+            report = run_demo_smoke(
+                args.file,
+                args.subset_report,
+                args.index,
+                args.report,
+                args.url,
+                args.checkout,
+            )
+            prefix = (
+                "DEMO RETRIEVAL SMOKE OK" if report["ok"] else "DEMO RETRIEVAL SMOKE REQUER REVISAO"
+            )
+            shape = report.get("index", {}).get("shape", [0, 0])
+            print(prefix)
+            print(f"Vetores validados: {shape[0]} x {shape[1]}")
+            print(f"Casos sinteticos: {len(report.get('queries', []))}")
+            print("Relatorio agregado local: " + str(args.report))
+            return 0 if report["ok"] else 1
+
+        if args.command == "real-smoke":
+            report = run_real_smoke(
+                args.file,
+                args.manifest,
+                args.index,
+                args.report,
+                args.url,
+                args.checkout,
+            )
+            prefix = "REAL CORPUS SMOKE OK" if report["ok"] else "REAL CORPUS SMOKE REQUER REVISAO"
+            rows = report.get("corpus", {}).get("rows", report.get("index", {}).get("rows", 0))
+            shape = report.get("index", {}).get("shape", [0, 0])
+            print(prefix)
+            print(f"Registros auditados: {rows}")
+            print(f"Vetores validados: {shape[0]} x {shape[1]}")
+            print(f"Casos sinteticos: {len(report.get('queries', []))}")
+            print("Relatorio agregado local: " + str(args.report))
+            return 0 if report["ok"] else 1
 
         if args.command == "show-index":
             _, _, state = load_index(args.index)

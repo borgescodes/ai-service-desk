@@ -1,0 +1,115 @@
+name: Demo retrieval smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Branch or SHA to validate
+        required: true
+        type: string
+      corpus_path:
+        description: Prepared full corpus path outside the repository checkout
+        required: true
+        default: 'C:\ai-service-desk-data\phase-2\corpus\base_ti_preparada.csv'
+        type: string
+      demo_root:
+        description: Demo data root outside the repository checkout
+        required: true
+        default: 'C:\ai-service-desk-data\phase-2\demo'
+        type: string
+      rebuild:
+        description: Rebuild the deterministic subset and demo index
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  demo-retrieval-smoke:
+    name: Windows demo retrieval smoke
+    runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref }}
+
+      - name: Verify Python 3.14
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+          Write-Host "Python: $version"
+          if (-not $version.StartsWith("3.14.")) {
+            throw "Demo retrieval smoke requires Python 3.14.x. Found $version"
+          }
+
+      - name: Install project
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Prepare demo directory
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $demoRoot = "${{ inputs.demo_root }}"
+          if ("${{ inputs.rebuild }}" -eq "true" -and (Test-Path $demoRoot)) {
+            Remove-Item -Recurse -Force $demoRoot
+          }
+          New-Item -ItemType Directory -Force (Join-Path $demoRoot "reports") | Out-Null
+
+      - name: Audit source snapshot
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $auditReport = Join-Path "${{ inputs.demo_root }}" "reports\corpus-audit.json"
+          python -m ai_service_desk audit `
+            --file "${{ inputs.corpus_path }}" `
+            --manifest docs/data/phase-2-corpus-v1.json `
+            --report "$auditReport"
+
+      - name: Prepare deterministic demo subset
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $demoRoot = "${{ inputs.demo_root }}"
+          $subset = Join-Path $demoRoot "demo_subset.csv"
+          $subsetReport = Join-Path $demoRoot "reports\subset.json"
+
+          if ((Test-Path $subset) -xor (Test-Path $subsetReport)) {
+            throw "Demo subset and aggregate report must exist together. Use rebuild=true."
+          }
+
+          if (-not (Test-Path $subset)) {
+            python -m ai_service_desk demo-subset `
+              --file "${{ inputs.corpus_path }}" `
+              --output "$subset" `
+              --report "$subsetReport" `
+              --checkout "$env:GITHUB_WORKSPACE" `
+              --per-group 40
+          }
+
+      - name: Validate demo retrieval
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $demoRoot = "${{ inputs.demo_root }}"
+          $subset = Join-Path $demoRoot "demo_subset.csv"
+          $subsetReport = Join-Path $demoRoot "reports\subset.json"
+          $index = Join-Path $demoRoot "index"
+          $smokeReport = Join-Path $demoRoot "reports\smoke.json"
+
+          python -m ai_service_desk demo-smoke `
+            --file "$subset" `
+            --subset-report "$subsetReport" `
+            --index "$index" `
+            --report "$smokeReport" `
+            --checkout "$env:GITHUB_WORKSPACE" `
+            --url http://127.0.0.1:11434
