@@ -206,10 +206,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"System accuracy: {float(runtime.get('system_accuracy', 0.0)):.4f}")
             print(f"Hit@3: {float(runtime.get('hit_at_3', 0.0)):.4f}")
             print(f"MRR: {float(runtime.get('mrr', 0.0)):.4f}")
-            print(
-                "Correct abstention rate: "
-                f"{float(runtime.get('correct_abstention_rate', 0.0)):.4f}"
-            )
+            print(f"Correct abstention rate: {float(runtime.get('correct_abstention_rate', 0.0)):.4f}")
             print(f"System leakage count: {int(runtime.get('system_leakage_count', 0))}")
             print("Synthetic recommendation: " + str(report.get("synthetic_recommendation")))
             print("Calibration decision: " + str(calibration.get("decision", "")))
