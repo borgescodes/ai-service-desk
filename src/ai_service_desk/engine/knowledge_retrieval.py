@@ -73,7 +73,11 @@ def _eligible_pool(
             return np.array([], dtype=int), "SYSTEM_MISMATCH"
 
     intent_indices = np.asarray(
-        [index for index in system_indices if str(data.iloc[int(index)]["intent"]) == classification.intent],
+        [
+            index
+            for index in system_indices
+            if str(data.iloc[int(index)]["intent"]) == classification.intent
+        ],
         dtype=int,
     )
     if not len(intent_indices):
