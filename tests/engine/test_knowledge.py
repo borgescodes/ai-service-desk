@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -8,7 +9,9 @@ from ai_service_desk.engine.index import build_index, load_index
 from ai_service_desk.engine.knowledge import (
     _project_approved_articles,
     approved_articles,
+    build_knowledge_index,
     load_knowledge,
+    load_knowledge_index,
 )
 
 
@@ -168,3 +171,129 @@ def test_answer_change_changes_source_hash_without_changing_embedding_text(tmp_p
     first_state = build_index(first_projection, tmp_path / "first", FakeEmbedder(), batch_size=1)
     second_state = build_index(second_projection, tmp_path / "second", FakeEmbedder(), batch_size=1)
     assert first_state["source_hash"] != second_state["source_hash"]
+
+
+def test_build_knowledge_index_writes_bound_provenance_and_only_approved(tmp_path: Path) -> None:
+    source = write_articles(
+        tmp_path,
+        [
+            valid_article(),
+            valid_article("KB-SYN-DRAFT-001", "DRAFT"),
+            valid_article("KB-SYN-RETIRED-001", "RETIRED"),
+        ],
+    )
+    root = tmp_path / "knowledge-index"
+    provenance = build_knowledge_index(source, root, FakeEmbedder(), batch_size=1)
+    data, _, loaded_provenance = load_knowledge_index(root)
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+
+    assert len(data) == 1
+    assert data.status.tolist() == ["APPROVED"]
+    assert provenance == loaded_provenance
+    assert provenance == {
+        "version": 1,
+        "domain": "APPROVED_KNOWLEDGE",
+        "knowledge_schema_version": 1,
+        "projection_recipe": "knowledge-search-v1",
+        "approved_only": True,
+        "source_hash": manifest["source_hash"],
+        "matrix_hash": manifest["matrix_hash"],
+        "rows": manifest["rows"],
+        "dimensions": manifest["dimensions"],
+        "model": manifest["model"],
+        "model_digest": manifest["model_digest"],
+        "index_recipe": manifest["recipe"],
+    }
+
+
+def test_build_knowledge_index_rejects_source_without_approved_articles(tmp_path: Path) -> None:
+    source = write_articles(
+        tmp_path,
+        [valid_article("KB-SYN-DRAFT-001", "DRAFT"), valid_article("KB-SYN-RET-001", "RETIRED")],
+    )
+    with pytest.raises(ValueError, match="APPROVED"):
+        build_knowledge_index(source, tmp_path / "index", FakeEmbedder())
+
+
+def test_historical_index_is_never_accepted_as_knowledge(tmp_path: Path) -> None:
+    import pandas as pd
+
+    historical = pd.DataFrame([{"ticket_id": "SYN-1", "texto_busca": "historico sintetico"}])
+    root = tmp_path / "historical"
+    build_index(historical, root, FakeEmbedder(), batch_size=1)
+    with pytest.raises(ValueError, match="provenance"):
+        load_knowledge_index(root)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("domain", "HISTORICAL_TICKETS"),
+        ("approved_only", False),
+        ("projection_recipe", "other"),
+        ("source_hash", "0" * 64),
+        ("matrix_hash", "1" * 64),
+        ("rows", 99),
+        ("dimensions", 99),
+        ("model", "other"),
+        ("model_digest", "other"),
+        ("index_recipe", "other"),
+    ],
+)
+def test_load_knowledge_index_rejects_divergent_provenance(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    source = write_articles(tmp_path, [valid_article()])
+    root = tmp_path / "index"
+    build_knowledge_index(source, root, FakeEmbedder(), batch_size=1)
+    sidecar = root / "knowledge-provenance.json"
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    payload[field] = value
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="provenance"):
+        load_knowledge_index(root)
+
+
+def test_load_knowledge_index_rejects_invalid_provenance_json(tmp_path: Path) -> None:
+    source = write_articles(tmp_path, [valid_article()])
+    root = tmp_path / "index"
+    build_knowledge_index(source, root, FakeEmbedder(), batch_size=1)
+    (root / "knowledge-provenance.json").write_text("{", encoding="utf-8")
+    with pytest.raises(ValueError, match="provenance"):
+        load_knowledge_index(root)
+
+
+def test_existing_divergent_sidecar_is_not_overwritten(tmp_path: Path) -> None:
+    source = write_articles(tmp_path, [valid_article()])
+    root = tmp_path / "index"
+    root.mkdir()
+    sidecar = root / "knowledge-provenance.json"
+    sidecar.write_text('{"domain":"WRONG"}', encoding="utf-8")
+    with pytest.raises(ValueError, match="provenance"):
+        build_knowledge_index(source, root, FakeEmbedder())
+    assert json.loads(sidecar.read_text(encoding="utf-8")) == {"domain": "WRONG"}
+
+
+def test_loaded_document_contract_is_checked_after_manifest_integrity(tmp_path: Path) -> None:
+    source = write_articles(tmp_path, [valid_article()])
+    root = tmp_path / "index"
+    build_knowledge_index(source, root, FakeEmbedder(), batch_size=1)
+
+    documents = root / "documents.jsonl"
+    row = json.loads(documents.read_text(encoding="utf-8").strip())
+    row["status"] = "DRAFT"
+    raw = (json.dumps(row, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+    documents.write_bytes(raw)
+
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["source_hash"] = hashlib.sha256(raw).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    sidecar = root / "knowledge-provenance.json"
+    provenance = json.loads(sidecar.read_text(encoding="utf-8"))
+    provenance["source_hash"] = manifest["source_hash"]
+    sidecar.write_text(json.dumps(provenance), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="APPROVED"):
+        load_knowledge_index(root)
