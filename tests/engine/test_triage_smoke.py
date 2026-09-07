@@ -51,17 +51,11 @@ def fake_classify(text: str, chat) -> TicketClassification:
     mapping = {
         "Nao consigo acessar.": TicketClassification("PROBLEMA_ACESSO", "", {}, 0.9),
         "CIGAM": TicketClassification("OUTRO", "CIGAM", {}, 0.3),
-        "Nao consigo acessar o CIGAM.": TicketClassification(
-            "PROBLEMA_ACESSO", "CIGAM", {}, 0.9
-        ),
-        "CIGAM e SIAGRI estao sem acesso.": TicketClassification(
-            "PROBLEMA_ACESSO", "", {}, 0.9
-        ),
+        "Nao consigo acessar o CIGAM.": TicketClassification("PROBLEMA_ACESSO", "CIGAM", {}, 0.9),
+        "CIGAM e SIAGRI estao sem acesso.": TicketClassification("PROBLEMA_ACESSO", "", {}, 0.9),
         "SIAGRI": TicketClassification("OUTRO", "SIAGRI", {}, 0.3),
         "Nao e CIGAM, e SIAGRI.": TicketClassification("OUTRO", "", {}, 0.3),
-        "O sistema XYZ esta sem acesso.": TicketClassification(
-            "PROBLEMA_ACESSO", "XYZ", {}, 0.8
-        ),
+        "O sistema XYZ esta sem acesso.": TicketClassification("PROBLEMA_ACESSO", "XYZ", {}, 0.8),
         "XYZ": TicketClassification("OUTRO", "XYZ", {}, 0.3),
         "O CIGAM fecha em uma rotina ficticia ainda em revisao.": TicketClassification(
             "ERRO_SISTEMA", "CIGAM", {}, 0.8
