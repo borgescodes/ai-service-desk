@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from ai_service_desk.engine.evaluation import load_evaluation_cases
 
 ROOT = Path(__file__).resolve().parent.parent.parent
