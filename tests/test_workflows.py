@@ -7,6 +7,7 @@ PHASE3_WORKFLOW = ROOT / ".github" / "workflows" / "phase3-evaluation.yml"
 PHASE4_WORKFLOW = ROOT / ".github" / "workflows" / "phase4-knowledge-smoke.yml"
 PHASE5_WORKFLOW = ROOT / ".github" / "workflows" / "phase5-triage-smoke.yml"
 PHASE6_WORKFLOW = ROOT / ".github" / "workflows" / "phase6-playbook-smoke.yml"
+PHASE7_WORKFLOW = ROOT / ".github" / "workflows" / "phase7-policy-smoke.yml"
 
 
 def test_real_corpus_workflow_is_manual_local_and_non_exporting() -> None:
@@ -162,6 +163,41 @@ def test_phase6_playbook_workflow_is_manual_local_and_non_exporting() -> None:
         assert required in text
 
     for forbidden in ("upload-artifact", "Get-Content", "--show-history", "DEMO_PRINT_QUEUE_CLEAR"):
+        assert forbidden not in text
+
+
+def test_phase7_policy_workflow_is_manual_local_and_non_exporting() -> None:
+    assert PHASE7_WORKFLOW.exists()
+    text = PHASE7_WORKFLOW.read_text(encoding="utf-8")
+    for required in (
+        "workflow_dispatch:",
+        "target_ref:",
+        "Exact candidate commit SHA to validate",
+        "self-hosted",
+        "Windows",
+        "X64",
+        "ai-service-desk",
+        "TARGET_REF: ${{ inputs.target_ref }}",
+        "git rev-parse HEAD",
+        "^[0-9a-f]{40}$",
+        "$actual -ne $expected",
+        "python -m ruff check .",
+        "python -m ruff format --check .",
+        "python -m pytest -q",
+        "python -m ai_service_desk policy-smoke",
+        "tests/fixtures/phase7_policy_cases.jsonl",
+    ):
+        assert required in text
+    for forbidden in (
+        "upload-artifact",
+        "Get-Content",
+        "python -m ai_service_desk doctor",
+        "knowledge-index",
+        "playbook-build",
+        "http://127.0.0.1:11434",
+        "CDM_ACCESS_REQUEST",
+        "PHASE7_CANDIDATE_SHA",
+    ):
         assert forbidden not in text
 
 
