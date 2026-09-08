@@ -53,6 +53,15 @@ AMBIGUOUS_PRIVILEGE_PHRASES = (
 GENERIC_ACCESS_TERMS = frozenset({"acesso", "acessar"})
 PRIVILEGED_ROLES = frozenset({"APROVADOR", "ADMIN", "SUPERADMIN"})
 
+ACTION_DESCRIPTOR_FIELDS = {
+    "knowledge_id",
+    "playbook_id",
+    "playbook_version",
+    "step_id",
+    "type",
+    "capability",
+}
+
 
 class AccessRequestValidationError(ValueError):
     pass
@@ -179,3 +188,75 @@ def normalize_requested_role(problem_text: str) -> tuple[RequestedRole, str]:
         return "SOLICITANTE", ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE
 
     return "UNKNOWN", ROLE_UNRESOLVED
+
+
+def _validate_action_descriptor(descriptor: Mapping[str, object]) -> dict[str, object]:
+    if not isinstance(descriptor, Mapping) or set(descriptor) != ACTION_DESCRIPTOR_FIELDS:
+        raise AccessRequestValidationError("descriptor ACTION_PROPOSAL fora do contrato.")
+    data = dict(descriptor)
+    _required_text(data["knowledge_id"], "knowledge_id", 120)
+    _required_text(data["playbook_id"], "playbook_id", 120)
+    version = data["playbook_version"]
+    if isinstance(version, bool) or not isinstance(version, int) or version <= 0:
+        raise AccessRequestValidationError("playbook_version deve ser inteiro positivo.")
+    _required_text(data["step_id"], "step_id", 120)
+    if data["type"] != "ACTION_PROPOSAL":
+        raise AccessRequestValidationError("descriptor deve ser ACTION_PROPOSAL.")
+    capability = _required_text(data["capability"], "capability", 120)
+    if not CAPABILITY_RE.fullmatch(capability):
+        raise AccessRequestValidationError("capability deve ser simbolica valida.")
+    return data
+
+
+def prepare_access_request(
+    requester: SessionIdentity,
+    triage: TriageState,
+    descriptor: Mapping[str, object],
+) -> AccessRequestPreparation:
+    validate_session_identity(requester)
+    if not isinstance(triage, TriageState):
+        raise AccessRequestValidationError("triage deve ser TriageState.")
+    if triage.status != "ANSWERED":
+        raise AccessRequestValidationError("triage deve estar resolvida como ANSWERED.")
+    purpose = _required_text(triage.problem_text, "problem_text", 3000).strip()
+    data = _validate_action_descriptor(descriptor)
+
+    if (
+        triage.system != CDM_SYSTEM
+        or triage.intent != CDM_ACCESS_INTENT
+        or data["capability"] != CDM_ACCESS_CAPABILITY
+    ):
+        raise AccessRequestValidationError(
+            "Fase 7 prepara somente CDM / PROBLEMA_ACESSO / CDM_ACCESS_REQUEST."
+        )
+
+    requested_role, reason_code = normalize_requested_role(purpose)
+    if reason_code not in PREPARATION_REASON_CODES:
+        raise AccessRequestValidationError("reason_code de normalizacao fora do contrato.")
+    if requested_role == "UNKNOWN":
+        return AccessRequestPreparation(
+            status="NEEDS_CLARIFICATION",
+            requested_role="UNKNOWN",
+            reason_code=reason_code,
+            context=None,
+        )
+
+    context = AccessRequestContext(
+        requester=requester,
+        system=triage.system,
+        intent=triage.intent,
+        requested_role=requested_role,
+        purpose=purpose,
+        knowledge_id=str(data["knowledge_id"]),
+        playbook_id=str(data["playbook_id"]),
+        playbook_version=int(data["playbook_version"]),
+        step_id=str(data["step_id"]),
+        capability=str(data["capability"]),
+    )
+    validate_access_request_context(context)
+    return AccessRequestPreparation(
+        status="READY",
+        requested_role=requested_role,
+        reason_code=reason_code,
+        context=context,
+    )
