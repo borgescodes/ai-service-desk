@@ -29,7 +29,7 @@ jobs:
       - name: Diagnostic Ruff formatting patch
         run: |
           python -m ruff format .
-          python -m ruff check --fix .
+          python -m ruff check --fix . || true
           python -m ruff format .
           git diff -- \
             src/ai_service_desk/engine/playbook.py \
@@ -39,4 +39,5 @@ jobs:
             tests/engine/test_playbook_resolution.py \
             tests/engine/test_playbook_smoke.py \
             tests/test_playbook_cli.py
+          python -m ruff check . || true
           exit 1
