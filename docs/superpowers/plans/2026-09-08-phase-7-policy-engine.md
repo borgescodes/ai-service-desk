@@ -6,17 +6,43 @@
 
 **Architecture:** Phase 7 adds three focused domain modules: `access_request.py`, `policy.py`, and `confidence.py`. `prepare_access_request(...)` is CDM-specific in this phase and consumes trusted `SessionIdentity`, resolved `TriageState`, and the real Phase 6 `ACTION_PROPOSAL` descriptor. `PolicyEngine.evaluate(...)` and `assess_confidence(...)` independently validate `AccessRequestContext`, so Phase 8 can reuse both contracts when revalidating a context reconstructed from persisted data.
 
-**Tech Stack:** Python 3.14, stdlib `dataclasses`, `typing`, `collections.abc`, existing `normalize_text`, existing `CAPABILITY_RE`, existing `TriageState`, existing `action_proposal_descriptor`, `pytest`, Ruff, GitHub Actions, Dell self-hosted Windows runner.
+**Tech Stack:** Python 3.14, stdlib `dataclasses`, `typing`, `collections.abc`, `re`, existing `normalize_text`, existing `CAPABILITY_RE`, existing `TriageState`, existing `action_proposal_descriptor`, `pytest`, Ruff, GitHub Actions, Dell self-hosted Windows runner.
 
 **Spec:** `docs/superpowers/specs/2026-09-08-phase-7-policy-engine-design.md`
 
-**Approved spec head:** `7e7142f757f66585f240e16781accd044f31eb6f`
+**Regression baseline:** `7e7142f757f66585f240e16781accd044f31eb6f`.
+
+**Execution start:** the final `phase-7-policy-engine` head containing this plan revision after explicit user approval. Execution starts from that approved plan head, not from the regression baseline.
 
 **Phase 6 quantitative baseline:** `319` collected tests.
 
+## Execution Start vs Regression Baseline
+
+These two references have different purposes and must never be conflated:
+
+```text
+execution start = final plan head explicitly approved by the user
+regression baseline = 7e7142f757f66585f240e16781accd044f31eb6f
+```
+
+At implementation handoff, before Gate 1, record the current approved branch head and prove the fixed regression baseline is its ancestor:
+
+```bash
+REGRESSION_BASELINE=7e7142f757f66585f240e16781accd044f31eb6f
+EXECUTION_START_HEAD="$(git rev-parse HEAD)"
+test -z "$(git status --porcelain)"
+git merge-base --is-ancestor "$REGRESSION_BASELINE" "$EXECUTION_START_HEAD"
+printf 'execution_start=%s\nregression_baseline=%s\n' "$EXECUTION_START_HEAD" "$REGRESSION_BASELINE"
+```
+
+The printed `EXECUTION_START_HEAD` must equal the concrete plan head explicitly approved in the implementation handoff. If it does not, stop and resolve the branch state. Do not run `git checkout`, `git switch --detach`, `git reset` or another operation that moves implementation back to `7e7142f757f66585f240e16781accd044f31eb6f`.
+
+The regression baseline is used only for historical comparisons, protected-file diffs and baseline test-node collection.
+
 ## Global Constraints
 
-- Work starts from exact head `7e7142f757f66585f240e16781accd044f31eb6f` on branch `phase-7-policy-engine`.
+- Implementation begins from the final approved plan head already present on branch `phase-7-policy-engine`.
+- `7e7142f757f66585f240e16781accd044f31eb6f` is the regression baseline only. It is not an execution checkout target.
 - Every production behavior gate follows observed RED before production implementation, then focused GREEN, then a small commit.
 - Phase 7 does not add a second access intent. Existing `PROBLEMA_ACESSO` remains the intent contract.
 - The Phase 7 CDM operational discriminator is `capability = "CDM_ACCESS_REQUEST"`.
@@ -31,9 +57,12 @@
 - Descriptor `type` must equal `ACTION_PROPOSAL` during preparation. It is not duplicated in `AccessRequestContext`.
 - `PolicyEngine.evaluate(...)` calls shared structural validation itself before every rule lookup.
 - `assess_confidence(...)` calls shared structural validation itself before every confidence assessment.
+- Every `PolicyRule` is runtime-validated before policy indexing. Type hints are not validation.
+- Any invalid policy rule fails engine construction with `PolicyConfigurationError / POLICY_RULE_INVALID`.
+- Duplicate valid policy keys fail engine construction with `PolicyConfigurationError / POLICY_RULE_CONFLICT`. No rule wins silently.
+- Validation of the complete rule sequence happens before any duplicate-key indexing, so invalid configuration takes precedence over conflict detection.
 - A structurally valid context without a policy returns `DENY / POLICY_NOT_FOUND`.
 - A structurally invalid context raises an explicit domain validation error and never becomes `POLICY_NOT_FOUND`.
-- Duplicate policy keys fail during engine construction with `PolicyConfigurationError / POLICY_RULE_CONFLICT`. No rule wins silently.
 - Policy and confidence remain structurally separate. Policy accepts no confidence input. Confidence accepts no policy input.
 - Confidence reason codes are deterministic. CDM access returns exactly two codes in area-then-purpose order. A valid non-CDM context returns exactly `LOW / ("CONTEXT_NOT_CDM_ACCESS_REQUEST",)`.
 - `SOLICITANTE` always yields `REQUIRE_APPROVAL` for `CDM_ACCESS_REQUEST`, regardless of HIGH or LOW confidence.
@@ -51,7 +80,7 @@
   - `playbooks/phase6_synthetic_playbooks.jsonl`
 - `classification.py` may change only by adding `"CDM": ("cdm",)` to `SYSTEM_ALIASES`. Prompt, intents, recovery and heuristics remain byte-for-byte unchanged.
 - No existing test may be deleted, disabled, converted to skip or weakened to satisfy the suite.
-- This plan defines a minimum of 91 new collected pytest cases. With the Phase 6 baseline of 319, the initial hard floor is 410 collected tests. If implementation adds additional tests, raise the floor by the same number.
+- This plan defines a minimum of 103 new collected pytest cases. With the Phase 6 baseline of 319, the initial hard floor is 422 collected tests. If implementation adds additional tests, raise the floor by the same number.
 - Merge is outside this plan. Final evidence is prepared for review only.
 
 ---
@@ -61,17 +90,17 @@
 ### Create
 
 - `src/ai_service_desk/engine/access_request.py`: trusted session identity, access contracts, shared structural validation, CDM role normalization, CDM-specific request preparation.
-- `src/ai_service_desk/engine/policy.py`: immutable in-code policy rules, duplicate-key detection, fail-closed `PolicyEngine`, `PolicyDecision`.
+- `src/ai_service_desk/engine/policy.py`: immutable in-code policy rules, runtime rule validation, duplicate-key detection, fail-closed `PolicyEngine`, `PolicyDecision`.
 - `src/ai_service_desk/engine/confidence.py`: deterministic confidence assessment with exact ordered machine reason codes.
 - `src/ai_service_desk/engine/policy_smoke.py`: strict 15-case synthetic Phase 7 smoke and privacy-safe report.
 - `tests/engine/test_access_request.py`: identity, context validation, role normalization and request preparation.
-- `tests/engine/test_policy.py`: CDM matrix, unknown policy, independent validation and duplicate rule conflict.
+- `tests/engine/test_policy.py`: CDM matrix, invalid rule configuration, unknown policy, independent validation and duplicate rule conflict.
 - `tests/engine/test_confidence.py`: confidence composition, ordering and independent validation.
 - `tests/engine/test_policy_security.py`: identity spoofing, policy-confidence invariants, fail-closed and zero-execution checks.
 - `tests/engine/test_policy_smoke.py`: strict smoke fixture and safe report tests.
 - `tests/fixtures/phase7_policy_cases.jsonl`: exactly 15 synthetic policy cases.
 - `tests/test_policy_cli.py`: parser and safe CLI behavior.
-- `.github/workflows/phase7-policy-smoke.yml`: manual exact-ref Dell-compatible smoke without Ollama or external calls.
+- `.github/workflows/phase7-policy-smoke.yml`: manual exact-SHA Dell-compatible smoke without Ollama or external calls.
 - `docs/policy/phase-7.md`: operator-facing Phase 7 behavior, commands, boundaries and Dell homologation steps.
 - `tests/test_phase7_docs.py`: operational documentation and README link contract.
 
@@ -175,8 +204,16 @@ PolicyRule(
     reason: str,
 )
 
+PolicyConfigurationError(reason_code: str, message: str)
 PolicyEngine(rules: Sequence[PolicyRule] | None = None)
 PolicyEngine.evaluate(context: AccessRequestContext) -> PolicyDecision
+```
+
+Runtime configuration error codes are exactly:
+
+```text
+POLICY_RULE_INVALID
+POLICY_RULE_CONFLICT
 ```
 
 The policy lookup key is exactly:
@@ -244,18 +281,18 @@ Planned new collected cases:
 | Gate 2 contracts and structural validation | 21 |
 | Gate 3 role normalizer | 12 |
 | Gate 4 CDM preparation and provenance | 14 |
-| Gate 5 policy engine | 9 |
+| Gate 5 policy engine and configuration | 21 |
 | Gate 6 confidence | 7 |
 | Gate 7 security and isolation | 8 |
 | Gate 8 smoke | 5 |
 | Gate 9 CLI and workflow | 4 |
 | Gate 10 docs | 2 |
-| **Minimum new Phase 7 cases** | **91** |
+| **Minimum new Phase 7 cases** | **103** |
 
 Initial final floor:
 
 ```text
-319 + 91 = 410 collected tests
+319 + 103 = 422 collected tests
 ```
 
 If any extra case is added beyond this plan, the final required count increases one-for-one. Gate 11 also verifies that every pre-Phase-7 collected node ID remains present.
@@ -1082,9 +1119,9 @@ git commit -m "feat: prepare CDM access request context"
 
 ---
 
-# Gate 5 - PolicyEngine, Fail-Closed Lookup and Rule Conflict Detection
+# Gate 5 - PolicyEngine, Runtime Rule Validation, Fail-Closed Lookup and Conflict Detection
 
-### Task 5: Implement pure deterministic policy evaluation
+### Task 5: Implement pure deterministic policy evaluation with validated in-code configuration
 
 **Files:** create `src/ai_service_desk/engine/policy.py`, create `tests/engine/test_policy.py`.
 
@@ -1092,6 +1129,7 @@ git commit -m "feat: prepare CDM access request context"
 - Consumes: `AccessRequestContext`.
 - Produces: `PolicyDecision`.
 - Independently invokes `validate_access_request_context(context)` on every `evaluate(...)` call.
+- Validates every injected or default `PolicyRule` in runtime before any index entry is created.
 
 - [ ] **Step 1: Create self-contained test helpers and RED policy matrix**
 
@@ -1129,6 +1167,18 @@ def valid_context() -> AccessRequestContext:
         playbook_version=1,
         step_id="STEP-CDM-POLICY",
         capability="CDM_ACCESS_REQUEST",
+    )
+
+
+def valid_policy_rule() -> PolicyRule:
+    return PolicyRule(
+        system="FUTURE_SYSTEM",
+        capability="FUTURE_CAPABILITY",
+        requested_role="SOLICITANTE",
+        decision="DENY",
+        policy_id="FUTURE_ACCESS_POLICY",
+        reason_code="FUTURE_ACCESS_DENIED",
+        reason="Synthetic valid policy rule.",
     )
 
 
@@ -1190,7 +1240,34 @@ def test_policy_evaluate_validates_context_independently() -> None:
         PolicyEngine().evaluate(replace(valid_context(), purpose=""))
 ```
 
-- [ ] **Step 2: Add RED conflict and idempotency tests**
+- [ ] **Step 2: Add RED runtime configuration validation tests before conflict tests**
+
+```python
+@pytest.mark.parametrize(
+    "rule",
+    [
+        object(),
+        replace(valid_policy_rule(), system=""),
+        replace(valid_policy_rule(), system=123),
+        replace(valid_policy_rule(), capability="cdm_access_request"),
+        replace(valid_policy_rule(), requested_role="UNKNOWN"),
+        replace(valid_policy_rule(), decision="ALLOW"),
+        replace(valid_policy_rule(), policy_id=""),
+        replace(valid_policy_rule(), policy_id="bad id"),
+        replace(valid_policy_rule(), reason_code=""),
+        replace(valid_policy_rule(), reason_code="bad reason"),
+        replace(valid_policy_rule(), reason=""),
+    ],
+)
+def test_policy_invalid_rule_configuration_fails_closed(rule: object) -> None:
+    with pytest.raises(PolicyConfigurationError) as exc_info:
+        PolicyEngine((rule,))
+    assert exc_info.value.reason_code == "POLICY_RULE_INVALID"
+```
+
+The invalid constructor arguments are intentional runtime violations. Add focused `# type: ignore[arg-type]` comments only if future static tooling requires them. Do not remove any case.
+
+- [ ] **Step 3: Add RED conflict, validation-order and idempotency tests**
 
 ```python
 def duplicate_rule(decision: str = "DENY") -> PolicyRule:
@@ -1218,15 +1295,24 @@ def test_policy_identical_duplicate_key_is_still_conflict() -> None:
     assert exc_info.value.reason_code == "POLICY_RULE_CONFLICT"
 
 
+def test_policy_rule_invalid_precedes_duplicate_key_detection() -> None:
+    first = duplicate_rule("DENY")
+    second = duplicate_rule("DENY")
+    invalid = replace(duplicate_rule("DENY"), decision="ALLOW")
+    with pytest.raises(PolicyConfigurationError) as exc_info:
+        PolicyEngine((first, second, invalid))
+    assert exc_info.value.reason_code == "POLICY_RULE_INVALID"
+
+
 def test_policy_same_context_is_idempotent() -> None:
     engine = PolicyEngine()
     context = valid_context()
     assert engine.evaluate(context) == engine.evaluate(context)
 ```
 
-Gate 5 contributes 9 collected cases.
+Gate 5 contributes 21 collected cases: the original 9 behavior/configuration cases plus 11 parametrized invalid-rule nodes and one validation-order node.
 
-- [ ] **Step 3: Run RED**
+- [ ] **Step 4: Run RED**
 
 ```bash
 python -m pytest tests/engine/test_policy.py -v
@@ -1234,11 +1320,12 @@ python -m pytest tests/engine/test_policy.py -v
 
 Expected: module import failure because `policy.py` does not exist.
 
-- [ ] **Step 4: Implement the in-code rule sequence and duplicate-safe index**
+- [ ] **Step 5: Implement runtime rule validation, then duplicate-safe indexing**
 
 Create `src/ai_service_desk/engine/policy.py`:
 
 ```python
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -1246,12 +1333,16 @@ from typing import Literal
 from ai_service_desk.engine.access_request import (
     CDM_ACCESS_CAPABILITY,
     CDM_SYSTEM,
+    CONCRETE_ROLES,
     AccessRequestContext,
     ConcreteRequestedRole,
     validate_access_request_context,
 )
+from ai_service_desk.engine.playbook import CAPABILITY_RE
 
 PolicyDecisionValue = Literal["REQUIRE_APPROVAL", "DENY"]
+POLICY_DECISIONS = frozenset({"REQUIRE_APPROVAL", "DENY"})
+MACHINE_CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,119}$")
 
 
 @dataclass(frozen=True)
@@ -1277,6 +1368,39 @@ class PolicyConfigurationError(ValueError):
     def __init__(self, reason_code: str, message: str):
         super().__init__(message)
         self.reason_code = reason_code
+
+
+def _invalid_rule(message: str) -> None:
+    raise PolicyConfigurationError("POLICY_RULE_INVALID", message)
+
+
+def _required_rule_text(value: object, field: str, limit: int) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > limit:
+        _invalid_rule(f"{field} invalido na PolicyRule.")
+    return value
+
+
+def _validate_policy_rule(rule: object) -> PolicyRule:
+    if not isinstance(rule, PolicyRule):
+        _invalid_rule("Entrada de policy deve ser PolicyRule.")
+    system = _required_rule_text(rule.system, "system", 120)
+    capability = _required_rule_text(rule.capability, "capability", 120)
+    if not CAPABILITY_RE.fullmatch(capability):
+        _invalid_rule("capability invalida na PolicyRule.")
+    if rule.requested_role not in CONCRETE_ROLES:
+        _invalid_rule("requested_role invalida na PolicyRule.")
+    if rule.decision not in POLICY_DECISIONS:
+        _invalid_rule("decision invalida na PolicyRule.")
+    policy_id = _required_rule_text(rule.policy_id, "policy_id", 120)
+    if not MACHINE_CODE_RE.fullmatch(policy_id):
+        _invalid_rule("policy_id invalido na PolicyRule.")
+    reason_code = _required_rule_text(rule.reason_code, "reason_code", 120)
+    if not MACHINE_CODE_RE.fullmatch(reason_code):
+        _invalid_rule("reason_code invalido na PolicyRule.")
+    _required_rule_text(rule.reason, "reason", 500)
+    if not system:
+        _invalid_rule("system invalido na PolicyRule.")
+    return rule
 
 
 CDM_POLICY_RULES = (
@@ -1322,10 +1446,10 @@ CDM_POLICY_RULES = (
 class PolicyEngine:
     def __init__(self, rules: Sequence[PolicyRule] | None = None):
         source = tuple(CDM_POLICY_RULES if rules is None else rules)
+        validated = tuple(_validate_policy_rule(rule) for rule in source)
+
         index: dict[tuple[str, str, str], PolicyRule] = {}
-        for rule in source:
-            if not isinstance(rule, PolicyRule):
-                raise ValueError("policy rule invalida.")
+        for rule in validated:
             key = (rule.system, rule.capability, rule.requested_role)
             if key in index:
                 raise PolicyConfigurationError(
@@ -1353,16 +1477,16 @@ class PolicyEngine:
         )
 ```
 
-Do not build the index through a dict comprehension because duplicate keys would be silently overwritten before detection.
+The two-pass construction is mandatory. Do not index while validating. A dict comprehension, `dict.setdefault`, or any other write-before-complete-validation pattern is forbidden because it can obscure configuration errors or conflicts.
 
-- [ ] **Step 5: Run GREEN and commit**
+- [ ] **Step 6: Run GREEN and commit**
 
 ```bash
 python -m pytest tests/engine/test_policy.py tests/engine/test_access_request.py -v
 python -m ruff check src/ai_service_desk/engine/policy.py tests/engine/test_policy.py
 python -m ruff format --check src/ai_service_desk/engine/policy.py tests/engine/test_policy.py
 git add src/ai_service_desk/engine/policy.py tests/engine/test_policy.py
-git commit -m "feat: add fail-closed CDM policy engine"
+git commit -m "feat: add validated fail-closed CDM policy engine"
 ```
 
 ---
@@ -2189,13 +2313,14 @@ git commit -m "test: add synthetic phase 7 policy smoke"
 
 # Gate 9 - CLI and Manual Workflow
 
-### Task 9: Expose safe `policy-smoke` and Dell-compatible workflow
+### Task 9: Expose safe `policy-smoke` and exact-head Dell-compatible workflow
 
 **Files:** modify `src/ai_service_desk/cli.py`, create `tests/test_policy_cli.py`, create `.github/workflows/phase7-policy-smoke.yml`, append `tests/test_workflows.py`.
 
 **Interfaces:**
 - Produces CLI: `policy-smoke --cases PATH --report PATH`.
 - No `--url`, knowledge index, playbook catalog or work directory is accepted.
+- Workflow `target_ref` is required to be the exact 40-character candidate commit SHA, not a branch name.
 
 - [ ] **Step 1: Write CLI RED tests**
 
@@ -2249,7 +2374,7 @@ def test_policy_smoke_cli_returns_nonzero_when_report_is_not_ok(monkeypatch) -> 
     assert cli.main(["policy-smoke", "--cases", "c", "--report", "r"]) == 1
 ```
 
-- [ ] **Step 2: Write workflow RED test**
+- [ ] **Step 2: Write workflow RED test including exact-head proof**
 
 Append to `tests/test_workflows.py`:
 
@@ -2263,13 +2388,20 @@ def test_phase7_policy_workflow_is_manual_local_and_non_exporting() -> None:
     for required in (
         "workflow_dispatch:",
         "target_ref:",
+        "Exact candidate commit SHA to validate",
         "self-hosted",
         "Windows",
         "X64",
         "ai-service-desk",
+        "TARGET_REF: ${{ inputs.target_ref }}",
+        "git rev-parse HEAD",
+        "^[0-9a-f]{40}$",
+        "$actual -ne $expected",
+        "python -m ruff check .",
+        "python -m ruff format --check .",
+        "python -m pytest -q",
         "python -m ai_service_desk policy-smoke",
         "tests/fixtures/phase7_policy_cases.jsonl",
-        "python -m pytest",
     ):
         assert required in text
     for forbidden in (
@@ -2280,6 +2412,7 @@ def test_phase7_policy_workflow_is_manual_local_and_non_exporting() -> None:
         "playbook-build",
         "http://127.0.0.1:11434",
         "CDM_ACCESS_REQUEST",
+        "PHASE7_CANDIDATE_SHA",
     ):
         assert forbidden not in text
 ```
@@ -2321,7 +2454,7 @@ Add handler before the existing line `client = OllamaClient(args.url)`:
             return 0 if report["ok"] else 1
 ```
 
-- [ ] **Step 5: Create the manual Phase 7 workflow**
+- [ ] **Step 5: Create the manual Phase 7 workflow with exact-head verification inside the workflow**
 
 Create `.github/workflows/phase7-policy-smoke.yml`:
 
@@ -2332,7 +2465,7 @@ on:
   workflow_dispatch:
     inputs:
       target_ref:
-        description: Branch or SHA to validate
+        description: Exact candidate commit SHA to validate
         required: true
         type: string
 
@@ -2351,6 +2484,22 @@ jobs:
         with:
           ref: ${{ inputs.target_ref }}
 
+      - name: Verify exact target SHA
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expected = $env:TARGET_REF.Trim().ToLowerInvariant()
+          if ($expected -notmatch '^[0-9a-f]{40}$') {
+            throw "target_ref must be an exact 40-character commit SHA"
+          }
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Checked out SHA $actual differs from target_ref $expected"
+          }
+          Write-Host "Exact head verified: $actual"
+
       - name: Verify Python 3.14
         shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
@@ -2368,18 +2517,23 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Run focused Phase 7 tests
+      - name: Run Ruff lint
         shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
           $ErrorActionPreference = "Stop"
-          python -m pytest `
-            tests/engine/test_access_request.py `
-            tests/engine/test_policy.py `
-            tests/engine/test_confidence.py `
-            tests/engine/test_policy_security.py `
-            tests/engine/test_policy_smoke.py `
-            tests/test_policy_cli.py `
-            -q
+          python -m ruff check .
+
+      - name: Run Ruff format check
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ruff format --check .
+
+      - name: Run complete test suite
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pytest -q
 
       - name: Run Phase 7 policy smoke
         shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
@@ -2391,6 +2545,8 @@ jobs:
             --cases tests/fixtures/phase7_policy_cases.jsonl `
             --report "$report"
 ```
+
+The exact-head comparison is self-contained in the workflow. It maps the `workflow_dispatch` input explicitly into `TARGET_REF`, requires that input to be a 40-character commit SHA, and compares `git rev-parse HEAD` directly with that received value before Python installation or any test execution. It does not depend on `PHASE7_CANDIDATE_SHA` or any externally defined environment variable.
 
 The existing `ollama` runner label only selects the already homologated Dell runner. This workflow contains no Ollama command, URL or model call.
 
@@ -2442,6 +2598,7 @@ def test_phase7_operational_doc_locks_policy_boundary() -> None:
         "ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE",
         "ROLE_UNRESOLVED",
         "POLICY_NOT_FOUND",
+        "POLICY_RULE_INVALID",
         "POLICY_RULE_CONFLICT",
         "CONTEXT_NOT_CDM_ACCESS_REQUEST",
         "AREA_MATCH_REVENDA",
@@ -2515,9 +2672,9 @@ READY -> AccessRequestContext -> PolicyEngine + ConfidenceAssessment
 NEEDS_CLARIFICATION -> no PolicyDecision and no ConfidenceAssessment
 ```
 
-It must list all seven preparation reason codes, the four CDM policy rows, `DENY / POLICY_NOT_FOUND` for a valid unknown policy, `PolicyConfigurationError / POLICY_RULE_CONFLICT` for duplicate rule keys, exact confidence reason-code order, provenance fields, zero external calls and the Phase 8 boundary.
+It must list all seven preparation reason codes, the four CDM policy rows, `DENY / POLICY_NOT_FOUND` for a valid unknown policy, runtime `PolicyRule` validation with `PolicyConfigurationError / POLICY_RULE_INVALID`, `PolicyConfigurationError / POLICY_RULE_CONFLICT` for duplicate valid rule keys, exact confidence reason-code order, provenance fields, zero external calls and the Phase 8 boundary.
 
-The Dell section uses the same local `policy-smoke` command. It does not run `doctor`, knowledge indexing or an Ollama command.
+The Dell section must instruct the operator to dispatch `.github/workflows/phase7-policy-smoke.yml` with `target_ref` equal to the exact 40-character candidate SHA and explain that the workflow itself compares that input with `git rev-parse HEAD` immediately after checkout. It does not use an external `PHASE7_CANDIDATE_SHA` variable, run `doctor`, build a knowledge index or start Ollama.
 
 - [ ] **Step 4: Update README minimally**
 
@@ -2550,13 +2707,18 @@ git commit -m "docs: add phase 7 policy operations"
 
 **Do not merge in this task. Do not change production behavior to make verification pass. A failure returns to the owning RED/GREEN gate.**
 
-- [ ] **Step 1: Verify final scope against the approved spec head**
+- [ ] **Step 1: Verify execution lineage and final scope against the regression baseline**
 
 ```bash
-git diff --name-status 7e7142f757f66585f240e16781accd044f31eb6f...HEAD
+REGRESSION_BASELINE=7e7142f757f66585f240e16781accd044f31eb6f
+EXECUTION_START_HEAD="$(git log --format=%H --reverse "$REGRESSION_BASELINE"..HEAD | head -n 1)"
+git merge-base --is-ancestor "$REGRESSION_BASELINE" HEAD
+git diff --name-status "$REGRESSION_BASELINE"...HEAD
 ```
 
-Allowed implementation files are exactly the Phase 7 file map in this plan plus this plan file. Any other changed production or protected file stops the gate for review.
+The scope comparison intentionally starts at the regression baseline. It does not mean implementation was started by checking out that commit. Review evidence must separately retain the `EXECUTION_START_HEAD` recorded at handoff from the final approved plan head.
+
+Allowed implementation files are exactly the Phase 7 file map in this plan plus the plan/spec documentary refinements already present at execution start. Any other changed production or protected file stops the gate for review.
 
 - [ ] **Step 2: Prove existing tests were not removed or skipped**
 
@@ -2611,11 +2773,11 @@ Requirements:
 
 ```text
 baseline = 319
-planned Phase 7 minimum = 91 new collected cases
-initial hard floor = 410
+planned Phase 7 minimum = 103 new collected cases
+initial hard floor = 422
 ```
 
-If more than 91 new cases were added, increase the floor one-for-one. A smaller green suite is not acceptable.
+If more than 103 new cases were added, increase the floor one-for-one. A smaller green suite is not acceptable.
 
 - [ ] **Step 5: Compare baseline and final collected node IDs, not only counts**
 
@@ -2652,15 +2814,15 @@ if len(baseline) != 319:
     raise SystemExit(f"expected baseline 319, got {len(baseline)}")
 if missing:
     raise SystemExit("missing baseline nodeids:\n" + "\n".join(missing))
-if len(new) < 91:
-    raise SystemExit(f"expected at least 91 new Phase 7 nodeids, got {len(new)}")
-if len(final) < 410:
-    raise SystemExit(f"expected at least 410 final nodeids, got {len(final)}")
+if len(new) < 103:
+    raise SystemExit(f"expected at least 103 new Phase 7 nodeids, got {len(new)}")
+if len(final) < 422:
+    raise SystemExit(f"expected at least 422 final nodeids, got {len(final)}")
 PY
 git worktree remove "$BASELINE_DIR"
 ```
 
-This check proves the old 319-node set is a subset of the final suite and records the actual number of newly collected tests.
+This detached worktree exists only to inspect the regression baseline. It must never replace, reset or move the implementation worktree. This check proves the old 319-node set is a subset of the final suite and records the actual number of newly collected tests.
 
 - [ ] **Step 6: Run zero-execution scans on Phase 7 production modules**
 
@@ -2762,38 +2924,36 @@ Casos sinteticos: 15
 
 Do not print the report body.
 
-- [ ] **Step 11: Dell homologation on the exact candidate SHA**
+- [ ] **Step 11: Dell homologation through the exact-head workflow**
 
-Before dispatching Dell homologation, set `PHASE7_CANDIDATE_SHA` to the immutable candidate commit SHA obtained from `git rev-parse HEAD`, and dispatch the workflow with the same exact SHA in `target_ref`. On the Dell checkout run:
+Capture the immutable final candidate SHA before dispatch:
 
 ```powershell
-if (-not $env:PHASE7_CANDIDATE_SHA) {
-    throw "PHASE7_CANDIDATE_SHA is required"
+$candidate = (git rev-parse HEAD).Trim().ToLowerInvariant()
+if ($candidate -notmatch '^[0-9a-f]{40}$') {
+    throw "Candidate must be an exact 40-character commit SHA"
 }
-$expected = $env:PHASE7_CANDIDATE_SHA.Trim()
-$actual = (git rev-parse HEAD).Trim()
-if ($actual -ne $expected) {
-    throw "Dell checkout SHA $actual differs from candidate $expected"
-}
-
-python --version
-python -m pip install -e ".[dev]"
-python -m ruff check .
-python -m ruff format --check .
-python -m pytest -q
-
-$report = Join-Path $env:TEMP "phase7-policy-smoke-dell.json"
-Remove-Item -Force $report -ErrorAction SilentlyContinue
-python -m ai_service_desk policy-smoke `
-  --cases tests/fixtures/phase7_policy_cases.jsonl `
-  --report "$report"
-
-$LASTEXITCODE
+Write-Host "Dispatch phase7-policy-smoke.yml with target_ref=$candidate"
 ```
 
-Required evidence:
+Dispatch `.github/workflows/phase7-policy-smoke.yml` using exactly the printed `$candidate` as the `workflow_dispatch` input `target_ref`.
+
+The workflow itself, immediately after `actions/checkout`, must:
 
 ```text
+receive target_ref
+require a 40-character commit SHA
+read git rev-parse HEAD
+compare actual HEAD directly with target_ref
+fail before Python setup if they differ
+```
+
+No `PHASE7_CANDIDATE_SHA` environment variable is set or expected outside the workflow. The only SHA source for the workflow comparison is the explicitly propagated `workflow_dispatch` input.
+
+Required Dell workflow evidence on that same run:
+
+```text
+Exact head verified: <candidate SHA>
 Python 3.14.x
 Ruff check exit code 0
 Ruff format check exit code 0
@@ -2805,31 +2965,38 @@ Casos sinteticos: 15
 
 The Dell run must not start Ollama, run `doctor`, build a knowledge index or call any URL.
 
-- [ ] **Step 12: Final self-review against the approved spec**
+- [ ] **Step 12: Final self-review against the approved spec and plan refinements**
 
 Review each item and record pass/fail in the review evidence:
 
 ```text
-1. prepare_access_request is CDM-specific and rejects future system/capability before role normalization.
-2. SessionIdentity is the only identity source and chat spoofing tests pass.
-3. RoleNormalizer uses closed lexical precedence and all seven reason codes exactly.
-4. Purpose is problem_text.strip() with no LLM rewrite.
-5. Full Phase 6 provenance survives in AccessRequestContext.
-6. ACTION_PROPOSAL type is validated and not duplicated in context.
-7. PolicyEngine validates context independently on every evaluate call.
-8. assess_confidence validates context independently on every call.
-9. Policy duplicate key raises POLICY_RULE_CONFLICT before any decision.
-10. Unknown valid policy context returns DENY / POLICY_NOT_FOUND.
-11. Invalid context raises domain validation error rather than POLICY_NOT_FOUND.
-12. Confidence CDM codes are always ordered area then purpose.
-13. Valid non-CDM confidence is exactly LOW / CONTEXT_NOT_CDM_ACCESS_REQUEST.
-14. HIGH never grants approval and LOW never denies SOLICITANTE.
-15. Privileged roles remain DENY under perfect confidence.
-16. No LLM, HTTP, executor, CDM adapter, persistence, approval state or request identifier exists.
-17. Homologated Phase 4, 5 and 6 protected files and fixtures are unchanged.
-18. Baseline 319 node IDs are all still present.
-19. Final collected count is at least 319 plus every newly added Phase 7 test.
-20. Synthetic smoke is 15/15 and report privacy checks pass.
+1. Implementation started from the final plan head approved by the user, not by checkout/reset to the regression baseline.
+2. Regression baseline remains exactly 7e7142f757f66585f240e16781accd044f31eb6f for comparisons and node-ID preservation.
+3. prepare_access_request is CDM-specific and rejects future system/capability before role normalization.
+4. SessionIdentity is the only identity source and chat spoofing tests pass.
+5. RoleNormalizer uses closed lexical precedence and all seven reason codes exactly.
+6. Purpose is problem_text.strip() with no LLM rewrite.
+7. Full Phase 6 provenance survives in AccessRequestContext.
+8. ACTION_PROPOSAL type is validated and not duplicated in context.
+9. PolicyEngine validates context independently on every evaluate call.
+10. assess_confidence validates context independently on every call.
+11. Every PolicyRule is runtime-validated before any index entry exists.
+12. Invalid PolicyRule raises POLICY_RULE_INVALID and prevents engine construction.
+13. A sequence containing an invalid rule and duplicate valid key fails as POLICY_RULE_INVALID before conflict indexing.
+14. Duplicate valid policy key raises POLICY_RULE_CONFLICT before any decision.
+15. Unknown valid policy context returns DENY / POLICY_NOT_FOUND.
+16. Invalid context raises domain validation error rather than POLICY_NOT_FOUND.
+17. Confidence CDM codes are always ordered area then purpose.
+18. Valid non-CDM confidence is exactly LOW / CONTEXT_NOT_CDM_ACCESS_REQUEST.
+19. HIGH never grants approval and LOW never denies SOLICITANTE.
+20. Privileged roles remain DENY under perfect confidence.
+21. No LLM, HTTP, executor, CDM adapter, persistence, approval state or request identifier exists.
+22. Homologated Phase 4, 5 and 6 protected files and fixtures are unchanged.
+23. Baseline 319 node IDs are all still present.
+24. Final collected count is at least 319 plus every newly added Phase 7 test, with planned minimum 422.
+25. Synthetic smoke is 15/15 and report privacy checks pass.
+26. Dell workflow verifies git rev-parse HEAD against the received target_ref inside the workflow before test execution.
+27. Dell workflow does not depend on PHASE7_CANDIDATE_SHA or another unpropagated external variable.
 ```
 
 - [ ] **Step 13: Prepare review evidence without merging**
@@ -2841,7 +3008,7 @@ git log --oneline 7e7142f757f66585f240e16781accd044f31eb6f..HEAD
 git diff --stat 7e7142f757f66585f240e16781accd044f31eb6f...HEAD
 ```
 
-Report exact final SHA, commit list, collected test count, new node ID count, Ruff results, smoke 15/15, privacy scan, protected-file equality and Dell exact-head result. Do not merge until explicit user approval in a later step.
+Report the execution-start head recorded at handoff, regression baseline, exact final SHA, commit list, collected test count, new node ID count, Ruff results, smoke 15/15, privacy scan, protected-file equality and Dell exact-head result. Do not merge until explicit user approval in a later step.
 
 ---
 
@@ -2852,11 +3019,11 @@ Gate 1: CDM alias observed RED -> strictly additive GREEN; existing aliases pres
 Gate 2: SessionIdentity and structural context validation RED -> GREEN
 Gate 3: closed RoleNormalizer precedence and seven reason codes RED -> GREEN
 Gate 4: CDM-specific preparation, full Phase 6 provenance and real descriptor RED -> GREEN
-Gate 5: CDM policy matrix, POLICY_NOT_FOUND and POLICY_RULE_CONFLICT RED -> GREEN
+Gate 5: runtime PolicyRule validation, POLICY_RULE_INVALID, CDM matrix, POLICY_NOT_FOUND and POLICY_RULE_CONFLICT RED -> GREEN
 Gate 6: exact confidence composition/order and independent validation RED -> GREEN
 Gate 7: spoofing, fail-closed invariants and zero-external-execution RED -> GREEN
 Gate 8: exact 15-case synthetic smoke RED -> GREEN
-Gate 9: policy-smoke CLI and manual Dell workflow RED -> GREEN
+Gate 9: policy-smoke CLI and workflow-owned exact-head Dell verification RED -> GREEN
 Gate 10: operational docs, focused regressions and protected-file checks RED -> GREEN
 Gate 11: full Ruff, complete suite, baseline-node subset, privacy, zero-execution scan and exact-head Dell homologation
 ```
@@ -2867,36 +3034,43 @@ Gate 11: full Ruff, complete suite, baseline-node subset, privacy, zero-executio
 
 Phase 7 implementation is ready for review only when all of the following are evidenced on the same final SHA:
 
-- `CDM` alias support is the only behavior change in `classification.py`.
-- `triage.py` is unchanged.
-- Phase 4 knowledge code and fixture are unchanged.
-- Phase 6 playbook code and fixture are unchanged.
-- `SessionIdentity` is immutable and validated.
-- `AccessRequestContext` is immutable, structurally validated and preserves all required provenance.
-- role normalization depends only on request text and uses the exact closed precedence.
-- all seven preparation reason codes are present and no eighth preparation reason code exists.
-- unsupported system, intent or capability is rejected before the CDM role normalizer runs.
-- `prepare_access_request(...)` creates contexts only for CDM `PROBLEMA_ACESSO` with `CDM_ACCESS_REQUEST`.
-- the real Phase 6 `action_proposal_descriptor(...)` is used in integration tests and smoke construction.
-- `PolicyEngine` has only in-code rules, no policy catalog.
-- `PolicyEngine.evaluate(...)` validates context independently.
-- duplicate policy keys fail with `PolicyConfigurationError / POLICY_RULE_CONFLICT`.
-- unknown valid policy keys return deterministic `DENY / POLICY_NOT_FOUND`.
-- structural corruption raises an explicit validation error.
-- `assess_confidence(...)` validates context independently.
-- CDM confidence reason codes always contain exactly two items, area first and purpose second.
-- valid non-CDM confidence returns the single context reason.
-- policy never consumes confidence and confidence never consumes policy.
-- `SOLICITANTE + HIGH` and `SOLICITANTE + LOW` both produce `REQUIRE_APPROVAL`.
-- privileged roles produce `DENY`, including `SUPERADMIN` with Revenda area and matching material purpose.
-- chat text cannot overwrite trusted identity.
-- Phase 7 production modules have zero HTTP, Ollama, embedding, subprocess, executor or CDM calls.
-- no request persistence, human approval state or request identifier is implemented.
-- official synthetic smoke is exactly 15/15.
-- smoke report contains no identity, raw problem text, purpose, capability, corporate data or generated external artifacts.
-- all 319 baseline test node IDs remain present.
-- final collected suite is at least the baseline plus every newly added Phase 7 test, with initial planned floor of 410 before optional extra tests.
-- complete pytest passes.
-- Ruff lint and format checks pass.
-- Dell homologation passes on the exact final candidate SHA.
+- implementation began from the final plan head explicitly approved by the user;
+- the implementation worktree was never reset or checked out to the regression baseline to begin work;
+- `7e7142f757f66585f240e16781accd044f31eb6f` remains the fixed regression baseline for historical comparison only;
+- `CDM` alias support is the only behavior change in `classification.py`;
+- `triage.py` is unchanged;
+- Phase 4 knowledge code and fixture are unchanged;
+- Phase 6 playbook code and fixture are unchanged;
+- `SessionIdentity` is immutable and validated;
+- `AccessRequestContext` is immutable, structurally validated and preserves all required provenance;
+- role normalization depends only on request text and uses the exact closed precedence;
+- all seven preparation reason codes are present and no eighth preparation reason code exists;
+- unsupported system, intent or capability is rejected before the CDM role normalizer runs;
+- `prepare_access_request(...)` creates contexts only for CDM `PROBLEMA_ACESSO` with `CDM_ACCESS_REQUEST`;
+- the real Phase 6 `action_proposal_descriptor(...)` is used in integration tests and smoke construction;
+- `PolicyEngine` has only in-code rules, no policy catalog;
+- every `PolicyRule` is runtime-validated before indexing;
+- invalid rule configuration fails with `PolicyConfigurationError / POLICY_RULE_INVALID`;
+- duplicate valid policy keys fail with `PolicyConfigurationError / POLICY_RULE_CONFLICT`;
+- invalid configuration is detected before duplicate-key indexing;
+- `PolicyEngine.evaluate(...)` validates context independently;
+- unknown valid policy keys return deterministic `DENY / POLICY_NOT_FOUND`;
+- structural corruption raises an explicit validation error;
+- `assess_confidence(...)` validates context independently;
+- CDM confidence reason codes always contain exactly two items, area first and purpose second;
+- valid non-CDM confidence returns the single context reason;
+- policy never consumes confidence and confidence never consumes policy;
+- `SOLICITANTE + HIGH` and `SOLICITANTE + LOW` both produce `REQUIRE_APPROVAL`;
+- privileged roles produce `DENY`, including `SUPERADMIN` with Revenda area and matching material purpose;
+- chat text cannot overwrite trusted identity;
+- Phase 7 production modules have zero HTTP, Ollama, embedding, subprocess, executor or CDM calls;
+- no request persistence, human approval state or request identifier is implemented;
+- official synthetic smoke is exactly 15/15;
+- smoke report contains no identity, raw problem text, purpose, capability, corporate data or generated external artifacts;
+- all 319 baseline test node IDs remain present;
+- final collected suite is at least the baseline plus every newly added Phase 7 test, with initial planned floor of 422 before optional extra tests;
+- complete pytest passes;
+- Ruff lint and format checks pass;
+- Dell workflow accepts only exact candidate SHA input for `target_ref` and verifies it against `git rev-parse HEAD` inside the workflow immediately after checkout;
+- Dell homologation passes on the exact final candidate SHA without `PHASE7_CANDIDATE_SHA` or another external comparison variable;
 - final review evidence is prepared without merging.
