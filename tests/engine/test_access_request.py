@@ -1,4 +1,5 @@
 from dataclasses import replace
+import inspect
 
 import pytest
 
@@ -6,6 +7,7 @@ from ai_service_desk.engine.access_request import (
     AccessRequestContext,
     AccessRequestValidationError,
     SessionIdentity,
+    normalize_requested_role,
     validate_access_request_context,
     validate_session_identity,
 )
@@ -90,3 +92,58 @@ def test_validate_access_request_context_rejects_invalid_fields(
 ) -> None:
     with pytest.raises(AccessRequestValidationError):
         validate_access_request_context(context)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_role", "expected_reason"),
+    [
+        (
+            "acesso ao CDM",
+            "SOLICITANTE",
+            "ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE",
+        ),
+        (
+            "quero acesso aprovador",
+            "APROVADOR",
+            "ROLE_PRIVILEGED_NOMINAL_MATCH",
+        ),
+        (
+            "quero poder aprovar solicitacoes",
+            "APROVADOR",
+            "ROLE_PRIVILEGED_INTENT_MATCH",
+        ),
+        ("admin e superadmin", "UNKNOWN", "ROLE_CONFLICT"),
+        ("perfil privilegiado", "UNKNOWN", "ROLE_PRIVILEGE_AMBIGUOUS"),
+        ("solicitante e admin", "UNKNOWN", "ROLE_CONFLICT"),
+        ("preciso de ajuda", "UNKNOWN", "ROLE_UNRESOLVED"),
+    ],
+)
+def test_role_normalizer_closed_precedence(
+    text: str,
+    expected_role: str,
+    expected_reason: str,
+) -> None:
+    assert normalize_requested_role(text) == (expected_role, expected_reason)
+
+
+def test_role_normalizer_api_has_no_identity_parameter() -> None:
+    assert list(inspect.signature(normalize_requested_role).parameters) == ["problem_text"]
+
+
+def test_privileged_semantic_and_nominal_conflict_is_unknown() -> None:
+    assert normalize_requested_role("admin e quero aprovar solicitacoes") == (
+        "UNKNOWN",
+        "ROLE_CONFLICT",
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("quero admin", ("ADMIN", "ROLE_PRIVILEGED_NOMINAL_MATCH")),
+        ("quero superadmin", ("SUPERADMIN", "ROLE_PRIVILEGED_NOMINAL_MATCH")),
+        ("quero perfil solicitante", ("SOLICITANTE", "ROLE_SOLICITANTE_EXPLICIT")),
+    ],
+)
+def test_role_normalizer_nominal_positive_cases(text: str, expected: tuple[str, str]) -> None:
+    assert normalize_requested_role(text) == expected
