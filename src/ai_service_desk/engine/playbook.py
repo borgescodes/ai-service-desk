@@ -314,9 +314,7 @@ def build_playbook_catalog(
     source_path = Path(source)
     playbooks = load_playbooks(source_path)
     compiled = _compile_catalog_rows(playbooks, eligible_ids)
-    approved_playbooks = {
-        key: compiled["playbooks"][key] for key in sorted(compiled["playbooks"])
-    }
+    approved_playbooks = {key: compiled["playbooks"][key] for key in sorted(compiled["playbooks"])}
     active_by_knowledge_id = {
         key: compiled["active_by_knowledge_id"][key]
         for key in sorted(compiled["active_by_knowledge_id"])
@@ -407,7 +405,11 @@ def _validate_operational_playbook(playbook_id: str, raw: object) -> dict:
 
 
 def _validate_hash(value: object, label: str) -> str:
-    if not isinstance(value, str) or len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(ch not in "0123456789abcdef" for ch in value)
+    ):
         raise ValueError(f"{label} invalido.")
     return value
 
@@ -418,7 +420,11 @@ def _validate_loaded_catalog(catalog: dict) -> tuple[set[str], dict[str, str]]:
     if binding.get("domain") != "APPROVED_KNOWLEDGE":
         raise ValueError("binding de knowledge pertence a outro dominio.")
     schema_version = binding.get("schema_version")
-    if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version <= 0:
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version <= 0
+    ):
         raise ValueError("binding de knowledge com schema invalido.")
     _validate_hash(binding.get("source_hash"), "knowledge source_hash")
     _validate_hash(binding.get("provenance_hash"), "knowledge provenance_hash")
@@ -467,7 +473,9 @@ def _validate_loaded_catalog(catalog: dict) -> tuple[set[str], dict[str, str]]:
             raise ValueError("metadata inativa invalida.")
         for raw in rows:
             if not isinstance(raw, dict) or set(raw) != {"playbook_id", "status", "version"}:
-                raise ValueError("metadata inativa contem conteudo operacional ou campos invalidos.")
+                raise ValueError(
+                    "metadata inativa contem conteudo operacional ou campos invalidos."
+                )
             _required_text(raw["playbook_id"], "playbook_id inativo", 120)
             if raw["status"] not in {"DRAFT", "RETIRED"}:
                 raise ValueError("metadata inativa com status invalido.")
@@ -533,7 +541,9 @@ def load_playbook_catalog(
 
     data, _, current_knowledge_provenance = load_knowledge_index(knowledge_index_directory)
     current_hash = sha256_bytes(canonical_json_bytes(current_knowledge_provenance))
-    current_ids = set(data["knowledge_id"].astype(str).tolist()) if "knowledge_id" in data.columns else set()
+    current_ids = (
+        set(data["knowledge_id"].astype(str).tolist()) if "knowledge_id" in data.columns else set()
+    )
     if current_ids != eligible_ids:
         raise ValueError("knowledge elegivel atual diverge do catalogo de playbook.")
     if (

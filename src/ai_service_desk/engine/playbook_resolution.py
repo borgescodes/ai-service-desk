@@ -92,7 +92,10 @@ def format_playbook_result(result: Mapping[str, object]) -> str:
     if status == "KNOWLEDGE_ONLY":
         return ""
     if status == "PLAYBOOK_UNAVAILABLE":
-        return "Ha um procedimento relacionado, mas ele nao esta disponivel para orientacao neste momento."
+        return (
+            "Ha um procedimento relacionado, mas ele nao esta disponivel "
+            "para orientacao neste momento."
+        )
     if status != "PLAYBOOK_FOUND":
         raise ValueError("resultado de playbook invalido para formatacao.")
 
