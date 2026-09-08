@@ -211,16 +211,21 @@ def run_playbook_smoke(
                         actual_reason = ""
                 else:
                     raise ValueError("Mode de smoke nao suportado.")
-            except (ValueError, RuntimeError, OSError, KeyError, StopIteration, AssertionError) as exc:
+            except (
+                ValueError,
+                RuntimeError,
+                OSError,
+                KeyError,
+                StopIteration,
+                AssertionError,
+            ) as exc:
                 actual_status = "EXECUTION_ERROR"
                 actual_reason = type(exc).__name__
                 actual_playbook_id = None
             report["cases"].append(
                 _case_summary(case, actual_status, actual_reason, actual_playbook_id)
             )
-        report["ok"] = len(report["cases"]) == 10 and all(
-            row["passed"] for row in report["cases"]
-        )
+        report["ok"] = len(report["cases"]) == 10 and all(row["passed"] for row in report["cases"])
     except (ValueError, RuntimeError, OSError, KeyError) as exc:
         report["error"] = type(exc).__name__
     finally:

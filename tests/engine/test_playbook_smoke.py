@@ -5,7 +5,6 @@ import pytest
 
 from ai_service_desk.engine.playbook_smoke import load_playbook_cases
 
-
 VALID = {
     "case_name": "approved-single-link",
     "mode": "RESOLVE",

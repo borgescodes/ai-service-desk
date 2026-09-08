@@ -1,5 +1,5 @@
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -87,7 +87,11 @@ def test_exact_approved_link_returns_playbook_found(monkeypatch, tmp_path: Path)
     assert result["playbook"]["playbook_id"] == "PB-SYN-PRINT-001"
     assert result["playbook"]["playbook_version"] == 1
     assert set(result["playbook"]) == {
-        "playbook_id", "title", "description", "playbook_version", "steps"
+        "playbook_id",
+        "title",
+        "description",
+        "playbook_version",
+        "steps",
     }
 
 
@@ -131,13 +135,15 @@ def test_draft_precedes_retired_when_both_inactive(monkeypatch, tmp_path: Path) 
 
 
 def test_resolve_uses_only_knowledge_id(monkeypatch, tmp_path: Path) -> None:
-    result = engine(monkeypatch, tmp_path).resolve({
-        "knowledge_id": "KB-SYN-VPN-001",
-        "title": "must not copy",
-        "answer": "must not copy",
-        "system": "must not copy",
-        "intent": "must not copy",
-    })
+    result = engine(monkeypatch, tmp_path).resolve(
+        {
+            "knowledge_id": "KB-SYN-VPN-001",
+            "title": "must not copy",
+            "answer": "must not copy",
+            "system": "must not copy",
+            "intent": "must not copy",
+        }
+    )
     assert set(result) == {"status", "reason", "knowledge_id", "playbook"}
     assert "title" not in result
     assert "answer" not in result
