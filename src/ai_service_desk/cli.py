@@ -16,6 +16,7 @@ from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
 from ai_service_desk.engine.real_smoke import run_demo_smoke, run_real_smoke
 from ai_service_desk.engine.retrieval import RetrievalEngine, format_result
 from ai_service_desk.engine.smoke import run_validation
+from ai_service_desk.engine.triage_smoke import run_triage_smoke
 
 DEFAULT_URL = "http://127.0.0.1:11434"
 DEFAULT_THRESHOLD = 0.65
@@ -87,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     knowledge_smoke.add_argument("--index", type=Path, required=True)
     knowledge_smoke.add_argument("--report", type=Path, required=True)
     knowledge_smoke.add_argument("--url", default=DEFAULT_URL)
+
+    triage_smoke = sub.add_parser("triage-smoke")
+    triage_smoke.add_argument("--index", type=Path, required=True)
+    triage_smoke.add_argument("--cases", type=Path, required=True)
+    triage_smoke.add_argument("--report", type=Path, required=True)
+    triage_smoke.add_argument("--url", default=DEFAULT_URL)
 
     show_index = sub.add_parser("show-index")
     show_index.add_argument("--index", type=Path, required=True)
@@ -252,6 +259,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "knowledge-smoke":
             report = run_knowledge_smoke(args.index, args.report, args.url)
             print("KNOWLEDGE SMOKE OK" if report["ok"] else "KNOWLEDGE SMOKE REQUER REVISAO")
+            print(f"Casos sinteticos: {len(report.get('cases', []))}")
+            print("Relatorio agregado local: " + str(args.report))
+            return 0 if report["ok"] else 1
+
+        if args.command == "triage-smoke":
+            report = run_triage_smoke(args.index, args.cases, args.report, args.url)
+            print("TRIAGE SMOKE OK" if report["ok"] else "TRIAGE SMOKE REQUER REVISAO")
             print(f"Casos sinteticos: {len(report.get('cases', []))}")
             print("Relatorio agregado local: " + str(args.report))
             return 0 if report["ok"] else 1

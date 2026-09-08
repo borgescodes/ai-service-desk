@@ -13,6 +13,8 @@ A Fase 3 adiciona avaliação reproduzível, sweep de thresholds e uma decisão 
 
 A Fase 4 adiciona uma base de conhecimento aprovada e separada do histórico. Somente artigos `APPROVED`, com provenance `APPROVED_KNOWLEDGE` válida, podem produzir orientação oficial. A resposta vem literalmente do campo `answer` aprovado.
 
+A Fase 5 adiciona uma triagem conversacional curta e controlada. Ela preserva somente o contexto necessário entre até 3 mensagens do usuário, faz no máximo 2 perguntas objetivas e consulta a mesma knowledge `APPROVED` da Fase 4 quando o contexto estiver suficiente.
+
 Históricos recuperados são evidências não validadas. Eles não são soluções aprovadas e não autorizam ações.
 
 ## Requisitos
@@ -148,9 +150,19 @@ python -m ai_service_desk knowledge-smoke `
   --url http://127.0.0.1:11434
 ```
 
+Executar os 10 cenários sintéticos da triagem conversacional da Fase 5:
+
+```powershell
+python -m ai_service_desk triage-smoke `
+  --index C:\ai-service-desk-data\phase-5\index `
+  --cases tests/fixtures/phase5_triage_conversations.jsonl `
+  --report C:\ai-service-desk-data\phase-5\reports\smoke.json `
+  --url http://127.0.0.1:11434
+```
+
 Também estão disponíveis `show-index`, `prepare`, `index`, `import-legacy`, `search` e `validate`.
 
-`doctor`, `index`, `import-legacy`, `search`, `validate`, `demo-smoke`, `real-smoke`, `evaluate`, `knowledge-index`, `knowledge-search` e `knowledge-smoke` dependem do Ollama local. `knowledge-validate` é offline. O cliente aceita somente HTTP em loopback e não baixa modelos automaticamente.
+`doctor`, `index`, `import-legacy`, `search`, `validate`, `demo-smoke`, `real-smoke`, `evaluate`, `knowledge-index`, `knowledge-search`, `knowledge-smoke` e `triage-smoke` dependem do Ollama local. `knowledge-validate` é offline. O cliente aceita somente HTTP em loopback e não baixa modelos automaticamente.
 
 ## Fase 2A: demonstração da competição
 
@@ -195,6 +207,18 @@ Quando uma FAQ aprovada é encontrada, o sistema devolve literalmente o `answer`
 
 A fixture `knowledge/phase4_synthetic_faq.jsonl` é 100% fictícia e os detalhes operacionais estão em `docs/knowledge/phase-4.md`.
 
+## Fase 5: triagem conversacional
+
+A Fase 5 envolve a knowledge aprovada com uma máquina de estados curta. `TriageEngine` preserva somente `problem_text`, classificação resolvida, entidades necessárias, contadores e o campo pendente. Não existe transcript acumulado, banco de sessão ou memória global.
+
+`MAX_USER_TURNS` permanece em 3 e `MAX_CLARIFICATIONS` em 2. O terceiro turno é totalmente processável. Correções de system são conservadoras, `confidence` não participa de decisões e cada mensagem aceita é classificada no máximo uma vez.
+
+`KnowledgeEngine.search()` permanece retrocompatível. A triagem usa `search_classified()` para evitar segunda classificação e `available_systems()` como única interface de disponibilidade. O threshold continua `0.65` e a query não recebe labels ou reforços artificiais para superar o limiar.
+
+Os resultados públicos são `NEEDS_CLARIFICATION`, `KNOWLEDGE_FOUND` e `TRIAGE_ABSTAINED`. Quando há `KNOWLEDGE_FOUND`, a resposta continua sendo o `answer` literal da Fase 4. Nenhum histórico não validado vira procedimento oficial.
+
+As 10 conversas versionadas são 100% sintéticas. Os detalhes estão em `docs/triage/phase-5.md`.
+
 ## Dados
 
 Exports brutos do TiFlux, corpus corporativo real, subconjunto real da demo, embeddings, índices, logs e relatórios gerados ficam fora do Git. Os testes e o CI hospedado usam somente dados sintéticos.
@@ -215,6 +239,7 @@ A homologação local é separada:
 - `.github/workflows/real-corpus-smoke.yml` valida o snapshot completo da Fase 2B como evidência adicional de escala.
 - `.github/workflows/phase3-evaluation.yml` executa o benchmark sintético, a decisão de calibração e as invariantes seguras da demo no Dell.
 - `.github/workflows/phase4-knowledge-smoke.yml` valida a FAQ sintética aprovada e as invariantes fail-closed da Fase 4 no Dell.
+- `.github/workflows/phase5-triage-smoke.yml` valida os 10 cenários sintéticos da triagem no Dell sem publicar transcript ou answer.
 
 Os workflows locais são manuais e executam no runner Windows homologado.
 
@@ -224,6 +249,7 @@ Os workflows locais são manuais e executam no runner Windows homologado.
 - Planos: `docs/superpowers/plans/`
 - Avaliação e calibração: `docs/evaluation/phase-3.md`
 - FAQ e base de conhecimento: `docs/knowledge/phase-4.md`
+- Triagem conversacional: `docs/triage/phase-5.md`
 - Manifesto seguro da Fase 2: `docs/data/phase-2-corpus-v1.json`
 - Equivalência do motor 2.1: `docs/migration/engine-v2.1-equivalence.md`
 - Homologação local: `docs/environment/local-demo.md`

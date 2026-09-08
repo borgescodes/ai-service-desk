@@ -182,15 +182,19 @@ class FakeClient:
         }
 
 
-def article() -> dict:
+def article(
+    knowledge_id: str = "KB-CIGAM",
+    system: str = "CIGAM",
+    intent: str = "PROBLEMA_ACESSO",
+) -> dict:
     return {
-        "knowledge_id": "KB-CIGAM",
-        "title": "Acesso CIGAM",
-        "question": "Nao consigo acessar o CIGAM.",
-        "answer": "Resposta literal aprovada.",
-        "system": "CIGAM",
-        "intent": "PROBLEMA_ACESSO",
-        "tags": ["acesso", "cigam"],
+        "knowledge_id": knowledge_id,
+        "title": f"Artigo sintetico {knowledge_id}",
+        "question": f"Pergunta sintetica {knowledge_id}.",
+        "answer": f"Resposta literal aprovada {knowledge_id}.",
+        "system": system,
+        "intent": intent,
+        "tags": ["sintetico"],
         "source": "SYNTHETIC_DEMO",
         "status": "APPROVED",
         "reviewed_by": "reviewer",
@@ -202,6 +206,20 @@ def article() -> dict:
 def write_source(path: Path) -> Path:
     path.write_text(json.dumps(article()) + "\n", encoding="utf-8")
     return path
+
+
+def write_articles(path: Path, articles: list[dict]) -> Path:
+    path.write_text("".join(json.dumps(item) + "\n" for item in articles), encoding="utf-8")
+    return path
+
+
+def build_engine_with_articles(tmp_path: Path, articles: list[dict]) -> KnowledgeEngine:
+    embedder = FakeEmbedder()
+    root = tmp_path / "index"
+    source = write_articles(tmp_path / "knowledge.jsonl", articles)
+    build_knowledge_index(source, root, embedder, batch_size=10)
+    embedder.calls.clear()
+    return KnowledgeEngine(root, FakeClient(), embedder)
 
 
 def test_engine_loads_only_valid_knowledge_index_and_searches_once(tmp_path: Path) -> None:
@@ -227,3 +245,42 @@ def test_engine_ambiguous_context_does_not_embed(tmp_path: Path) -> None:
     result = engine.search("CIGAM e SIAGRI estao sem acesso")
     assert result["reason"] == "CONTEXTO_AMBIGUO"
     assert embedder.calls == []
+
+
+def test_search_and_search_classified_are_equivalent_for_same_classification(
+    tmp_path: Path,
+) -> None:
+    embedder = FakeEmbedder()
+    root = tmp_path / "index"
+    build_knowledge_index(write_source(tmp_path / "knowledge.jsonl"), root, embedder, batch_size=1)
+    embedder.calls.clear()
+
+    client = FakeClient(system="CIGAM", intent="PROBLEMA_ACESSO")
+    engine = KnowledgeEngine(root, client, embedder)
+    expected = TicketClassification("PROBLEMA_ACESSO", "CIGAM", {}, 0.9)
+
+    via_search = engine.search("Nao consigo acessar o CIGAM")
+    assert client.chat_calls == 1
+
+    embedder.calls.clear()
+    via_classified = engine.search_classified("Nao consigo acessar o CIGAM", expected)
+
+    assert via_classified == via_search
+    assert client.chat_calls == 1
+    assert len(embedder.calls) == 1
+
+
+def test_available_systems_is_sorted_unique_and_intent_scoped(tmp_path: Path) -> None:
+    engine = build_engine_with_articles(
+        tmp_path,
+        [
+            article(knowledge_id="KB-S1", system="SIAGRI", intent="PROBLEMA_ACESSO"),
+            article(knowledge_id="KB-C1", system="CIGAM", intent="PROBLEMA_ACESSO"),
+            article(knowledge_id="KB-C2", system="CIGAM", intent="PROBLEMA_ACESSO"),
+            article(knowledge_id="KB-P1", system="", intent="PROBLEMA_IMPRESSAO"),
+        ],
+    )
+
+    assert engine.available_systems("PROBLEMA_ACESSO") == ("CIGAM", "SIAGRI")
+    assert engine.available_systems("PROBLEMA_IMPRESSAO") == ("",)
+    assert engine.available_systems("ORIENTACAO") == ()

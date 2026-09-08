@@ -171,8 +171,18 @@ class KnowledgeEngine:
         self.embedder = embedder
         self.threshold = float(threshold)
 
-    def search(self, text: str) -> dict:
-        classification = classify_ticket(text, self.client.chat)
+    def available_systems(self, intent: str) -> tuple[str, ...]:
+        values = {
+            str(value)
+            for value in self.df.loc[self.df["intent"].astype(str).eq(intent), "system"].tolist()
+        }
+        return tuple(sorted(values))
+
+    def search_classified(
+        self,
+        text: str,
+        classification: TicketClassification,
+    ) -> dict:
         pool, reason = _eligible_pool(self.df, classification, text)
         if reason != "MATCH":
             return _base_result(classification, self.threshold, reason)
@@ -187,3 +197,7 @@ class KnowledgeEngine:
             text,
             threshold=self.threshold,
         )
+
+    def search(self, text: str) -> dict:
+        classification = classify_ticket(text, self.client.chat)
+        return self.search_classified(text, classification)
