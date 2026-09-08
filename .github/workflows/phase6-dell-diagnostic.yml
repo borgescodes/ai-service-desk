@@ -1,0 +1,99 @@
+name: Phase 6 Dell exact-head diagnostic
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dell-phase6:
+    name: Dell Phase 6 exact-head smoke
+    runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact official Phase 6 head
+        uses: actions/checkout@v4
+        with:
+          ref: 0349a6cf6f3fb1b129dab3f309a2d8a7aa9a92e0
+
+      - name: Verify exact head and Python
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $head = git rev-parse HEAD
+          Write-Host "HEAD: $head"
+          if ($head -ne "0349a6cf6f3fb1b129dab3f309a2d8a7aa9a92e0") {
+            throw "Unexpected checkout head: $head"
+          }
+          $version = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+          Write-Host "Python: $version"
+          if (-not $version.StartsWith("3.14.")) {
+            throw "Phase 6 requires Python 3.14.x. Found $version"
+          }
+
+      - name: Install project
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install -e ".[dev]"
+
+      - name: Verify local models
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ai_service_desk doctor --url http://127.0.0.1:11434
+
+      - name: Validate synthetic knowledge
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ai_service_desk knowledge-validate --file knowledge/phase4_synthetic_faq.jsonl
+
+      - name: Build synthetic approved knowledge index
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $index = Join-Path $env:RUNNER_TEMP "phase6-dell-knowledge-$env:GITHUB_RUN_ID"
+          if (Test-Path $index) { Remove-Item -Recurse -Force $index }
+          python -m ai_service_desk knowledge-index `
+            --file knowledge/phase4_synthetic_faq.jsonl `
+            --index "$index" `
+            --batch-size 10 `
+            --url http://127.0.0.1:11434
+
+      - name: Validate synthetic playbooks
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ai_service_desk playbook-validate --file playbooks/phase6_synthetic_playbooks.jsonl
+
+      - name: Build approved playbook catalog
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $index = Join-Path $env:RUNNER_TEMP "phase6-dell-knowledge-$env:GITHUB_RUN_ID"
+          $catalog = Join-Path $env:RUNNER_TEMP "phase6-dell-catalog-$env:GITHUB_RUN_ID"
+          if (Test-Path $catalog) { Remove-Item -Recurse -Force $catalog }
+          python -m ai_service_desk playbook-build `
+            --file playbooks/phase6_synthetic_playbooks.jsonl `
+            --knowledge-index "$index" `
+            --output "$catalog"
+
+      - name: Run Phase 6 playbook smoke
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $index = Join-Path $env:RUNNER_TEMP "phase6-dell-knowledge-$env:GITHUB_RUN_ID"
+          $work = Join-Path $env:RUNNER_TEMP "phase6-dell-work-$env:GITHUB_RUN_ID"
+          $report = Join-Path $env:RUNNER_TEMP "phase6-dell-report-$env:GITHUB_RUN_ID.json"
+          if (Test-Path $work) { Remove-Item -Recurse -Force $work }
+          if (Test-Path $report) { Remove-Item -Force $report }
+          python -m ai_service_desk playbook-smoke `
+            --knowledge-index "$index" `
+            --playbooks playbooks/phase6_synthetic_playbooks.jsonl `
+            --cases tests/fixtures/phase6_playbook_cases.jsonl `
+            --work-directory "$work" `
+            --report "$report"
+          if ($LASTEXITCODE -ne 0) { throw "Phase 6 playbook smoke failed." }
