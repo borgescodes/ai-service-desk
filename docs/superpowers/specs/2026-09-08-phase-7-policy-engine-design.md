@@ -792,7 +792,7 @@ capability = CDM_ACCESS_REQUEST
 Se qualquer uma dessas três condições não for satisfeita em um contexto estruturalmente válido, o resultado é `LOW` com exatamente:
 
 ```python
-reason_codes=("CONTEXT_NOT_CDM_ACCESS_REQUEST",)
+reason_codes = ("CONTEXT_NOT_CDM_ACCESS_REQUEST",)
 ```
 
 Nesse caso nenhuma regra de Revenda ou materiais é avaliada.

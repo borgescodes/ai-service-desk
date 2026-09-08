@@ -80,7 +80,7 @@ The regression baseline is used only for historical comparisons, protected-file 
   - `playbooks/phase6_synthetic_playbooks.jsonl`
 - `classification.py` may change only by adding `"CDM": ("cdm",)` to `SYSTEM_ALIASES`. Prompt, intents, recovery and heuristics remain byte-for-byte unchanged.
 - No existing test may be deleted, disabled, converted to skip or weakened to satisfy the suite.
-- This plan defines a minimum of 103 new collected pytest cases. With the Phase 6 baseline of 319, the initial hard floor is 422 collected tests. If implementation adds additional tests, raise the floor by the same number.
+- This plan defines a minimum of 105 new collected pytest cases. With the Phase 6 baseline of 319, the initial hard floor is 424 collected tests. If implementation adds additional tests, raise the floor by the same number.
 - Merge is outside this plan. Final evidence is prepared for review only.
 
 ---
@@ -281,18 +281,18 @@ Planned new collected cases:
 | Gate 2 contracts and structural validation | 21 |
 | Gate 3 role normalizer | 12 |
 | Gate 4 CDM preparation and provenance | 14 |
-| Gate 5 policy engine and configuration | 21 |
+| Gate 5 policy engine and configuration | 23 |
 | Gate 6 confidence | 7 |
 | Gate 7 security and isolation | 8 |
 | Gate 8 smoke | 5 |
 | Gate 9 CLI and workflow | 4 |
 | Gate 10 docs | 2 |
-| **Minimum new Phase 7 cases** | **103** |
+| **Minimum new Phase 7 cases** | **105** |
 
 Initial final floor:
 
 ```text
-319 + 103 = 422 collected tests
+319 + 105 = 424 collected tests
 ```
 
 If any extra case is added beyond this plan, the final required count increases one-for-one. Gate 11 also verifies that every pre-Phase-7 collected node ID remains present.
@@ -767,9 +767,7 @@ Add these helpers and public function:
 def _nominal_role_signals(normalized: str) -> set[str]:
     tokens = set(normalized.split())
     return {
-        role
-        for role, terms in ROLE_NOMINAL_TERMS.items()
-        if any(term in tokens for term in terms)
+        role for role, terms in ROLE_NOMINAL_TERMS.items() if any(term in tokens for term in terms)
     }
 
 
@@ -1251,7 +1249,9 @@ def test_policy_evaluate_validates_context_independently() -> None:
         replace(valid_policy_rule(), system=123),
         replace(valid_policy_rule(), capability="cdm_access_request"),
         replace(valid_policy_rule(), requested_role="UNKNOWN"),
+        replace(valid_policy_rule(), requested_role=[]),
         replace(valid_policy_rule(), decision="ALLOW"),
+        replace(valid_policy_rule(), decision=[]),
         replace(valid_policy_rule(), policy_id=""),
         replace(valid_policy_rule(), policy_id="bad id"),
         replace(valid_policy_rule(), reason_code=""),
@@ -1310,7 +1310,7 @@ def test_policy_same_context_is_idempotent() -> None:
     assert engine.evaluate(context) == engine.evaluate(context)
 ```
 
-Gate 5 contributes 21 collected cases: the original 9 behavior/configuration cases plus 11 parametrized invalid-rule nodes and one validation-order node.
+Gate 5 contributes 23 collected cases: the original 9 behavior/configuration cases plus 13 parametrized invalid-rule nodes and one validation-order node.
 
 - [ ] **Step 4: Run RED**
 
@@ -1678,9 +1678,7 @@ def assess_confidence(context: AccessRequestContext) -> ConfidenceAssessment:
     area_match = _area_matches_revenda(context.requester.area)
     purpose_match = _purpose_matches_material_request(context.purpose)
     area_reason = AREA_MATCH_REVENDA if area_match else AREA_OUTSIDE_REVENDA
-    purpose_reason = (
-        PURPOSE_MATCH_MATERIAL_REQUEST if purpose_match else PURPOSE_NOT_CONFIRMED
-    )
+    purpose_reason = PURPOSE_MATCH_MATERIAL_REQUEST if purpose_match else PURPOSE_NOT_CONFIRMED
     level: Literal["HIGH", "LOW"] = "HIGH" if area_match and purpose_match else "LOW"
     return ConfidenceAssessment(level, (area_reason, purpose_reason))
 ```
@@ -2285,9 +2283,7 @@ def run_policy_smoke(cases_path: str | Path, report_path: str | Path) -> dict:
                         "passed": False,
                     }
                 )
-        report["ok"] = len(report["cases"]) == 15 and all(
-            row["passed"] for row in report["cases"]
-        )
+        report["ok"] = len(report["cases"]) == 15 and all(row["passed"] for row in report["cases"])
     except (ValueError, RuntimeError, OSError, KeyError) as exc:
         report["error"] = type(exc).__name__
     finally:
@@ -2778,11 +2774,11 @@ Requirements:
 
 ```text
 baseline = 319
-planned Phase 7 minimum = 103 new collected cases
-initial hard floor = 422
+planned Phase 7 minimum = 105 new collected cases
+initial hard floor = 424
 ```
 
-If more than 103 new cases were added, increase the floor one-for-one. A smaller green suite is not acceptable.
+If more than 105 new cases were added, increase the floor one-for-one. A smaller green suite is not acceptable.
 
 - [ ] **Step 5: Compare baseline and final collected node IDs, not only counts**
 
@@ -2819,10 +2815,10 @@ if len(baseline) != 319:
     raise SystemExit(f"expected baseline 319, got {len(baseline)}")
 if missing:
     raise SystemExit("missing baseline nodeids:\n" + "\n".join(missing))
-if len(new) < 103:
-    raise SystemExit(f"expected at least 103 new Phase 7 nodeids, got {len(new)}")
-if len(final) < 422:
-    raise SystemExit(f"expected at least 422 final nodeids, got {len(final)}")
+if len(new) < 105:
+    raise SystemExit(f"expected at least 105 new Phase 7 nodeids, got {len(new)}")
+if len(final) < 424:
+    raise SystemExit(f"expected at least 424 final nodeids, got {len(final)}")
 PY
 git worktree remove "$BASELINE_DIR"
 ```
@@ -2998,7 +2994,7 @@ Review each item and record pass/fail in the review evidence:
 21. No LLM, HTTP, executor, CDM adapter, persistence, approval state or request identifier exists.
 22. Homologated Phase 4, 5 and 6 protected files and fixtures are unchanged.
 23. Baseline 319 node IDs are all still present.
-24. Final collected count is at least 319 plus every newly added Phase 7 test, with planned minimum 422.
+24. Final collected count is at least 319 plus every newly added Phase 7 test, with planned minimum 424.
 25. Synthetic smoke is 15/15 and report privacy checks pass.
 26. Dell workflow verifies git rev-parse HEAD against the received target_ref inside the workflow before test execution.
 27. Dell workflow does not depend on PHASE7_CANDIDATE_SHA or another unpropagated external variable.
@@ -3073,7 +3069,7 @@ Phase 7 implementation is ready for review only when all of the following are ev
 - official synthetic smoke is exactly 15/15;
 - smoke report contains no identity, raw problem text, purpose, capability, corporate data or generated external artifacts;
 - all 319 baseline test node IDs remain present;
-- final collected suite is at least the baseline plus every newly added Phase 7 test, with initial planned floor of 422 before optional extra tests;
+- final collected suite is at least the baseline plus every newly added Phase 7 test, with initial planned floor of 424 before optional extra tests;
 - complete pytest passes;
 - Ruff lint and format checks pass;
 - Dell workflow accepts only exact candidate SHA input for `target_ref` and verifies it against `git rev-parse HEAD` inside the workflow immediately after checkout;
