@@ -171,3 +171,35 @@ def test_equipment_name_is_not_promoted_to_software_system() -> None:
         ),
     )
     assert result.system == ""
+
+
+def test_explicit_systems_recognizes_cdm() -> None:
+    assert explicit_systems("acesso ao CDM") == ["CDM"]
+
+
+def test_cdm_and_cigam_are_multi_system_context() -> None:
+    text = "acesso ao CDM e CIGAM"
+    assert set(explicit_systems(text)) == {"CDM", "CIGAM"}
+    result = classify_ticket(
+        text,
+        lambda payload: response(
+            '{"intent":"PROBLEMA_ACESSO","system":"CDM","entities":{},"confidence":0.9}'
+        ),
+    )
+    assert result.system == ""
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("erro no CIGAM", ["CIGAM"]),
+        ("erro no SIAGRI", ["SIAGRI"]),
+        ("erro no Outlook", ["OUTLOOK"]),
+        ("erro no Teams", ["TEAMS"]),
+        ("erro no Microsoft 365", ["OFFICE 365"]),
+        ("erro no WhatsApp", ["WHATSAPP"]),
+        ("erro no Windows", ["WINDOWS"]),
+    ],
+)
+def test_existing_system_aliases_remain_recognized(text: str, expected: list[str]) -> None:
+    assert explicit_systems(text) == expected
