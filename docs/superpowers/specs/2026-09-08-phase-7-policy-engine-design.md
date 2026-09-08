@@ -641,17 +641,48 @@ reason_code = CDM_PRIVILEGED_ACCESS_NOT_ALLOWED
 decision = DENY
 ```
 
-### 7.1 Construção das regras e conflito de chave
+### 7.1 Construção, validação runtime e conflito de chave
 
-Mesmo sem catálogo externo, as regras em código não podem depender de um `dict` literal que permita sobrescrita silenciosa de chave duplicada.
+Mesmo sem catálogo externo, as regras em código não podem depender apenas de type hints nem de um `dict` literal que permita sobrescrita silenciosa de chave duplicada.
 
-A implementação deve declarar as regras como uma sequência explícita de entradas e construir o índice interno por uma função que valide unicidade da chave:
+A implementação deve declarar as regras como uma sequência explícita de entradas. Antes de qualquer indexação, cada item da sequência é validado em runtime como `PolicyRule` completo. Type hints não substituem essa validação.
+
+Cada `PolicyRule` deve satisfazer exatamente:
+
+- o objeto é uma instância de `PolicyRule`;
+- `system` é string não vazia com até 120 caracteres;
+- `capability` é string simbólica válida com até 120 caracteres e respeita `^[A-Z][A-Z0-9_]{2,119}$`;
+- `requested_role` é uma das roles concretas `SOLICITANTE`, `APROVADOR`, `ADMIN` ou `SUPERADMIN`;
+- `decision` é exatamente `REQUIRE_APPROVAL` ou `DENY`;
+- `policy_id` é código de máquina válido segundo `^[A-Z][A-Z0-9_]{2,119}$`;
+- `reason_code` é código de máquina válido segundo `^[A-Z][A-Z0-9_]{2,119}$`;
+- `reason` é string não vazia com até 500 caracteres.
+
+Ao encontrar qualquer rule inválida, a construção falha antes de criar ou preencher o índice:
+
+```text
+PolicyConfigurationError
+reason_code = POLICY_RULE_INVALID
+```
+
+O engine com configuração inválida não fica operacional e não produz `PolicyDecision`.
+
+A construção é obrigatoriamente em duas passagens conceituais:
+
+```text
+1. validar todas as rules em runtime
+2. somente depois indexar e validar unicidade das chaves
+```
+
+Essa ordem garante que uma rule inválida nunca seja mascarada por conflito de chave. Se uma sequência contém uma rule inválida e também uma chave duplicada, o resultado é `POLICY_RULE_INVALID` porque a indexação ainda não começou.
+
+Depois que todas as rules estiverem válidas, o índice interno usa a chave:
 
 ```text
 (system, capability, requested_role)
 ```
 
-Ao encontrar duas regras com a mesma chave, mesmo que tenham a mesma decisão, a construção deve falhar com erro explícito de configuração:
+Ao encontrar duas rules válidas com a mesma chave, mesmo que tenham a mesma decisão, a construção deve falhar com erro explícito de configuração:
 
 ```text
 PolicyConfigurationError
@@ -662,11 +693,11 @@ Nenhuma das regras conflitantes prevalece. Não existe `last write wins`, merge 
 
 O engine com configuração conflitante não fica operacional e não pode produzir `REQUIRE_APPROVAL`. Esse comportamento é fail-closed e detectável por teste.
 
-A verificação de unicidade deve ocorrer na construção do engine ou do índice de regras antes da primeira decisão. O teste deve conseguir injetar uma sequência sintética com chave duplicada e observar `POLICY_RULE_CONFLICT`.
+Os testes devem conseguir injetar tanto rules estruturalmente inválidas quanto uma sequência sintética de rules válidas com chave duplicada e observar os reason codes distintos.
 
 ### 7.2 Fail-closed e distinção entre desconhecido e inválido
 
-A Fase 7 distingue três casos.
+A Fase 7 distingue quatro casos.
 
 Contexto estruturalmente válido, porém sem regra conhecida:
 
@@ -687,16 +718,25 @@ erro explícito de domínio
 
 Não é permitido transformar corrupção de contrato em `POLICY_NOT_FOUND`.
 
-Configuração de policy conflitante:
+Configuração de policy inválida:
+
+```text
+PolicyConfigurationError
+reason_code = POLICY_RULE_INVALID
+```
+
+Isso inclui rule com `decision`, `requested_role`, `capability`, `system`, `policy_id`, `reason_code` ou `reason` fora do contrato runtime definido na seção 7.1.
+
+Configuração de policy conflitante, depois de todas as rules passarem pela validação runtime:
 
 ```text
 PolicyConfigurationError
 reason_code = POLICY_RULE_CONFLICT
 ```
 
-Não é permitido escolher silenciosamente uma das regras conflitantes.
+Não é permitido indexar configuração inválida nem escolher silenciosamente uma das regras conflitantes.
 
-Exemplos de erro estrutural:
+Exemplos de erro estrutural do contexto:
 
 - `requester` inválido.
 - `requested_role` fora do contrato concreto.
@@ -705,7 +745,7 @@ Exemplos de erro estrutural:
 - `playbook_version <= 0`.
 - capability vazia.
 
-Exemplos de válido mas não conhecido:
+Exemplos de contexto válido mas não conhecido:
 
 - `system` textual válido sem policy cadastrada.
 - capability simbólica válida sem policy cadastrada.
@@ -1089,15 +1129,35 @@ Contrato inválido:
 -> erro explícito
 ```
 
-Conflito de rules:
+Configuração inválida de rule:
 
 ```text
-duas rules com a mesma chave
+rule com decision, requested_role, capability ou campo estrutural fora do contrato
+-> PolicyConfigurationError
+-> POLICY_RULE_INVALID
+-> nenhuma indexação ou decisão produzida
+```
+
+Os testes de configuração inválida devem cobrir pelo menos `decision`, `requested_role`, `capability`, `system`, `policy_id`, `reason_code` e `reason`, incluindo tipo ou valor inválido conforme o contrato da seção 7.1.
+
+Conflito de rules válidas:
+
+```text
+duas rules válidas com a mesma chave
 (system, capability, requested_role)
 -> PolicyConfigurationError
 -> POLICY_RULE_CONFLICT
 -> nenhuma decisão produzida
 ```
+
+Um teste combinado deve provar a ordem fail-closed da construção:
+
+```text
+sequência contém rule inválida e também chave duplicada
+-> POLICY_RULE_INVALID
+```
+
+Isso demonstra que todas as rules são validadas antes da indexação e que conflito não mascara configuração inválida.
 
 Cobrir idempotência lógica da decisão:
 
@@ -1361,6 +1421,12 @@ Risco: duas policies com a mesma chave entrarem em um mapa e a última sobrescre
 
 Mitigação: índice de rules é construído por rotina que rejeita chave duplicada com `PolicyConfigurationError / POLICY_RULE_CONFLICT` antes de qualquer decisão.
 
+### 17.13 Type hints tratados como validação de policy
+
+Risco: uma `PolicyRule` construída em runtime com `decision`, role, capability ou campo estrutural inválido chegar ao índice porque a anotação de tipo não executa validação.
+
+Mitigação: todas as rules são validadas em runtime em primeira passagem. Qualquer violação produz `PolicyConfigurationError / POLICY_RULE_INVALID`; somente uma sequência integralmente válida segue para indexação e checagem de conflitos.
+
 ## 18. Critérios de aceite da Fase 7
 
 A implementação futura só pode ser considerada concluída quando houver evidência de que:
@@ -1388,7 +1454,10 @@ A implementação futura só pode ser considerada concluída quando houver evid�
 - `triage.py` permanece intacto.
 - `PolicyEngine.evaluate(...)` valida `AccessRequestContext` independentemente da preparação original.
 - `assess_confidence(...)` valida `AccessRequestContext` independentemente da preparação e de policy.
-- regra de policy duplicada é detectada como `PolicyConfigurationError / POLICY_RULE_CONFLICT` e nunca sobrescrita silenciosamente.
+- toda `PolicyRule` é validada em runtime antes da indexação.
+- rule inválida é detectada como `PolicyConfigurationError / POLICY_RULE_INVALID` e impede construção do engine.
+- regra de policy duplicada, depois de validação runtime bem-sucedida, é detectada como `PolicyConfigurationError / POLICY_RULE_CONFLICT` e nunca sobrescrita silenciosamente.
+- configuração contendo rule inválida e também chave duplicada falha como `POLICY_RULE_INVALID`, comprovando validação antes da indexação.
 - `SOLICITANTE` sempre produz `REQUIRE_APPROVAL` para `CDM_ACCESS_REQUEST`.
 - `APROVADOR`, `ADMIN` e `SUPERADMIN` sempre produzem `DENY` para `CDM_ACCESS_REQUEST`.
 - `SUPERADMIN` continua `DENY` mesmo com área Revenda e purpose perfeitamente coerente.
