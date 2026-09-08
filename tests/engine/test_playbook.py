@@ -1,9 +1,11 @@
+import inspect
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
-from ai_service_desk.engine.playbook import load_playbooks
+from ai_service_desk.engine.playbook import build_playbook_catalog, load_playbooks
 
 
 def valid_step(step_id='STEP-01', step_type='INSTRUCTION', capability=''):
@@ -164,3 +166,89 @@ def test_accepts_official_lifecycle(tmp_path: Path, status: str) -> None:
 def test_accepts_official_step_types(tmp_path: Path, step_type: str, capability: str) -> None:
     source = tmp_path / 'good.jsonl'; write_jsonl(source, [valid_playbook(steps=[valid_step(step_type=step_type, capability=capability)])])
     assert load_playbooks(source)[0]['steps'][0]['type'] == step_type
+
+
+def trusted_knowledge_provenance(rows: int, source_hash: str = "b" * 64) -> dict:
+    return {
+        "version": 1,
+        "domain": "APPROVED_KNOWLEDGE",
+        "knowledge_schema_version": 1,
+        "projection_recipe": "knowledge-search-v1",
+        "approved_only": True,
+        "source_hash": source_hash,
+        "matrix_hash": "c" * 64,
+        "rows": rows,
+        "dimensions": 1024,
+        "model": "qwen3-embedding:0.6b",
+        "model_digest": "d" * 64,
+        "index_recipe": "texto_busca-plain-v1",
+    }
+
+
+def trusted_index_double(ids: list[str], source_hash: str = "b" * 64):
+    data = pd.DataFrame({"knowledge_id": ids})
+    return data, object(), trusted_knowledge_provenance(len(ids), source_hash)
+
+
+def test_build_uses_validated_knowledge_index_loader(monkeypatch, tmp_path: Path) -> None:
+    calls: list[Path] = []
+    def fake_load(path):
+        calls.append(Path(path))
+        return trusted_index_double(["KB-SYN-PRINT-001"])
+    monkeypatch.setattr("ai_service_desk.engine.playbook.load_knowledge_index", fake_load)
+    source = tmp_path / "playbooks.jsonl"
+    write_jsonl(source, [valid_playbook()])
+    build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "catalog")
+    assert calls == [tmp_path / "knowledge"]
+
+
+def test_build_public_signature_has_no_raw_provenance() -> None:
+    assert list(inspect.signature(build_playbook_catalog).parameters) == [
+        "source", "knowledge_index_directory", "output_directory"
+    ]
+
+
+def test_build_accepts_reference_present_in_approved_index(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("ai_service_desk.engine.playbook.load_knowledge_index", lambda path: trusted_index_double(["KB-SYN-PRINT-001"]))
+    source = tmp_path / "playbooks.jsonl"
+    write_jsonl(source, [valid_playbook()])
+    result = build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "catalog")
+    assert result["active_links"] == 1
+
+
+def test_build_rejects_reference_absent_from_approved_index(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("ai_service_desk.engine.playbook.load_knowledge_index", lambda path: trusted_index_double(["KB-SYN-OTHER-001"]))
+    source = tmp_path / "playbooks.jsonl"
+    write_jsonl(source, [valid_playbook()])
+    with pytest.raises(ValueError, match="referencia de knowledge nao elegivel"):
+        build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "catalog")
+
+
+def test_one_approved_playbook_can_link_multiple_knowledge_ids(monkeypatch, tmp_path: Path) -> None:
+    ids = ["KB-SYN-CIGAM-ACCESS-001", "KB-SYN-SIAGRI-ACCESS-001"]
+    monkeypatch.setattr("ai_service_desk.engine.playbook.load_knowledge_index", lambda path: trusted_index_double(ids))
+    source = tmp_path / "playbooks.jsonl"
+    write_jsonl(source, [valid_playbook(knowledge_ids=ids)])
+    result = build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "catalog")
+    assert result["active_links"] == 2
+
+
+def test_two_approved_playbooks_for_same_knowledge_reject_build(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("ai_service_desk.engine.playbook.load_knowledge_index", lambda path: trusted_index_double(["KB-SYN-PRINT-001"]))
+    source = tmp_path / "playbooks.jsonl"
+    write_jsonl(source, [valid_playbook("PB-SYN-A"), valid_playbook("PB-SYN-B")])
+    with pytest.raises(ValueError, match="mais de um playbook APPROVED"):
+        build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "catalog")
+
+
+def test_inactive_playbooks_share_knowledge_without_active_conflict(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("ai_service_desk.engine.playbook.load_knowledge_index", lambda path: trusted_index_double(["KB-SYN-PRINT-001"]))
+    source = tmp_path / "playbooks.jsonl"
+    write_jsonl(source, [valid_playbook("PB-SYN-D", status="DRAFT"), valid_playbook("PB-SYN-R", status="RETIRED")])
+    result = build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "catalog")
+    assert result["active_links"] == 0
+    assert result["inactive_links"] == 2
+    assert result["inactive_by_knowledge_id"]["KB-SYN-PRINT-001"] == [
+        {"playbook_id": "PB-SYN-D", "status": "DRAFT", "version": 1},
+        {"playbook_id": "PB-SYN-R", "status": "RETIRED", "version": 1},
+    ]

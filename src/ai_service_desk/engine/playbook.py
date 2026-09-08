@@ -161,3 +161,66 @@ def load_playbooks(path: str | Path) -> list[dict]:
     if not rows:
         raise ValueError("Base de playbooks vazia.")
     return rows
+
+
+def _compile_catalog_rows(playbooks: list[dict], eligible_ids: set[str]) -> dict:
+    approved_playbooks: dict[str, dict] = {}
+    active_by_knowledge_id: dict[str, str] = {}
+    inactive_by_knowledge_id: dict[str, list[dict]] = {}
+    for playbook in playbooks:
+        playbook_id = playbook["playbook_id"]
+        for knowledge_id in playbook["knowledge_ids"]:
+            if knowledge_id not in eligible_ids:
+                raise ValueError(f"referencia de knowledge nao elegivel: {knowledge_id}")
+        if playbook["status"] == "APPROVED":
+            operational = {
+                "playbook_id": playbook_id,
+                "title": playbook["title"],
+                "description": playbook["description"],
+                "knowledge_ids": list(playbook["knowledge_ids"]),
+                "version": playbook["version"],
+                "steps": [dict(step) for step in playbook["steps"]],
+            }
+            approved_playbooks[playbook_id] = operational
+            for knowledge_id in playbook["knowledge_ids"]:
+                if knowledge_id in active_by_knowledge_id:
+                    raise ValueError(
+                        f"knowledge_id possui mais de um playbook APPROVED: {knowledge_id}"
+                    )
+                active_by_knowledge_id[knowledge_id] = playbook_id
+        else:
+            metadata = {
+                "playbook_id": playbook_id,
+                "status": playbook["status"],
+                "version": playbook["version"],
+            }
+            for knowledge_id in playbook["knowledge_ids"]:
+                inactive_by_knowledge_id.setdefault(knowledge_id, []).append(dict(metadata))
+    return {
+        "playbooks": approved_playbooks,
+        "active_by_knowledge_id": active_by_knowledge_id,
+        "inactive_by_knowledge_id": inactive_by_knowledge_id,
+    }
+
+
+def build_playbook_catalog(
+    source: str | Path,
+    knowledge_index_directory: str | Path,
+    output_directory: str | Path,
+) -> dict:
+    data, _, knowledge_provenance = load_knowledge_index(knowledge_index_directory)
+    if "knowledge_id" not in data.columns:
+        raise ValueError("Indice APPROVED_KNOWLEDGE sem knowledge_id.")
+    eligible_ids = set(data["knowledge_id"].astype(str).tolist())
+    if not eligible_ids:
+        raise ValueError("Indice APPROVED_KNOWLEDGE sem knowledge elegivel.")
+    playbooks = load_playbooks(source)
+    compiled = _compile_catalog_rows(playbooks, eligible_ids)
+    return {
+        **compiled,
+        "approved_playbooks": len(compiled["playbooks"]),
+        "active_links": len(compiled["active_by_knowledge_id"]),
+        "inactive_links": sum(len(rows) for rows in compiled["inactive_by_knowledge_id"].values()),
+        "knowledge_provenance": knowledge_provenance,
+        "eligible_knowledge_ids": sorted(eligible_ids),
+    }
