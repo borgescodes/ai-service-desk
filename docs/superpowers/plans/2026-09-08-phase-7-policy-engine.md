@@ -1383,7 +1383,7 @@ def _required_rule_text(value: object, field: str, limit: int) -> str:
 def _validate_policy_rule(rule: object) -> PolicyRule:
     if not isinstance(rule, PolicyRule):
         _invalid_rule("Entrada de policy deve ser PolicyRule.")
-    system = _required_rule_text(rule.system, "system", 120)
+    _required_rule_text(rule.system, "system", 120)
     capability = _required_rule_text(rule.capability, "capability", 120)
     if not CAPABILITY_RE.fullmatch(capability):
         _invalid_rule("capability invalida na PolicyRule.")
@@ -1398,8 +1398,6 @@ def _validate_policy_rule(rule: object) -> PolicyRule:
     if not MACHINE_CODE_RE.fullmatch(reason_code):
         _invalid_rule("reason_code invalido na PolicyRule.")
     _required_rule_text(rule.reason, "reason", 500)
-    if not system:
-        _invalid_rule("system invalido na PolicyRule.")
     return rule
 
 
@@ -2707,16 +2705,23 @@ git commit -m "docs: add phase 7 policy operations"
 
 **Do not merge in this task. Do not change production behavior to make verification pass. A failure returns to the owning RED/GREEN gate.**
 
-- [ ] **Step 1: Verify execution lineage and final scope against the regression baseline**
+- [ ] **Step 1: Verify recorded execution lineage and final scope against the regression baseline**
+
+Use the `EXECUTION_START_HEAD` captured at implementation handoff. Do not derive or recompute it from commit order.
 
 ```bash
 REGRESSION_BASELINE=7e7142f757f66585f240e16781accd044f31eb6f
-EXECUTION_START_HEAD="$(git log --format=%H --reverse "$REGRESSION_BASELINE"..HEAD | head -n 1)"
-git merge-base --is-ancestor "$REGRESSION_BASELINE" HEAD
+test -n "$EXECUTION_START_HEAD"
+git merge-base --is-ancestor "$REGRESSION_BASELINE" "$EXECUTION_START_HEAD"
+git merge-base --is-ancestor "$EXECUTION_START_HEAD" HEAD
 git diff --name-status "$REGRESSION_BASELINE"...HEAD
+printf 'execution_start=%s\nregression_baseline=%s\nfinal_head=%s\n' \
+  "$EXECUTION_START_HEAD" \
+  "$REGRESSION_BASELINE" \
+  "$(git rev-parse HEAD)"
 ```
 
-The scope comparison intentionally starts at the regression baseline. It does not mean implementation was started by checking out that commit. Review evidence must separately retain the `EXECUTION_START_HEAD` recorded at handoff from the final approved plan head.
+`EXECUTION_START_HEAD` is the exact final plan head explicitly approved by the user and recorded before Gate 1. It is never the first commit after the regression baseline unless those commits happen to be identical by history, and it is never recomputed from `git log`. The regression baseline is only the reference for historical comparison and test preservation.
 
 Allowed implementation files are exactly the Phase 7 file map in this plan plus the plan/spec documentary refinements already present at execution start. Any other changed production or protected file stops the gate for review.
 
