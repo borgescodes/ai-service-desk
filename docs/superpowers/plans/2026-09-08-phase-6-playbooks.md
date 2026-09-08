@@ -36,6 +36,7 @@
 - All Phase 6 committed fixtures and playbooks are synthetic. No real corporate history, ticket text, ticket IDs, hostnames, credentials, or procedures enter Git.
 - Protected Phase 1-5 files remain unchanged unless a focused failing test proves a technical blocker first: `classification.py`, `retrieval.py`, `index.py`, `knowledge.py`, `knowledge_retrieval.py`, `triage.py`.
 - Gates 1 through 8 require observed RED before production implementation for that gate, followed by focused GREEN.
+- Gate 10 preserves the quantitative Phase 5 baseline of 225 tests. The final collection must contain at least `225 + new Phase 6 tests`; if collection is below 225 even before counting Phase 6 additions, stop and investigate missing tests rather than accepting a smaller green suite.
 - Merge is forbidden until full regression, hosted CI, exact-head Dell homologation, final review, and explicit user approval.
 
 ---
@@ -1158,15 +1159,16 @@ git diff --name-only 849d4e6017ba54cf839971556366c4c8ead5f8dc...HEAD
 
 Allowed files after the approved spec are only the plan plus Phase 6 files listed in this document. Any protected file triggers escalation.
 
-- [ ] **Step 2: Full regression**
+- [ ] **Step 2: Full regression and quantitative test baseline**
 
 ```bash
 ruff check .
 ruff format --check .
+pytest --collect-only -q
 pytest -q
 ```
 
-Require zero lint errors, zero format drift, all tests passing including all Phase 1-5 tests.
+Require zero lint errors, zero format drift, and all tests passing including all Phase 1-5 tests. Record `NEW_PHASE6_TESTS` as the number of tests collected from the new Phase 6 test files. The total collected suite must be at least `225 + NEW_PHASE6_TESTS`. Independently, if total collection is below 225 at any point, stop immediately and investigate missing Phase 1-5 tests. A smaller green suite is not acceptable evidence.
 
 - [ ] **Step 3: Zero-execution scans**
 
@@ -1247,7 +1249,7 @@ Capture exact head, merge-base, clean status. PR body records spec/plan, TDD gat
 
 - [ ] **Step 7: Hosted CI**
 
-Require exact-head Python 3.14, Ruff lint, Ruff format, complete pytest suite. On failure use systematic debugging and never weaken fail-closed tests.
+Require exact-head Python 3.14, Ruff lint, Ruff format, complete pytest suite. On failure use systematic debugging and never weaken fail-closed tests. CI evidence must also report the collected test count and satisfy the same `225 + NEW_PHASE6_TESTS` lower bound.
 
 - [ ] **Step 8: Dell homologation on exact PR head**
 
@@ -1255,7 +1257,7 @@ First `git rev-parse HEAD` must equal PR head. Then run Step 5 commands. Require
 
 - [ ] **Step 9: Final review**
 
-Verify exact-head equality, hosted CI green, Dell green, protected files absent, no unresolved threads, inactive content isolation, capability hidden in formatter, no generated artifacts, no corporate fixture data, all corruption paths raise.
+Verify exact-head equality, hosted CI green, Dell green, protected files absent, no unresolved threads, inactive content isolation, capability hidden in formatter, no generated artifacts, no corporate fixture data, all corruption paths raise, and quantitative test collection remains at or above the Phase 5 baseline plus all new Phase 6 tests.
 
 Mark Ready for Review only after these checks. Do not merge.
 
@@ -1290,7 +1292,7 @@ Gate 6: machine/formatter/Phase7/zero-execution RED -> GREEN
 Gate 7: exact 10-case synthetic smoke RED -> GREEN
 Gate 8: CLI RED -> GREEN
 Gate 9: workflow/docs test RED -> GREEN
-Gate 10: full Ruff + full pytest + privacy + CI + same-head Dell + review
+Gate 10: full Ruff + quantitative pytest baseline + privacy + CI + same-head Dell + review
 ```
 
 ---
@@ -1313,6 +1315,7 @@ Phase 6 is complete only when:
 - no executor/action implementation exists;
 - official smoke is 10/10 synthetic;
 - all Phase 1-5 regressions remain green;
+- quantitative test collection is never below 225 and final collection is at least `225 + new Phase 6 tests`;
 - hosted CI is green on exact final head;
 - Dell homologation is green on exact final head;
 - final PR review is clean;
