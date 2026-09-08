@@ -208,9 +208,7 @@ def run_policy_smoke(cases_path: str | Path, report_path: str | Path) -> dict:
                         "passed": False,
                     }
                 )
-        report["ok"] = len(report["cases"]) == 15 and all(
-            row["passed"] for row in report["cases"]
-        )
+        report["ok"] = len(report["cases"]) == 15 and all(row["passed"] for row in report["cases"])
     except (ValueError, RuntimeError, OSError, KeyError) as exc:
         report["error"] = type(exc).__name__
     finally:
