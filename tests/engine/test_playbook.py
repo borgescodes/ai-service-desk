@@ -245,10 +245,94 @@ def test_inactive_playbooks_share_knowledge_without_active_conflict(monkeypatch,
     monkeypatch.setattr("ai_service_desk.engine.playbook.load_knowledge_index", lambda path: trusted_index_double(["KB-SYN-PRINT-001"]))
     source = tmp_path / "playbooks.jsonl"
     write_jsonl(source, [valid_playbook("PB-SYN-D", status="DRAFT"), valid_playbook("PB-SYN-R", status="RETIRED")])
-    result = build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "catalog")
+    out = tmp_path / "catalog"
+    result = build_playbook_catalog(source, tmp_path / "knowledge", out)
     assert result["active_links"] == 0
     assert result["inactive_links"] == 2
-    assert result["inactive_by_knowledge_id"]["KB-SYN-PRINT-001"] == [
+    catalog = json.loads((out / "playbook-catalog.json").read_text(encoding="utf-8"))
+    assert catalog["inactive_by_knowledge_id"]["KB-SYN-PRINT-001"] == [
         {"playbook_id": "PB-SYN-D", "status": "DRAFT", "version": 1},
         {"playbook_id": "PB-SYN-R", "status": "RETIRED", "version": 1},
     ]
+
+
+def test_build_is_deterministic(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "ai_service_desk.engine.playbook.load_knowledge_index",
+        lambda path: trusted_index_double(["KB-SYN-PRINT-001"]),
+    )
+    source = tmp_path / "playbooks.jsonl"
+    write_jsonl(source, [valid_playbook()])
+    first = build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "first")
+    second = build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "second")
+    assert first == second
+    assert first["catalog_hash"] == second["catalog_hash"]
+    first_catalog = json.loads(
+        (tmp_path / "first" / "playbook-catalog.json").read_text(encoding="utf-8")
+    )
+    second_catalog = json.loads(
+        (tmp_path / "second" / "playbook-catalog.json").read_text(encoding="utf-8")
+    )
+    assert first_catalog == second_catalog
+
+
+def test_provenance_binds_source_catalog_and_knowledge(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import canonical_json_bytes, sha256_bytes
+
+    monkeypatch.setattr(
+        "ai_service_desk.engine.playbook.load_knowledge_index",
+        lambda path: trusted_index_double(["KB-SYN-PRINT-001"]),
+    )
+    source = tmp_path / "playbooks.jsonl"
+    write_jsonl(source, [valid_playbook()])
+    out = tmp_path / "catalog"
+    provenance = build_playbook_catalog(source, tmp_path / "knowledge", out)
+    catalog = json.loads((out / "playbook-catalog.json").read_text(encoding="utf-8"))
+    assert set(provenance) == {
+        "version",
+        "domain",
+        "playbook_schema_version",
+        "catalog_schema_version",
+        "catalog_recipe",
+        "source_hash",
+        "catalog_hash",
+        "approved_playbooks",
+        "active_links",
+        "inactive_links",
+        "knowledge_domain",
+        "knowledge_schema_version",
+        "knowledge_source_hash",
+        "knowledge_provenance_hash",
+    }
+    assert provenance["domain"] == "APPROVED_PLAYBOOK"
+    assert provenance["source_hash"] == catalog["source_hash"]
+    assert provenance["knowledge_domain"] == catalog["knowledge_binding"]["domain"]
+    assert provenance["knowledge_schema_version"] == catalog["knowledge_binding"]["schema_version"]
+    assert provenance["knowledge_source_hash"] == catalog["knowledge_binding"]["source_hash"]
+    assert provenance["knowledge_provenance_hash"] == catalog["knowledge_binding"]["provenance_hash"]
+    assert provenance["catalog_hash"] == sha256_bytes(canonical_json_bytes(catalog))
+    assert provenance["approved_playbooks"] == 1
+    assert provenance["active_links"] == 1
+    assert provenance["inactive_links"] == 0
+
+
+def test_provenance_sidecar_is_last_write(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "ai_service_desk.engine.playbook.load_knowledge_index",
+        lambda path: trusted_index_double(["KB-SYN-PRINT-001"]),
+    )
+    source = tmp_path / "playbooks.jsonl"
+    write_jsonl(source, [valid_playbook()])
+
+    from ai_service_desk.engine import playbook as module
+
+    writes: list[str] = []
+    real_atomic = module.atomic_json
+
+    def recording_atomic(path, payload):
+        writes.append(Path(path).name)
+        return real_atomic(path, payload)
+
+    monkeypatch.setattr(module, "atomic_json", recording_atomic)
+    build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "catalog")
+    assert writes == ["playbook-catalog.json", "playbook-provenance.json"]

@@ -203,6 +203,102 @@ def _compile_catalog_rows(playbooks: list[dict], eligible_ids: set[str]) -> dict
     }
 
 
+def _read_json_object(path: Path, label: str) -> dict:
+    if not path.exists() or not path.is_file():
+        raise ValueError(f"{label} nao encontrado.")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
+        raise ValueError(f"{label} invalido.") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} invalido.")
+    return payload
+
+
+def _validate_catalog_build_shape(catalog: dict) -> None:
+    expected = {
+        "catalog_schema_version",
+        "domain",
+        "source_hash",
+        "knowledge_binding",
+        "eligible_knowledge_ids",
+        "playbooks",
+        "active_by_knowledge_id",
+        "inactive_by_knowledge_id",
+    }
+    if set(catalog) != expected:
+        raise ValueError("catalogo de playbook invalido.")
+    if catalog.get("catalog_schema_version") != PLAYBOOK_CATALOG_SCHEMA_VERSION:
+        raise ValueError("catalogo de playbook com schema incompativel.")
+    if catalog.get("domain") != PLAYBOOK_DOMAIN:
+        raise ValueError("catalogo de playbook pertence a outro dominio.")
+    if not isinstance(catalog.get("source_hash"), str) or len(catalog["source_hash"]) != 64:
+        raise ValueError("catalogo de playbook sem source_hash valido.")
+    binding = catalog.get("knowledge_binding")
+    if not isinstance(binding, dict) or set(binding) != {
+        "domain",
+        "schema_version",
+        "source_hash",
+        "provenance_hash",
+    }:
+        raise ValueError("binding de knowledge invalido.")
+    if not isinstance(catalog.get("eligible_knowledge_ids"), list):
+        raise ValueError("catalogo sem knowledge elegivel valido.")
+    for field in ("playbooks", "active_by_knowledge_id", "inactive_by_knowledge_id"):
+        if not isinstance(catalog.get(field), dict):
+            raise ValueError("catalogo de playbook invalido.")
+
+
+def _provenance_from_catalog(catalog: dict, catalog_hash: str) -> dict:
+    binding = catalog["knowledge_binding"]
+    inactive_links = sum(len(rows) for rows in catalog["inactive_by_knowledge_id"].values())
+    return {
+        "version": 1,
+        "domain": PLAYBOOK_DOMAIN,
+        "playbook_schema_version": PLAYBOOK_SCHEMA_VERSION,
+        "catalog_schema_version": PLAYBOOK_CATALOG_SCHEMA_VERSION,
+        "catalog_recipe": CATALOG_RECIPE,
+        "source_hash": catalog["source_hash"],
+        "catalog_hash": catalog_hash,
+        "approved_playbooks": len(catalog["playbooks"]),
+        "active_links": len(catalog["active_by_knowledge_id"]),
+        "inactive_links": inactive_links,
+        "knowledge_domain": binding["domain"],
+        "knowledge_schema_version": binding["schema_version"],
+        "knowledge_source_hash": binding["source_hash"],
+        "knowledge_provenance_hash": binding["provenance_hash"],
+    }
+
+
+def _validate_provenance_build_shape(provenance: dict) -> None:
+    expected = {
+        "version",
+        "domain",
+        "playbook_schema_version",
+        "catalog_schema_version",
+        "catalog_recipe",
+        "source_hash",
+        "catalog_hash",
+        "approved_playbooks",
+        "active_links",
+        "inactive_links",
+        "knowledge_domain",
+        "knowledge_schema_version",
+        "knowledge_source_hash",
+        "knowledge_provenance_hash",
+    }
+    if set(provenance) != expected:
+        raise ValueError("playbook provenance invalida.")
+    if (
+        provenance.get("version") != 1
+        or provenance.get("domain") != PLAYBOOK_DOMAIN
+        or provenance.get("playbook_schema_version") != PLAYBOOK_SCHEMA_VERSION
+        or provenance.get("catalog_schema_version") != PLAYBOOK_CATALOG_SCHEMA_VERSION
+        or provenance.get("catalog_recipe") != CATALOG_RECIPE
+    ):
+        raise ValueError("playbook provenance invalida.")
+
+
 def build_playbook_catalog(
     source: str | Path,
     knowledge_index_directory: str | Path,
@@ -214,13 +310,60 @@ def build_playbook_catalog(
     eligible_ids = set(data["knowledge_id"].astype(str).tolist())
     if not eligible_ids:
         raise ValueError("Indice APPROVED_KNOWLEDGE sem knowledge elegivel.")
-    playbooks = load_playbooks(source)
+
+    source_path = Path(source)
+    playbooks = load_playbooks(source_path)
     compiled = _compile_catalog_rows(playbooks, eligible_ids)
-    return {
-        **compiled,
-        "approved_playbooks": len(compiled["playbooks"]),
-        "active_links": len(compiled["active_by_knowledge_id"]),
-        "inactive_links": sum(len(rows) for rows in compiled["inactive_by_knowledge_id"].values()),
-        "knowledge_provenance": knowledge_provenance,
-        "eligible_knowledge_ids": sorted(eligible_ids),
+    approved_playbooks = {
+        key: compiled["playbooks"][key] for key in sorted(compiled["playbooks"])
     }
+    active_by_knowledge_id = {
+        key: compiled["active_by_knowledge_id"][key]
+        for key in sorted(compiled["active_by_knowledge_id"])
+    }
+    inactive_by_knowledge_id = {
+        key: sorted(
+            compiled["inactive_by_knowledge_id"][key],
+            key=lambda item: (item["playbook_id"], item["status"], item["version"]),
+        )
+        for key in sorted(compiled["inactive_by_knowledge_id"])
+    }
+
+    knowledge_provenance_hash = sha256_bytes(canonical_json_bytes(knowledge_provenance))
+    source_hash = sha256_bytes(source_path.read_bytes())
+    catalog = {
+        "catalog_schema_version": PLAYBOOK_CATALOG_SCHEMA_VERSION,
+        "domain": PLAYBOOK_DOMAIN,
+        "source_hash": source_hash,
+        "knowledge_binding": {
+            "domain": knowledge_provenance["domain"],
+            "schema_version": knowledge_provenance["knowledge_schema_version"],
+            "source_hash": knowledge_provenance["source_hash"],
+            "provenance_hash": knowledge_provenance_hash,
+        },
+        "eligible_knowledge_ids": sorted(eligible_ids),
+        "playbooks": approved_playbooks,
+        "active_by_knowledge_id": active_by_knowledge_id,
+        "inactive_by_knowledge_id": inactive_by_knowledge_id,
+    }
+    _validate_catalog_build_shape(catalog)
+
+    root = Path(output_directory)
+    catalog_path = root / PLAYBOOK_CATALOG_FILE
+    provenance_path = root / PLAYBOOK_PROVENANCE_FILE
+    atomic_json(catalog_path, catalog)
+    published_catalog = _read_json_object(catalog_path, "catalogo de playbook")
+    _validate_catalog_build_shape(published_catalog)
+    catalog_hash = sha256_bytes(canonical_json_bytes(published_catalog))
+
+    provenance = _provenance_from_catalog(published_catalog, catalog_hash)
+    _validate_provenance_build_shape(provenance)
+    atomic_json(provenance_path, provenance)
+
+    final_catalog = _read_json_object(catalog_path, "catalogo de playbook")
+    final_provenance = _read_json_object(provenance_path, "playbook provenance")
+    _validate_catalog_build_shape(final_catalog)
+    _validate_provenance_build_shape(final_provenance)
+    if final_provenance["catalog_hash"] != sha256_bytes(canonical_json_bytes(final_catalog)):
+        raise ValueError("catalogo e provenance divergentes apos publicacao.")
+    return final_provenance
