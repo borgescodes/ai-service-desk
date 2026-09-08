@@ -1,0 +1,85 @@
+name: Phase 7 policy smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Exact candidate commit SHA to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  phase7-policy-smoke:
+    name: Windows Phase 7 policy smoke
+    runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref }}
+
+      - name: Verify exact target SHA
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expected = $env:TARGET_REF.Trim().ToLowerInvariant()
+          if ($expected -notmatch '^[0-9a-f]{40}$') {
+            throw "target_ref must be an exact 40-character commit SHA"
+          }
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Checked out SHA $actual differs from target_ref $expected"
+          }
+          Write-Host "Exact head verified: $actual"
+
+      - name: Verify Python 3.14
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+          Write-Host "Python: $version"
+          if (-not $version.StartsWith("3.14.")) {
+            throw "Phase 7 policy smoke requires Python 3.14.x. Found $version"
+          }
+
+      - name: Install project
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run Ruff lint
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ruff check .
+
+      - name: Run Ruff format check
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ruff format --check .
+
+      - name: Run complete test suite
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pytest -q
+
+      - name: Run Phase 7 policy smoke
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $report = Join-Path $env:RUNNER_TEMP "phase7-policy-$env:GITHUB_RUN_ID.json"
+          Remove-Item -Force $report -ErrorAction SilentlyContinue
+          python -m ai_service_desk policy-smoke `
+            --cases tests/fixtures/phase7_policy_cases.jsonl `
+            --report "$report"
