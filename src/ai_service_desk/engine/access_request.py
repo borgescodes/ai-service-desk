@@ -142,9 +142,7 @@ def validate_access_request_context(context: AccessRequestContext) -> None:
 def _nominal_role_signals(normalized: str) -> set[str]:
     tokens = set(normalized.split())
     return {
-        role
-        for role, terms in ROLE_NOMINAL_TERMS.items()
-        if any(term in tokens for term in terms)
+        role for role, terms in ROLE_NOMINAL_TERMS.items() if any(term in tokens for term in terms)
     }
 
 
