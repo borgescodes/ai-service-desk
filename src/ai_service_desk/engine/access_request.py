@@ -122,10 +122,7 @@ def validate_access_request_context(context: AccessRequestContext) -> None:
     intent = _required_text(context.intent, "intent", 120)
     if intent not in ALLOWED_INTENTS:
         raise AccessRequestValidationError("intent fora do contrato existente.")
-    if (
-        not isinstance(context.requested_role, str)
-        or context.requested_role not in CONCRETE_ROLES
-    ):
+    if not isinstance(context.requested_role, str) or context.requested_role not in CONCRETE_ROLES:
         raise AccessRequestValidationError("requested_role fora do contrato concreto.")
     _required_text(context.purpose, "purpose", 3000)
     _required_text(context.knowledge_id, "knowledge_id", 120)
