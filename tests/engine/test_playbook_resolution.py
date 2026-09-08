@@ -1,8 +1,13 @@
 from pathlib import Path
+import subprocess
 
 import pytest
 
-from ai_service_desk.engine.playbook_resolution import PlaybookEngine
+from ai_service_desk.engine.playbook_resolution import (
+    PlaybookEngine,
+    action_proposal_descriptor,
+    format_playbook_result,
+)
 
 
 def catalog_double():
@@ -27,7 +32,14 @@ def catalog_double():
                         "title": "Verificar fila ficticia",
                         "instruction": "Confirme o estado da fila ficticia.",
                         "capability": "",
-                    }
+                    },
+                    {
+                        "step_id": "STEP-02",
+                        "type": "ACTION_PROPOSAL",
+                        "title": "Considerar limpeza ficticia",
+                        "instruction": "A limpeza ficticia pode ser considerada como proxima acao.",
+                        "capability": "DEMO_PRINT_QUEUE_CLEAR",
+                    },
                 ],
             }
         },
@@ -152,3 +164,70 @@ def test_resolve_rejects_invalid_knowledge_id(monkeypatch, tmp_path: Path, knowl
 def test_resolve_rejects_id_outside_eligible_set(monkeypatch, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="elegivel"):
         engine(monkeypatch, tmp_path).resolve_knowledge_id("KB-SYN-NOT-ELIGIBLE-001")
+
+
+def test_machine_result_contains_action_capability(monkeypatch, tmp_path: Path) -> None:
+    result = engine(monkeypatch, tmp_path).resolve_knowledge_id("KB-SYN-PRINT-001")
+    action = result["playbook"]["steps"][1]
+    assert result["playbook"]["playbook_version"] == 1
+    assert action["type"] == "ACTION_PROPOSAL"
+    assert action["capability"] == "DEMO_PRINT_QUEUE_CLEAR"
+
+
+def test_action_descriptor_exact_contract(monkeypatch, tmp_path: Path) -> None:
+    result = engine(monkeypatch, tmp_path).resolve_knowledge_id("KB-SYN-PRINT-001")
+    action = result["playbook"]["steps"][1]
+    assert action_proposal_descriptor("KB-SYN-PRINT-001", result["playbook"], action) == {
+        "knowledge_id": "KB-SYN-PRINT-001",
+        "playbook_id": "PB-SYN-PRINT-001",
+        "playbook_version": 1,
+        "step_id": "STEP-02",
+        "type": "ACTION_PROPOSAL",
+        "capability": "DEMO_PRINT_QUEUE_CLEAR",
+    }
+
+
+def test_descriptor_rejects_check(monkeypatch, tmp_path: Path) -> None:
+    result = engine(monkeypatch, tmp_path).resolve_knowledge_id("KB-SYN-PRINT-001")
+    with pytest.raises(ValueError, match="ACTION_PROPOSAL"):
+        action_proposal_descriptor(
+            "KB-SYN-PRINT-001",
+            result["playbook"],
+            result["playbook"]["steps"][0],
+        )
+
+
+def test_formatter_hides_capability_and_internal_reason(monkeypatch, tmp_path: Path) -> None:
+    found = engine(monkeypatch, tmp_path).resolve_knowledge_id("KB-SYN-PRINT-001")
+    text = format_playbook_result(found)
+    assert "Impressao sintetica" in text
+    assert "Procedimento aprovado ficticio." in text
+    assert "Verificar fila ficticia" in text
+    assert "Confirme o estado da fila ficticia." in text
+    assert "Acao proposta:" in text
+    assert "A limpeza ficticia pode ser considerada como proxima acao." in text
+    assert "DEMO_PRINT_QUEUE_CLEAR" not in text
+    assert "APPROVED_PLAYBOOK" not in text
+    unavailable = engine(monkeypatch, tmp_path).resolve_knowledge_id("KB-SYN-OUTLOOK-001")
+    unavailable_text = format_playbook_result(unavailable)
+    assert "PLAYBOOK_RETIRED" not in unavailable_text
+
+
+def test_formatter_knowledge_only_is_empty(monkeypatch, tmp_path: Path) -> None:
+    result = engine(monkeypatch, tmp_path).resolve_knowledge_id("KB-SYN-VPN-001")
+    assert format_playbook_result(result) == ""
+
+
+def test_action_proposal_is_data_only(monkeypatch, tmp_path: Path) -> None:
+    calls = []
+
+    def forbidden(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("executor must not be called")
+
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    result = engine(monkeypatch, tmp_path).resolve_knowledge_id("KB-SYN-PRINT-001")
+    action = result["playbook"]["steps"][1]
+    action_proposal_descriptor("KB-SYN-PRINT-001", result["playbook"], action)
+    format_playbook_result(result)
+    assert calls == []

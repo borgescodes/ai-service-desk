@@ -65,3 +65,49 @@ class PlaybookEngine:
             "knowledge_id": knowledge_id,
             "playbook": None,
         }
+
+
+def action_proposal_descriptor(
+    knowledge_id: str,
+    playbook: Mapping[str, object],
+    step: Mapping[str, object],
+) -> dict:
+    if not isinstance(step, Mapping) or step.get("type") != "ACTION_PROPOSAL":
+        raise ValueError("step nao e ACTION_PROPOSAL")
+    capability = step.get("capability")
+    if not isinstance(capability, str) or not capability:
+        raise ValueError("ACTION_PROPOSAL sem capability valida")
+    return {
+        "knowledge_id": knowledge_id,
+        "playbook_id": playbook["playbook_id"],
+        "playbook_version": playbook["playbook_version"],
+        "step_id": step["step_id"],
+        "type": "ACTION_PROPOSAL",
+        "capability": capability,
+    }
+
+
+def format_playbook_result(result: Mapping[str, object]) -> str:
+    status = result.get("status")
+    if status == "KNOWLEDGE_ONLY":
+        return ""
+    if status == "PLAYBOOK_UNAVAILABLE":
+        return "Ha um procedimento relacionado, mas ele nao esta disponivel para orientacao neste momento."
+    if status != "PLAYBOOK_FOUND":
+        raise ValueError("resultado de playbook invalido para formatacao.")
+
+    playbook = result.get("playbook")
+    if not isinstance(playbook, Mapping):
+        raise ValueError("resultado PLAYBOOK_FOUND sem playbook valido.")
+    lines = [str(playbook["title"]), str(playbook["description"])]
+    steps = playbook.get("steps")
+    if not isinstance(steps, list):
+        raise ValueError("playbook sem steps validos.")
+    for raw_step in steps:
+        if not isinstance(raw_step, Mapping):
+            raise ValueError("step invalido para formatacao.")
+        if raw_step.get("type") == "ACTION_PROPOSAL":
+            lines.append("Acao proposta:")
+        lines.append(str(raw_step["title"]))
+        lines.append(str(raw_step["instruction"]))
+    return "\n".join(lines)
