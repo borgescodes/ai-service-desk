@@ -29,7 +29,7 @@
 - `DRAFT` and `RETIRED` never contribute title, description, instruction, capability, or step text to the operational catalog.
 - `PLAYBOOK_UNAVAILABLE` is only a normal lifecycle result from a valid catalog. Corruption, conflict, schema failure, and provenance mismatch raise explicit errors before resolution.
 - `playbook-provenance.json` is written only after the complete catalog has been atomically written, re-read, structurally validated, and hashed.
-- Production build/load/runtime obtains current knowledge trust from `load_knowledge_index(...)` or an already validated `KnowledgeEngine`. This plan chooses the simpler public runtime contract that receives `knowledge_index_directory` and calls `load_knowledge_index(...)` internally.
+- Production build/load/runtime obtains current knowledge trust from `load_knowledge_index(...)` or an already validated `KnowledgeEngine`. This plan chooses the public runtime contract that receives `knowledge_index_directory` and calls `load_knowledge_index(...)` internally.
 - Tests may monkeypatch the imported `load_knowledge_index` boundary with controlled doubles. No production API accepts `knowledge_provenance: dict`.
 - Phase 6 result owns only `status`, `reason`, `knowledge_id`, and `playbook`. It does not duplicate `answer`, `question`, `system`, `intent`, `score`, or `threshold`.
 - Machine results include `capability`; user-facing formatting does not expose it automatically.
@@ -44,27 +44,9 @@
 
 ### Create
 
-- `src/ai_service_desk/engine/playbook.py`
-  - strict source schema;
-  - lifecycle rules;
-  - canonical JSON/hash helpers;
-  - reference/cardinality validation;
-  - deterministic catalog build;
-  - provenance build;
-  - fail-closed catalog/provenance load.
-
-- `src/ai_service_desk/engine/playbook_resolution.py`
-  - `PlaybookEngine`;
-  - exact resolution;
-  - machine result;
-  - Phase 7 action descriptor;
-  - user formatter.
-
-- `src/ai_service_desk/engine/playbook_smoke.py`
-  - strict 10-case smoke loader;
-  - controlled source/catalog mutations for negative cases;
-  - aggregate-only report.
-
+- `src/ai_service_desk/engine/playbook.py`: source validation, lifecycle, canonical hashes, reference/cardinality validation, catalog build, provenance, fail-closed load.
+- `src/ai_service_desk/engine/playbook_resolution.py`: `PlaybookEngine`, exact resolution, machine result, Phase 7 descriptor, user formatter.
+- `src/ai_service_desk/engine/playbook_smoke.py`: strict 10-case smoke and aggregate-only report.
 - `playbooks/phase6_synthetic_playbooks.jsonl`
 - `tests/fixtures/phase6_playbook_cases.jsonl`
 - `tests/engine/test_playbook.py`
@@ -93,8 +75,6 @@
 
 ## Locked Interfaces
 
-Use these exact public names unless a focused RED test proves a blocker and the plan is amended before implementation continues.
-
 ### `src/ai_service_desk/engine/playbook.py`
 
 ```text
@@ -114,7 +94,7 @@ build_playbook_catalog(source: str | Path, knowledge_index_directory: str | Path
 load_playbook_catalog(directory: str | Path, knowledge_index_directory: str | Path) -> tuple[dict, dict]
 ```
 
-`build_playbook_catalog(...)` and `load_playbook_catalog(...)` call the existing `load_knowledge_index(...)` internally. Neither accepts a provenance mapping from a public caller.
+`build_playbook_catalog(...)` and `load_playbook_catalog(...)` call the existing fail-closed `load_knowledge_index(...)` internally. Neither accepts a provenance mapping from a public caller.
 
 ### `src/ai_service_desk/engine/playbook_resolution.py`
 
@@ -126,14 +106,7 @@ action_proposal_descriptor(knowledge_id: str, playbook: Mapping[str, object], st
 format_playbook_result(result: Mapping[str, object]) -> str
 ```
 
-Machine result keys are always exactly:
-
-```text
-status
-reason
-knowledge_id
-playbook
-```
+Machine result keys are always exactly `status`, `reason`, `knowledge_id`, `playbook`.
 
 Normal statuses/reasons:
 
@@ -144,11 +117,9 @@ PLAYBOOK_UNAVAILABLE / PLAYBOOK_NOT_APPROVED
 PLAYBOOK_UNAVAILABLE / PLAYBOOK_RETIRED
 ```
 
-Integrity errors are exceptions, never normal statuses.
+Integrity errors are exceptions, never business statuses.
 
-### Phase 7 descriptor
-
-For an `ACTION_PROPOSAL`, the projection keys are exactly:
+For `ACTION_PROPOSAL`, the Phase 7 projection keys are exactly:
 
 ```text
 knowledge_id
@@ -161,9 +132,9 @@ capability
 
 ---
 
-## Shared Test Helpers Required by Gates 1-6
+## Shared Test Helpers for Gates 1-6
 
-Define these concrete helpers in `tests/engine/test_playbook.py` and reuse equivalent data in `tests/engine/test_playbook_resolution.py`. Do not create a production fixture module just for tests.
+Use these concrete helpers in `tests/engine/test_playbook.py`. Resolution tests may use equivalent local dictionaries rather than importing test code across modules.
 
 ```python
 import json
@@ -171,6 +142,8 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+
+from ai_service_desk.engine.index import RECIPE
 
 
 def valid_step(
@@ -197,8 +170,10 @@ def valid_playbook(
         "playbook_id": playbook_id,
         "title": "Playbook sintetico",
         "description": "Procedimento totalmente sintetico para testes.",
-        "knowledge_ids": knowledge_ids or ["KB-SYN-PRINT-001"],
-        "steps": steps or [valid_step()],
+        "knowledge_ids": (
+            knowledge_ids if knowledge_ids is not None else ["KB-SYN-PRINT-001"]
+        ),
+        "steps": steps if steps is not None else [valid_step()],
         "source": "SYNTHETIC_DEMO",
         "status": status,
         "reviewed_by": "synthetic-reviewer" if status == "APPROVED" else "",
@@ -214,7 +189,7 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
     )
 
 
-def trusted_knowledge_provenance(source_hash: str = "b" * 64) -> dict:
+def trusted_knowledge_provenance(rows: int, source_hash: str = "b" * 64) -> dict:
     return {
         "version": 1,
         "domain": "APPROVED_KNOWLEDGE",
@@ -223,20 +198,20 @@ def trusted_knowledge_provenance(source_hash: str = "b" * 64) -> dict:
         "approved_only": True,
         "source_hash": source_hash,
         "matrix_hash": "c" * 64,
-        "rows": 2,
+        "rows": rows,
         "dimensions": 1024,
         "model": "qwen3-embedding:0.6b",
         "model_digest": "d" * 64,
-        "index_recipe": "semantic-index-v1",
+        "index_recipe": RECIPE,
     }
 
 
 def trusted_index_double(ids: list[str], source_hash: str = "b" * 64):
     data = pd.DataFrame({"knowledge_id": ids})
-    return data, object(), trusted_knowledge_provenance(source_hash)
+    return data, object(), trusted_knowledge_provenance(len(ids), source_hash)
 ```
 
-If the actual Phase 4 `RECIPE` constant differs from the illustrative `"semantic-index-v1"`, the test helper must import `RECIPE` from `ai_service_desk.engine.index` instead of hard-coding a different value. Do not modify the protected constant.
+The real protected `RECIPE` currently resolves to `texto_busca-plain-v1`; import it rather than duplicating the constant.
 
 ---
 
@@ -244,15 +219,11 @@ If the actual Phase 4 `RECIPE` constant differs from the illustrative `"semantic
 
 ### Task 1: Strict source loader
 
-**Files:**
-- Create: `src/ai_service_desk/engine/playbook.py`
-- Create: `tests/engine/test_playbook.py`
+**Files:** create `src/ai_service_desk/engine/playbook.py`, create `tests/engine/test_playbook.py`.
 
-**Produces:** `load_playbooks`, source constants, canonical JSON/hash helpers.
+**Produces:** `load_playbooks`, constants, canonical hash helpers.
 
 - [ ] **Step 1: Write the first failing tests**
-
-Create these exact tests with full bodies:
 
 ```python
 def test_load_playbooks_accepts_strict_valid_source(tmp_path: Path) -> None:
@@ -287,45 +258,43 @@ def test_load_playbooks_rejects_extra_field(tmp_path: Path) -> None:
 pytest tests/engine/test_playbook.py::test_load_playbooks_accepts_strict_valid_source tests/engine/test_playbook.py::test_load_playbooks_rejects_missing_field tests/engine/test_playbook.py::test_load_playbooks_rejects_extra_field -v
 ```
 
-Expected: import or missing-function failure. Do not write production implementation before observing this failure.
+Expected: import or missing-function failure. Do not create production implementation before observing RED.
 
 - [ ] **Step 3: Add the exact schema test matrix**
 
-Add one test per row below. Each test mutates `valid_playbook()`, writes one JSONL source, calls `load_playbooks`, and asserts `ValueError`.
+Each row is one explicit test that mutates `valid_playbook()`, writes JSONL, and asserts `ValueError`.
 
 | Test name | Mutation | Expected failure theme |
 | --- | --- | --- |
-| `test_rejects_duplicate_playbook_id` | write same `playbook_id` twice | duplicate ID |
+| `test_rejects_duplicate_playbook_id` | same `playbook_id` twice | duplicate ID |
 | `test_rejects_empty_source` | zero nonblank lines | empty base |
-| `test_rejects_invalid_utf8` | write invalid bytes | UTF-8 |
-| `test_rejects_invalid_json` | write `{not-json}` | invalid JSON |
+| `test_rejects_invalid_utf8` | invalid bytes | UTF-8 |
+| `test_rejects_invalid_json` | `{not-json}` | invalid JSON |
 | `test_rejects_invalid_status` | `status="ACTIVE"` | lifecycle |
-| `test_rejects_approved_without_reviewer` | blank `reviewed_by` | approval review |
-| `test_rejects_approved_without_reviewed_at` | blank `reviewed_at` | approval review |
+| `test_rejects_approved_without_reviewer` | blank `reviewed_by` | review |
+| `test_rejects_approved_without_reviewed_at` | blank `reviewed_at` | review |
 | `test_rejects_reviewed_at_without_timezone` | `2026-09-08T01:00:00` | timezone |
-| `test_rejects_boolean_version` | `version=True` | positive integer |
-| `test_rejects_zero_version` | `version=0` | positive integer |
+| `test_rejects_boolean_version` | `True` | integer |
+| `test_rejects_zero_version` | `0` | positive integer |
 | `test_rejects_duplicate_knowledge_id_inside_playbook` | same ID twice | duplicate link |
-| `test_rejects_empty_knowledge_ids` | `[]` | 1..20 links |
-| `test_rejects_more_than_20_knowledge_ids` | 21 synthetic IDs | 1..20 links |
-| `test_rejects_empty_steps` | `[]` | 1..20 steps |
-| `test_rejects_more_than_20_steps` | 21 unique synthetic steps | 1..20 steps |
-| `test_rejects_duplicate_step_id` | two `STEP-01` | duplicate step ID |
-| `test_rejects_invalid_step_type` | `type="EXECUTE"` | official type |
-| `test_action_proposal_requires_capability` | action with empty capability | symbolic capability |
-| `test_instruction_rejects_capability` | instruction with `DEMO_X` | empty capability |
-| `test_check_rejects_capability` | check with `DEMO_X` | empty capability |
+| `test_rejects_empty_knowledge_ids` | `[]` | 1..20 |
+| `test_rejects_more_than_20_knowledge_ids` | 21 IDs | 1..20 |
+| `test_rejects_empty_steps` | `[]` | 1..20 |
+| `test_rejects_more_than_20_steps` | 21 unique steps | 1..20 |
+| `test_rejects_duplicate_step_id` | two `STEP-01` | duplicate step |
+| `test_rejects_invalid_step_type` | `EXECUTE` | official type |
+| `test_action_proposal_requires_capability` | empty capability | symbolic capability |
+| `test_instruction_rejects_capability` | `DEMO_X` | empty capability |
+| `test_check_rejects_capability` | `DEMO_X` | empty capability |
 | `test_rejects_invalid_capability` | `pwsh.exe` | regex |
 | `test_rejects_overlong_playbook_id` | 121 chars | limit 120 |
 | `test_rejects_overlong_title` | 181 chars | limit 180 |
 | `test_rejects_overlong_description` | 1001 chars | limit 1000 |
 | `test_rejects_overlong_step_instruction` | 1501 chars | limit 1500 |
 
-Also add positive lifecycle tests for all three statuses and positive step-type tests for `INSTRUCTION`, `CHECK`, and `ACTION_PROPOSAL` with a valid capability for the last type.
+Positive tests must cover all three lifecycles and all three step types, with `DEMO_PRINT_QUEUE_CLEAR` for the valid action proposal.
 
 - [ ] **Step 4: Implement the strict validator**
-
-Production constants and exact field sets:
 
 ```python
 PLAYBOOK_SCHEMA_VERSION = 1
@@ -344,11 +313,11 @@ PLAYBOOK_FIELDS = {
 STEP_FIELDS = {"step_id", "type", "title", "instruction", "capability"}
 ```
 
-Limits:
+Exact limits:
 
 ```text
 playbook_id 1..120
-playbook title 1..180
+title 1..180
 description 1..1000
 knowledge_ids 1..20, each 1..120
 steps 1..20
@@ -362,7 +331,7 @@ reviewed_at 0..80
 version positive non-bool int
 ```
 
-Canonical helpers are exactly:
+Canonical helpers:
 
 ```python
 def canonical_json_bytes(payload: object) -> bytes:
@@ -378,19 +347,12 @@ def sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 ```
 
-- [ ] **Step 5: Run GREEN**
+- [ ] **Step 5: Run GREEN and commit**
 
 ```bash
 pytest tests/engine/test_playbook.py -v
 ruff check src/ai_service_desk/engine/playbook.py tests/engine/test_playbook.py
 ruff format --check src/ai_service_desk/engine/playbook.py tests/engine/test_playbook.py
-```
-
-Expected: all pass.
-
-- [ ] **Step 6: Commit Gate 1**
-
-```bash
 git add src/ai_service_desk/engine/playbook.py tests/engine/test_playbook.py
 git commit -m "feat: validate declarative playbook schema"
 ```
@@ -401,11 +363,9 @@ git commit -m "feat: validate declarative playbook schema"
 
 ### Task 2: Reference validation and active ownership
 
-**Files:**
-- Modify: `src/ai_service_desk/engine/playbook.py`
-- Modify: `tests/engine/test_playbook.py`
+**Files:** modify `playbook.py`, modify `test_playbook.py`.
 
-**Produces:** `build_playbook_catalog(...)` reference/cardinality layer.
+**Produces:** `build_playbook_catalog(...)`.
 
 - [ ] **Step 1: Write RED trust-boundary test**
 
@@ -433,9 +393,9 @@ def test_build_uses_validated_knowledge_index_loader(monkeypatch, tmp_path: Path
 pytest tests/engine/test_playbook.py::test_build_uses_validated_knowledge_index_loader -v
 ```
 
-Expected: missing `build_playbook_catalog`.
+Expected: missing build function.
 
-- [ ] **Step 3: Add concrete reference tests**
+- [ ] **Step 3: Add reference and public-signature tests**
 
 ```python
 def test_build_accepts_reference_present_in_approved_index(monkeypatch, tmp_path: Path) -> None:
@@ -460,11 +420,9 @@ def test_build_rejects_reference_absent_from_approved_index(monkeypatch, tmp_pat
         build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "catalog")
 ```
 
-Add a signature test using `inspect.signature(build_playbook_catalog)` and assert its parameter names are exactly `source`, `knowledge_index_directory`, `output_directory`. This proves raw knowledge source and provenance mappings are not part of the build API.
+Use `inspect.signature(build_playbook_catalog)` to assert parameters are exactly `source`, `knowledge_index_directory`, `output_directory`. No raw knowledge source or provenance mapping parameter is allowed.
 
-- [ ] **Step 4: Add concrete cardinality tests**
-
-Use two approved knowledge IDs in the trusted index.
+- [ ] **Step 4: Add cardinality tests**
 
 ```python
 def test_one_approved_playbook_can_link_multiple_knowledge_ids(monkeypatch, tmp_path: Path) -> None:
@@ -485,33 +443,30 @@ def test_two_approved_playbooks_for_same_knowledge_reject_build(monkeypatch, tmp
         lambda path: trusted_index_double(["KB-SYN-PRINT-001"]),
     )
     source = tmp_path / "playbooks.jsonl"
-    write_jsonl(
-        source,
-        [valid_playbook("PB-SYN-A"), valid_playbook("PB-SYN-B")],
-    )
+    write_jsonl(source, [valid_playbook("PB-SYN-A"), valid_playbook("PB-SYN-B")])
     with pytest.raises(ValueError, match="mais de um playbook APPROVED"):
         build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "catalog")
 ```
 
-Also add one test proving a DRAFT and RETIRED may coexist for the same approved knowledge without creating an active conflict.
+Add a test with one DRAFT plus one RETIRED for the same approved knowledge and assert build succeeds with `active_links == 0` and two inactive metadata records.
 
-- [ ] **Step 5: Implement compilation rules**
+- [ ] **Step 5: Implement compilation**
 
-Private compiler contract:
+Private contract:
 
 ```text
 _compile_catalog_rows(playbooks: list[dict], eligible_ids: set[str]) -> dict
 ```
 
-Compilation rules:
+Rules:
 
 1. every referenced ID from every lifecycle must exist in `eligible_ids`;
-2. only APPROVED populates full `playbooks` and `active_by_knowledge_id`;
+2. APPROVED populates full `playbooks` and `active_by_knowledge_id`;
 3. DRAFT/RETIRED populate only `playbook_id`, `status`, `version` in `inactive_by_knowledge_id`;
-4. second APPROVED owner for one knowledge ID raises before output write;
-5. no inactive title, description, steps, instruction, or capability is copied.
+4. second APPROVED owner for one knowledge ID raises before any output write;
+5. inactive content never copies title, description, steps, instruction, capability.
 
-Build begins with:
+Build starts with:
 
 ```python
 data, _, knowledge_provenance = load_knowledge_index(knowledge_index_directory)
@@ -533,9 +488,7 @@ git commit -m "feat: bind playbooks to approved knowledge ids"
 
 ### Task 3: Atomic build and cryptographic binding
 
-**Files:**
-- Modify: `src/ai_service_desk/engine/playbook.py`
-- Modify: `tests/engine/test_playbook.py`
+**Files:** modify `playbook.py`, modify `test_playbook.py`.
 
 - [ ] **Step 1: Write RED deterministic build test**
 
@@ -551,18 +504,22 @@ def test_build_is_deterministic(monkeypatch, tmp_path: Path) -> None:
     second = build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "second")
     assert first == second
     assert first["catalog_hash"] == second["catalog_hash"]
-    first_catalog = json.loads((tmp_path / "first" / "playbook-catalog.json").read_text(encoding="utf-8"))
-    second_catalog = json.loads((tmp_path / "second" / "playbook-catalog.json").read_text(encoding="utf-8"))
+    first_catalog = json.loads(
+        (tmp_path / "first" / "playbook-catalog.json").read_text(encoding="utf-8")
+    )
+    second_catalog = json.loads(
+        (tmp_path / "second" / "playbook-catalog.json").read_text(encoding="utf-8")
+    )
     assert first_catalog == second_catalog
 ```
 
 - [ ] **Step 2: Run RED**
 
-Run only this test. Expected failure because Gate 2 does not yet publish the final provenance shape.
+Expected: Gate 2 lacks final provenance/hash behavior.
 
 - [ ] **Step 3: Add exact provenance binding tests**
 
-Verify these fields are present and no extras exist:
+Sidecar keys are exactly:
 
 ```text
 version
@@ -581,7 +538,7 @@ knowledge_source_hash
 knowledge_provenance_hash
 ```
 
-Add assertions:
+Assertions:
 
 ```python
 assert provenance["domain"] == "APPROVED_PLAYBOOK"
@@ -593,7 +550,7 @@ assert provenance["knowledge_provenance_hash"] == catalog["knowledge_binding"]["
 assert provenance["catalog_hash"] == sha256_bytes(canonical_json_bytes(catalog))
 ```
 
-- [ ] **Step 4: Write sidecar ordering test with complete setup**
+- [ ] **Step 4: Write sidecar-last test**
 
 ```python
 def test_provenance_sidecar_is_last_write(monkeypatch, tmp_path: Path) -> None:
@@ -618,9 +575,9 @@ def test_provenance_sidecar_is_last_write(monkeypatch, tmp_path: Path) -> None:
     assert writes == ["playbook-catalog.json", "playbook-provenance.json"]
 ```
 
-- [ ] **Step 5: Implement exact catalog shape**
+- [ ] **Step 5: Implement catalog/provenance**
 
-Top-level catalog keys:
+Catalog keys exactly:
 
 ```text
 catalog_schema_version
@@ -633,35 +590,28 @@ active_by_knowledge_id
 inactive_by_knowledge_id
 ```
 
-`knowledge_binding` keys:
-
-```text
-domain
-schema_version
-source_hash
-provenance_hash
-```
+`knowledge_binding` keys exactly `domain`, `schema_version`, `source_hash`, `provenance_hash`.
 
 Hash rules:
 
-- `source_hash`: SHA-256 over exact playbook JSONL bytes.
-- `catalog_hash`: SHA-256 over `canonical_json_bytes(parsed_catalog)`.
-- `knowledge_provenance_hash`: SHA-256 over `canonical_json_bytes(validated_knowledge_provenance)`.
+- source hash is SHA-256 over exact JSONL bytes;
+- catalog hash is SHA-256 over canonical parsed catalog JSON;
+- knowledge provenance hash is SHA-256 over canonical validated knowledge provenance JSON.
 
-Build ordering:
+Build order:
 
 1. validated knowledge load;
 2. source validation;
 3. reference/cardinality compilation;
 4. construct catalog;
-5. `atomic_json(catalog_path, catalog)`;
-6. re-read and validate catalog structure;
+5. atomic catalog write;
+6. re-read and structurally validate catalog;
 7. calculate catalog hash;
-8. construct provenance;
-9. `atomic_json(sidecar_path, provenance)`;
-10. re-read both and validate pair before success return.
+8. construct sidecar;
+9. atomic sidecar write;
+10. re-read and validate pair before returning provenance.
 
-If step 9 fails, a catalog without sidecar may remain. Gate 4 must reject that state explicitly.
+A catalog left without sidecar after write failure is intentionally unusable and must fail Gate 4 load.
 
 - [ ] **Step 6: Run GREEN and commit**
 
@@ -677,11 +627,9 @@ git commit -m "feat: build deterministic playbook catalog"
 
 # Gate 4 - Fail-Closed Load and Corruption
 
-### Task 4: Reject every integrity ambiguity before resolution
+### Task 4: Reject integrity ambiguity before resolution
 
-**Files:**
-- Modify: `src/ai_service_desk/engine/playbook.py`
-- Modify: `tests/engine/test_playbook.py`
+**Files:** modify `playbook.py`, modify `test_playbook.py`.
 
 **Produces:** `load_playbook_catalog(directory, knowledge_index_directory)`.
 
@@ -704,33 +652,33 @@ def test_load_rejects_missing_sidecar(monkeypatch, tmp_path: Path) -> None:
 
 - [ ] **Step 2: Run RED**
 
-Expected: missing `load_playbook_catalog` or missing fail-closed behavior.
+Expected: missing load function or missing fail-closed behavior.
 
-- [ ] **Step 3: Add exact corruption test matrix**
+- [ ] **Step 3: Add exact corruption matrix**
 
-Each row is a separate test. Build a valid catalog first, mutate only the described part, then assert `ValueError` from `load_playbook_catalog`.
+Each row is a separate test that starts from a valid build and asserts `ValueError` on load.
 
 | Test | Mutation |
 | --- | --- |
-| `test_load_rejects_sidecar_from_other_catalog` | replace sidecar with one from catalog built from a different source hash |
-| `test_load_rejects_catalog_hash_mismatch` | edit valid catalog JSON after sidecar creation |
-| `test_load_rejects_truncated_catalog` | replace catalog bytes with first half |
-| `test_load_rejects_partial_catalog_schema` | delete `active_by_knowledge_id` and recalculate no sidecar field |
+| `test_load_rejects_sidecar_from_other_catalog` | replace sidecar with one built from another playbook source |
+| `test_load_rejects_catalog_hash_mismatch` | edit catalog after sidecar creation |
+| `test_load_rejects_truncated_catalog` | replace catalog with first half of bytes |
+| `test_load_rejects_partial_catalog_schema` | remove `active_by_knowledge_id` |
 | `test_load_rejects_wrong_catalog_domain` | set catalog domain to `HISTORICO_NAO_VALIDADO` |
 | `test_load_rejects_wrong_sidecar_domain` | set sidecar domain to another string |
-| `test_load_rejects_extra_provenance_field` | add one unknown sidecar key |
-| `test_load_rejects_wrong_knowledge_source_hash` | change sidecar knowledge source hash |
-| `test_load_rejects_wrong_knowledge_provenance_hash` | change sidecar knowledge provenance hash |
-| `test_load_rejects_catalog_sidecar_binding_mismatch` | change catalog `knowledge_binding` only |
-| `test_load_rejects_active_link_to_missing_playbook` | active map points to nonexistent playbook |
-| `test_load_rejects_active_link_outside_eligible_ids` | active map includes non-eligible ID |
+| `test_load_rejects_extra_provenance_field` | add unknown sidecar key |
+| `test_load_rejects_wrong_knowledge_source_hash` | alter sidecar knowledge source hash |
+| `test_load_rejects_wrong_knowledge_provenance_hash` | alter sidecar provenance hash |
+| `test_load_rejects_catalog_sidecar_binding_mismatch` | alter catalog binding only |
+| `test_load_rejects_active_link_to_missing_playbook` | map active ID to nonexistent playbook |
+| `test_load_rejects_active_link_outside_eligible_ids` | add active non-eligible ID |
 | `test_load_rejects_inactive_instruction` | add `instruction` to inactive metadata |
 | `test_load_rejects_inactive_capability` | add `capability` to inactive metadata |
-| `test_load_rejects_two_approved_owners_even_if_active_map_has_one` | add second approved playbook claiming same knowledge ID while active map still names one |
+| `test_load_rejects_two_approved_owners_even_if_active_map_has_one` | add second approved playbook claiming the same knowledge ID |
 
-For mutations where `catalog_hash` would otherwise fail first, update the sidecar `catalog_hash` to the tampered catalog's canonical hash so the test reaches the deeper structural invariant. This proves each invariant independently.
+For deeper invariant tests, recalculate sidecar `catalog_hash` after the intentional catalog mutation so hash mismatch does not mask the structural failure being tested.
 
-- [ ] **Step 4: Add runtime knowledge trust-chain test**
+- [ ] **Step 4: Add runtime trust-chain test**
 
 ```python
 def test_load_revalidates_current_knowledge_index(monkeypatch, tmp_path: Path) -> None:
@@ -751,27 +699,27 @@ def test_load_revalidates_current_knowledge_index(monkeypatch, tmp_path: Path) -
     assert calls == [tmp_path / "knowledge"]
 ```
 
-Also assert with `inspect.signature(load_playbook_catalog)` that public parameters are exactly `directory` and `knowledge_index_directory`.
+Use `inspect.signature(load_playbook_catalog)` to assert the only public parameters are `directory` and `knowledge_index_directory`.
 
-- [ ] **Step 5: Implement load validation in this exact order**
+- [ ] **Step 5: Implement load validation in exact order**
 
-1. require `playbook-provenance.json`;
-2. parse sidecar and validate closed field set/domain/schema;
-3. parse catalog and validate closed top-level field set/domain/schema;
-4. compare catalog `source_hash` to sidecar;
-5. recompute canonical `catalog_hash` and compare;
-6. verify sidecar counters equal catalog counts;
-7. validate approved playbook internal schema;
-8. reconstruct approved owners from each approved playbook `knowledge_ids` and enforce 0..1;
-9. verify reconstructed ownership equals `active_by_knowledge_id`;
-10. verify all active IDs are eligible;
-11. verify inactive metadata has exactly `playbook_id`, `status`, `version` and status is DRAFT/RETIRED;
+1. require sidecar;
+2. validate sidecar closed schema/domain;
+3. validate catalog closed schema/domain;
+4. compare source hash;
+5. recompute/compare catalog hash;
+6. verify counters;
+7. validate approved playbook structures;
+8. reconstruct approved ownership and enforce 0..1;
+9. verify reconstructed owners equal active map;
+10. verify active IDs are eligible;
+11. verify inactive records have exactly `playbook_id`, `status`, `version` and only DRAFT/RETIRED;
 12. call `load_knowledge_index(knowledge_index_directory)`;
-13. hash the returned validated knowledge provenance;
-14. compare current knowledge domain/schema/source/provenance hash with both sidecar and catalog binding;
-15. return `(catalog, provenance)` only after every check passes.
+13. hash returned validated knowledge provenance;
+14. compare current knowledge domain/schema/source/provenance hash with catalog binding and sidecar;
+15. return only after every check passes.
 
-No failure returns a business status.
+No failure returns `KNOWLEDGE_ONLY` or `PLAYBOOK_UNAVAILABLE`.
 
 - [ ] **Step 6: Run GREEN and commit**
 
@@ -787,11 +735,9 @@ git commit -m "feat: fail closed on playbook catalog integrity"
 
 ### Task 5: Deterministic business resolution
 
-**Files:**
-- Create: `src/ai_service_desk/engine/playbook_resolution.py`
-- Create: `tests/engine/test_playbook_resolution.py`
+**Files:** create `playbook_resolution.py`, create `test_playbook_resolution.py`.
 
-- [ ] **Step 1: Write production-constructor RED test**
+- [ ] **Step 1: Write constructor RED test**
 
 ```python
 def test_engine_loads_through_validated_catalog_loader(monkeypatch, tmp_path: Path) -> None:
@@ -819,62 +765,22 @@ def test_engine_loads_through_validated_catalog_loader(monkeypatch, tmp_path: Pa
 
 Expected: module/class missing.
 
-- [ ] **Step 3: Add exact resolution tests with a concrete loaded catalog double**
+- [ ] **Step 3: Add exact resolution matrix**
 
-Use this catalog in tests:
+Use a loaded catalog with eligible IDs for print, VPN, software, Outlook; one approved print playbook; DRAFT metadata for software; RETIRED metadata for Outlook.
 
-```python
-catalog = {
-    "eligible_knowledge_ids": [
-        "KB-SYN-PRINT-001",
-        "KB-SYN-VPN-001",
-        "KB-SYN-SOFTWARE-001",
-        "KB-SYN-OUTLOOK-001",
-    ],
-    "playbooks": {
-        "PB-SYN-PRINT-001": {
-            "playbook_id": "PB-SYN-PRINT-001",
-            "title": "Impressao sintetica",
-            "description": "Procedimento aprovado ficticio.",
-            "knowledge_ids": ["KB-SYN-PRINT-001"],
-            "version": 1,
-            "steps": [
-                {
-                    "step_id": "STEP-01",
-                    "type": "CHECK",
-                    "title": "Verificar fila ficticia",
-                    "instruction": "Confirme o estado da fila ficticia.",
-                    "capability": "",
-                }
-            ],
-        }
-    },
-    "active_by_knowledge_id": {"KB-SYN-PRINT-001": "PB-SYN-PRINT-001"},
-    "inactive_by_knowledge_id": {
-        "KB-SYN-SOFTWARE-001": [
-            {"playbook_id": "PB-SYN-SOFTWARE-DRAFT-001", "status": "DRAFT", "version": 1}
-        ],
-        "KB-SYN-OUTLOOK-001": [
-            {"playbook_id": "PB-SYN-OUTLOOK-RETIRED-001", "status": "RETIRED", "version": 1}
-        ],
-    },
-}
-```
-
-Tests and exact expected results:
+Expected:
 
 ```text
 KB-SYN-PRINT-001 -> PLAYBOOK_FOUND / MATCH / PB-SYN-PRINT-001
-KB-SYN-VPN-001 -> KNOWLEDGE_ONLY / NO_PLAYBOOK / playbook=None
-KB-SYN-SOFTWARE-001 -> PLAYBOOK_UNAVAILABLE / PLAYBOOK_NOT_APPROVED / playbook=None
-KB-SYN-OUTLOOK-001 -> PLAYBOOK_UNAVAILABLE / PLAYBOOK_RETIRED / playbook=None
+KB-SYN-VPN-001 -> KNOWLEDGE_ONLY / NO_PLAYBOOK / null
+KB-SYN-SOFTWARE-001 -> PLAYBOOK_UNAVAILABLE / PLAYBOOK_NOT_APPROVED / null
+KB-SYN-OUTLOOK-001 -> PLAYBOOK_UNAVAILABLE / PLAYBOOK_RETIRED / null
 ```
 
-Add one catalog double with both DRAFT and RETIRED metadata for the same ID and assert DRAFT reason takes deterministic precedence.
+Add one case with both DRAFT and RETIRED metadata and assert DRAFT reason wins deterministically.
 
-- [ ] **Step 4: Add input-domain isolation tests**
-
-Concrete assertions:
+- [ ] **Step 4: Add domain-isolation tests**
 
 ```python
 knowledge = {
@@ -890,17 +796,17 @@ assert "title" not in result
 assert "answer" not in result
 ```
 
-Also assert `ValueError` for non-mapping input, missing ID, blank ID, over-120 ID, and ID not in `eligible_knowledge_ids`.
+Assert `ValueError` for non-mapping input, missing ID, blank ID, over-120 ID, and ID outside `eligible_knowledge_ids`.
 
-- [ ] **Step 5: Implement resolver**
+- [ ] **Step 5: Implement exact resolution**
 
-`PlaybookEngine.__init__` stores only the validated catalog/provenance returned by `load_playbook_catalog(catalog_directory, knowledge_index_directory)`.
+`PlaybookEngine.__init__` calls `load_playbook_catalog(catalog_directory, knowledge_index_directory)`.
 
-`resolve(knowledge)` validates Mapping and delegates only the `knowledge_id` value.
+`resolve(knowledge)` extracts only `knowledge_id` and delegates to `resolve_knowledge_id`.
 
-`resolve_knowledge_id` uses only exact dictionary membership. No normalization, aliases, fuzzy match, score, classifier, LLM, or embedding.
+`resolve_knowledge_id` uses only exact dictionary membership. No normalization, aliases, fuzzy matching, score, classifier, LLM, or embedding.
 
-For `PLAYBOOK_FOUND`, project source playbook `version` to runtime `playbook_version` and return only:
+`PLAYBOOK_FOUND` runtime playbook keys are exactly:
 
 ```text
 playbook_id
@@ -909,6 +815,8 @@ description
 playbook_version
 steps
 ```
+
+Source `version` becomes runtime `playbook_version`.
 
 - [ ] **Step 6: Run GREEN and commit**
 
@@ -924,13 +832,11 @@ git commit -m "feat: resolve approved playbooks by knowledge id"
 
 ### Task 6: Separate machine and user-facing contracts
 
-**Files:**
-- Modify: `src/ai_service_desk/engine/playbook_resolution.py`
-- Modify: `tests/engine/test_playbook_resolution.py`
+**Files:** modify `playbook_resolution.py`, modify its tests.
 
-- [ ] **Step 1: Add ACTION_PROPOSAL to the concrete approved test playbook and write RED machine test**
+- [ ] **Step 1: Add concrete ACTION_PROPOSAL and write RED machine test**
 
-Append this step in the test catalog:
+Approved test playbook gets:
 
 ```python
 {
@@ -942,29 +848,20 @@ Append this step in the test catalog:
 }
 ```
 
-Assert:
+Assert machine result keeps `playbook_version=1` and `capability="DEMO_PRINT_QUEUE_CLEAR"`.
+
+- [ ] **Step 2: Run RED for descriptor/formatter**
+
+Tests import and call `action_proposal_descriptor` and `format_playbook_result` before implementation. Expected: missing functions.
+
+- [ ] **Step 3: Add exact Phase 7 descriptor assertion**
 
 ```python
-result = engine.resolve_knowledge_id("KB-SYN-PRINT-001")
-action = result["playbook"]["steps"][1]
-assert result["playbook"]["playbook_version"] == 1
-assert action["type"] == "ACTION_PROPOSAL"
-assert action["capability"] == "DEMO_PRINT_QUEUE_CLEAR"
-```
-
-- [ ] **Step 2: Run RED for missing descriptor/formatter behavior**
-
-Call `action_proposal_descriptor` and `format_playbook_result` in tests before implementing them. Expected: import/missing-function failure.
-
-- [ ] **Step 3: Write exact Phase 7 descriptor test**
-
-```python
-descriptor = action_proposal_descriptor(
+assert action_proposal_descriptor(
     "KB-SYN-PRINT-001",
     result["playbook"],
     action,
-)
-assert descriptor == {
+) == {
     "knowledge_id": "KB-SYN-PRINT-001",
     "playbook_id": "PB-SYN-PRINT-001",
     "playbook_version": 1,
@@ -974,44 +871,19 @@ assert descriptor == {
 }
 ```
 
-Add one test passing the CHECK step and assert `ValueError("step nao e ACTION_PROPOSAL")`.
+CHECK passed to descriptor must raise `ValueError("step nao e ACTION_PROPOSAL")`.
 
-- [ ] **Step 4: Write exact formatter secrecy tests**
+- [ ] **Step 4: Add formatter secrecy tests**
 
-For `PLAYBOOK_FOUND`, assert formatted text contains:
+For found playbook, formatted text contains title, description, ordered step titles/instructions and `Acao proposta:`. It must not contain `DEMO_PRINT_QUEUE_CLEAR`, `APPROVED_PLAYBOOK`, reviewer fields, or hashes.
 
-```text
-Impressao sintetica
-Procedimento aprovado ficticio.
-Verificar fila ficticia
-Confirme o estado da fila ficticia.
-Acao proposta:
-A limpeza ficticia pode ser considerada como proxima acao.
-```
+For unavailable playbook, formatter returns generic unavailable text and does not reveal `PLAYBOOK_RETIRED` or `PLAYBOOK_NOT_APPROVED` literally.
 
-Assert it does not contain:
+For `KNOWLEDGE_ONLY`, formatter returns empty string.
 
-```text
-DEMO_PRINT_QUEUE_CLEAR
-APPROVED_PLAYBOOK
-reviewed_by
-knowledge_source_hash
-```
+- [ ] **Step 5: Add zero-execution proof**
 
-For `PLAYBOOK_UNAVAILABLE / PLAYBOOK_RETIRED`, assert formatter returns a generic unavailable message that does not contain the literal `PLAYBOOK_RETIRED`.
-
-For `KNOWLEDGE_ONLY`, assert formatter returns an empty string so Phase 6 does not duplicate the Phase 5 answer.
-
-- [ ] **Step 5: Add explicit zero-execution tests**
-
-Runtime static check in the test reads only:
-
-```text
-src/ai_service_desk/engine/playbook.py
-src/ai_service_desk/engine/playbook_resolution.py
-```
-
-and asserts none of these tokens occur:
+Static test reads `playbook.py` and `playbook_resolution.py` and rejects these tokens:
 
 ```text
 import subprocess
@@ -1026,18 +898,13 @@ import httpx
 urllib.request
 ```
 
-Runtime dynamic test monkeypatches `subprocess.run` to raise `AssertionError`, resolves the action playbook, produces its descriptor, and formats it. The test passes only if the sentinel remains uncalled.
+Dynamic test monkeypatches `subprocess.run` to raise, then resolves, projects, and formats an ACTION_PROPOSAL. No sentinel call may occur.
 
-- [ ] **Step 6: Implement formatter and descriptor**
+- [ ] **Step 6: Implement descriptor and formatter**
 
-Rules:
+Descriptor reads structured IDs/capability directly and never parses `instruction`.
 
-- descriptor accepts only `ACTION_PROPOSAL`;
-- descriptor uses IDs and capability fields directly, never `instruction` parsing;
-- formatter shows approved title/description/step title/instruction in source order;
-- action step is prefixed with `Acao proposta:`;
-- formatter never claims permission or execution;
-- formatter never emits capability or provenance.
+Formatter shows only approved presentation text, preserves step order, prefixes action text with `Acao proposta:`, never claims permission/execution, and never emits capability/provenance.
 
 - [ ] **Step 7: Run GREEN and commit**
 
@@ -1055,15 +922,11 @@ git commit -m "feat: expose playbook machine and display contracts"
 
 ### Task 7: Official synthetic gate
 
-**Files:**
-- Create: `playbooks/phase6_synthetic_playbooks.jsonl`
-- Create: `tests/fixtures/phase6_playbook_cases.jsonl`
-- Create: `src/ai_service_desk/engine/playbook_smoke.py`
-- Create: `tests/engine/test_playbook_smoke.py`
+**Files:** create synthetic playbook source, smoke case fixture, smoke module, smoke tests.
 
-- [ ] **Step 1: Write RED fixture-loader tests before creating fixture files**
+- [ ] **Step 1: Write RED fixture-loader tests before fixture creation**
 
-`phase6_playbook_cases.jsonl` has exactly these fields:
+Case fields are exactly:
 
 ```text
 case_name
@@ -1075,111 +938,65 @@ expected_playbook_id
 mutation
 ```
 
-All seven fields are always present. `mutation` is empty string when unused.
+Allowed modes: `RESOLVE`, `BUILD_ERROR`, `LOAD_ERROR`, `ACTION_CONTRACT`.
 
-Allowed modes:
+Allowed mutation values: empty string, `APPROVED_CONFLICT`, `INELIGIBLE_REFERENCE`, `CATALOG_TAMPER`.
 
-```text
-RESOLVE
-BUILD_ERROR
-LOAD_ERROR
-ACTION_CONTRACT
-```
-
-Allowed mutation values:
-
-```text
-""
-APPROVED_CONFLICT
-INELIGIBLE_REFERENCE
-CATALOG_TAMPER
-```
-
-Write tests that reject wrong field set, duplicate case name, invalid mode, invalid mutation, blank case name, non-string knowledge ID, and any fixture count other than exactly 10.
+Reject wrong field set, duplicate names, invalid mode, invalid mutation, blank name, non-string knowledge ID, and any count other than exactly 10.
 
 - [ ] **Step 2: Run RED**
 
-Expected: `playbook_smoke` module or fixture loader missing.
+Expected: smoke module/loader missing.
 
-- [ ] **Step 3: Create synthetic playbook source with exactly these records**
+- [ ] **Step 3: Create exactly four synthetic playbook records**
 
-1. `PB-SYN-ACCESS-SHARED-001`, APPROVED, links `KB-SYN-CIGAM-ACCESS-001` and `KB-SYN-SIAGRI-ACCESS-001`, contains only fictitious INSTRUCTION/CHECK text.
-2. `PB-SYN-PRINT-001`, APPROVED, links `KB-SYN-PRINT-001`, contains CHECK plus ACTION_PROPOSAL capability `DEMO_PRINT_QUEUE_CLEAR`.
-3. `PB-SYN-SOFTWARE-DRAFT-001`, DRAFT, links `KB-SYN-SOFTWARE-001`.
-4. `PB-SYN-OUTLOOK-RETIRED-001`, RETIRED, links `KB-SYN-OUTLOOK-001`.
+1. `PB-SYN-ACCESS-SHARED-001`, APPROVED, links CIGAM and SIAGRI synthetic access knowledge.
+2. `PB-SYN-PRINT-001`, APPROVED, links print synthetic knowledge, contains CHECK plus `ACTION_PROPOSAL / DEMO_PRINT_QUEUE_CLEAR`.
+3. `PB-SYN-SOFTWARE-DRAFT-001`, DRAFT, links software synthetic knowledge.
+4. `PB-SYN-OUTLOOK-RETIRED-001`, RETIRED, links Outlook synthetic knowledge.
 
-Leave `KB-SYN-VPN-001` unlinked.
+Leave VPN synthetic knowledge unlinked.
 
-DRAFT/RETIRED source rows may contain synthetic steps because the source is administrative content, but their step text must never appear in compiled operational catalog or report.
+All wording is fictitious. Inactive source records may contain synthetic administrative steps, but compiled operational catalog and reports must never contain those steps.
 
-- [ ] **Step 4: Create the exact 10 smoke cases**
+- [ ] **Step 4: Create exact 10 smoke cases**
 
-| # | case_name | mode | knowledge_id | expected status/reason | expected playbook | mutation |
+| # | case | mode | knowledge | expected | playbook | mutation |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `approved-single-link` | RESOLVE | `KB-SYN-PRINT-001` | `PLAYBOOK_FOUND/MATCH` | `PB-SYN-PRINT-001` | empty |
-| 2 | `approved-shared-cigam` | RESOLVE | `KB-SYN-CIGAM-ACCESS-001` | `PLAYBOOK_FOUND/MATCH` | `PB-SYN-ACCESS-SHARED-001` | empty |
-| 3 | `approved-shared-siagri` | RESOLVE | `KB-SYN-SIAGRI-ACCESS-001` | `PLAYBOOK_FOUND/MATCH` | `PB-SYN-ACCESS-SHARED-001` | empty |
-| 4 | `knowledge-only` | RESOLVE | `KB-SYN-VPN-001` | `KNOWLEDGE_ONLY/NO_PLAYBOOK` | empty | empty |
-| 5 | `draft-only` | RESOLVE | `KB-SYN-SOFTWARE-001` | `PLAYBOOK_UNAVAILABLE/PLAYBOOK_NOT_APPROVED` | empty | empty |
-| 6 | `retired-only` | RESOLVE | `KB-SYN-OUTLOOK-001` | `PLAYBOOK_UNAVAILABLE/PLAYBOOK_RETIRED` | empty | empty |
-| 7 | `approved-conflict` | BUILD_ERROR | `KB-SYN-PRINT-001` | `BUILD_ERROR/ValueError` | empty | `APPROVED_CONFLICT` |
-| 8 | `ineligible-reference` | BUILD_ERROR | `KB-SYN-NOT-ELIGIBLE-001` | `BUILD_ERROR/ValueError` | empty | `INELIGIBLE_REFERENCE` |
-| 9 | `catalog-integrity` | LOAD_ERROR | `KB-SYN-PRINT-001` | `LOAD_ERROR/ValueError` | empty | `CATALOG_TAMPER` |
-| 10 | `action-proposal-contract` | ACTION_CONTRACT | `KB-SYN-PRINT-001` | `PLAYBOOK_FOUND/MATCH` | `PB-SYN-PRINT-001` | empty |
+| 1 | approved-single-link | RESOLVE | KB-SYN-PRINT-001 | PLAYBOOK_FOUND/MATCH | PB-SYN-PRINT-001 | empty |
+| 2 | approved-shared-cigam | RESOLVE | KB-SYN-CIGAM-ACCESS-001 | PLAYBOOK_FOUND/MATCH | PB-SYN-ACCESS-SHARED-001 | empty |
+| 3 | approved-shared-siagri | RESOLVE | KB-SYN-SIAGRI-ACCESS-001 | PLAYBOOK_FOUND/MATCH | PB-SYN-ACCESS-SHARED-001 | empty |
+| 4 | knowledge-only | RESOLVE | KB-SYN-VPN-001 | KNOWLEDGE_ONLY/NO_PLAYBOOK | empty | empty |
+| 5 | draft-only | RESOLVE | KB-SYN-SOFTWARE-001 | PLAYBOOK_UNAVAILABLE/PLAYBOOK_NOT_APPROVED | empty | empty |
+| 6 | retired-only | RESOLVE | KB-SYN-OUTLOOK-001 | PLAYBOOK_UNAVAILABLE/PLAYBOOK_RETIRED | empty | empty |
+| 7 | approved-conflict | BUILD_ERROR | KB-SYN-PRINT-001 | BUILD_ERROR/ValueError | empty | APPROVED_CONFLICT |
+| 8 | ineligible-reference | BUILD_ERROR | KB-SYN-NOT-ELIGIBLE-001 | BUILD_ERROR/ValueError | empty | INELIGIBLE_REFERENCE |
+| 9 | catalog-integrity | LOAD_ERROR | KB-SYN-PRINT-001 | LOAD_ERROR/ValueError | empty | CATALOG_TAMPER |
+| 10 | action-proposal-contract | ACTION_CONTRACT | KB-SYN-PRINT-001 | PLAYBOOK_FOUND/MATCH | PB-SYN-PRINT-001 | empty |
 
-- [ ] **Step 5: Implement smoke signature and safe report**
-
-Exact function:
+- [ ] **Step 5: Implement smoke contract**
 
 ```text
 run_playbook_smoke(knowledge_index: str | Path, playbook_source: str | Path, cases_path: str | Path, work_directory: str | Path, report_path: str | Path) -> dict
 ```
 
-It does not accept an Ollama URL.
+No Ollama URL parameter.
 
-Top-level report keys:
+Report top-level keys: `schema_version`, `phase`, `domain`, `timestamp_utc`, `ok`, `cases`, `privacy`.
 
-```text
-schema_version
-phase
-domain
-timestamp_utc
-ok
-cases
-privacy
-```
+Privacy values are all false for `raw_text_included`, `approved_content_included`, `capability_included`, `corporate_data_included`.
 
-Privacy values:
+Per-case keys exactly: `case_name`, `expected_status`, `actual_status`, `expected_reason`, `actual_reason`, `expected_playbook_id`, `actual_playbook_id`, `passed`.
 
-```text
-raw_text_included = false
-approved_content_included = false
-capability_included = false
-corporate_data_included = false
-```
+For build/load errors, store only `type(exc).__name__`, never full exception message.
 
-Per-case report keys exactly:
+Controlled mutations happen only in `work_directory`:
 
-```text
-case_name
-expected_status
-actual_status
-expected_reason
-actual_reason
-expected_playbook_id
-actual_playbook_id
-passed
-```
+- conflict appends a second approved print playbook;
+- ineligible replaces knowledge ID with `KB-SYN-NOT-ELIGIBLE-001`;
+- catalog tamper changes valid catalog content without updating sidecar.
 
-For build/load error cases, report `actual_reason = type(exc).__name__`, not the full exception message.
-
-Controlled mutations happen only under `work_directory`:
-
-- `APPROVED_CONFLICT`: clone parsed source rows, append second approved playbook linked to print knowledge, write temp source, expect build ValueError.
-- `INELIGIBLE_REFERENCE`: clone one approved source row, replace its knowledge IDs with `KB-SYN-NOT-ELIGIBLE-001`, expect build ValueError.
-- `CATALOG_TAMPER`: build valid temp catalog, alter title in parsed catalog, rewrite catalog without updating sidecar, expect load ValueError.
-
-ACTION_CONTRACT asserts machine result contains capability, formatter omits capability, and descriptor equals the six-field Phase 7 contract. Report stores none of those text/capability values.
+ACTION_CONTRACT verifies machine capability present, formatter capability absent, six-field descriptor exact, and no execution call.
 
 - [ ] **Step 6: Run GREEN and commit**
 
@@ -1195,13 +1012,11 @@ git commit -m "test: add synthetic phase 6 playbook smoke"
 
 ### Task 8: Safe Phase 6 commands
 
-**Files:**
-- Modify: `src/ai_service_desk/cli.py`
-- Create: `tests/test_playbook_cli.py`
+**Files:** modify `src/ai_service_desk/cli.py`, create `tests/test_playbook_cli.py`.
 
-- [ ] **Step 1: Write RED parser tests for exact commands**
+- [ ] **Step 1: Write RED parser tests**
 
-Expected CLI:
+Exact commands:
 
 ```text
 playbook-validate --file PATH
@@ -1209,7 +1024,7 @@ playbook-build --file PATH --knowledge-index PATH --output PATH
 playbook-smoke --knowledge-index PATH --playbooks PATH --cases PATH --work-directory PATH --report PATH
 ```
 
-Tests also assert these parsers have no `url`, `query`, `command`, `script`, `args`, or executor argument.
+Assert no Phase 6 parser argument named `url`, `query`, `command`, `script`, `args`, or executor.
 
 - [ ] **Step 2: Run RED**
 
@@ -1219,9 +1034,9 @@ pytest tests/test_playbook_cli.py -v
 
 Expected: invalid command choice.
 
-- [ ] **Step 3: Write safe-output tests**
+- [ ] **Step 3: Add safe-output tests**
 
-`playbook-validate` expected lines:
+Expected validate counts for the official four-row fixture:
 
 ```text
 Total: 4
@@ -1231,25 +1046,13 @@ RETIRED: 1
 Nenhum step ou capability foi exibido. Nenhuma chamada de IA foi feita.
 ```
 
-`playbook-build` expected lines include:
+Expected build summary includes `APPROVED_PLAYBOOK`, two approved playbooks, three active links.
 
-```text
-Playbook catalog: APPROVED_PLAYBOOK
-Playbooks APPROVED: 2
-Links ativos: 3
-```
+Expected smoke summary includes `PLAYBOOK SMOKE OK`, `Casos sinteticos: 10`, local report path.
 
-`playbook-smoke` expected lines include:
+All outputs must exclude `DEMO_PRINT_QUEUE_CLEAR` and fixture instruction text.
 
-```text
-PLAYBOOK SMOKE OK
-Casos sinteticos: 10
-Relatorio agregado local:
-```
-
-Every CLI test asserts output does not contain `DEMO_PRINT_QUEUE_CLEAR` and does not contain any fixture instruction sentence.
-
-- [ ] **Step 4: Implement CLI before generic Ollama client creation**
+- [ ] **Step 4: Implement CLI before generic Ollama creation**
 
 Imports:
 
@@ -1258,13 +1061,7 @@ from ai_service_desk.engine.playbook import build_playbook_catalog, load_playboo
 from ai_service_desk.engine.playbook_smoke import run_playbook_smoke
 ```
 
-Place all three command handlers before the current generic `client = OllamaClient(args.url)` line. Phase 6 commands therefore cannot accidentally instantiate an Ollama client.
-
-`playbook-validate` computes lifecycle counts from `load_playbooks`.
-
-`playbook-build` calls `build_playbook_catalog` and prints only domain/counts.
-
-`playbook-smoke` calls `run_playbook_smoke` and returns 0 only when report `ok` is true.
+Place all three handlers before current `client = OllamaClient(args.url)`. Phase 6 commands therefore do not instantiate Ollama.
 
 - [ ] **Step 5: Run GREEN and commit**
 
@@ -1279,17 +1076,13 @@ git commit -m "feat: add phase 6 playbook cli"
 
 # Gate 9 - Workflow and Docs
 
-### Task 9: Manual Dell-compatible smoke workflow
+### Task 9: Manual Dell-compatible validation
 
-**Files:**
-- Create: `.github/workflows/phase6-playbook-smoke.yml`
-- Modify: `tests/test_workflows.py`
-- Create: `docs/playbooks/phase-6.md`
-- Modify: `README.md`
+**Files:** create Phase 6 workflow, modify workflow tests, create operational doc, modify README.
 
-- [ ] **Step 1: Write workflow RED test first**
+- [ ] **Step 1: Write workflow RED test**
 
-Add `PHASE6_WORKFLOW` and a test requiring these strings:
+Require strings:
 
 ```text
 workflow_dispatch:
@@ -1309,14 +1102,7 @@ tests/fixtures/phase6_playbook_cases.jsonl
 http://127.0.0.1:11434
 ```
 
-Forbidden workflow strings:
-
-```text
-upload-artifact
-Get-Content
---show-history
-DEMO_PRINT_QUEUE_CLEAR
-```
+Forbid `upload-artifact`, `Get-Content`, `--show-history`, `DEMO_PRINT_QUEUE_CLEAR`.
 
 - [ ] **Step 2: Run RED**
 
@@ -1324,46 +1110,27 @@ DEMO_PRINT_QUEUE_CLEAR
 pytest tests/test_workflows.py::test_phase6_playbook_workflow_is_manual_local_and_non_exporting -v
 ```
 
-Expected: workflow file missing.
+Expected: workflow missing.
 
-- [ ] **Step 3: Create workflow in this exact order**
+- [ ] **Step 3: Create workflow in exact order**
 
-1. checkout `target_ref`;
+1. checkout target ref;
 2. verify Python 3.14.x;
 3. install `.[dev]`;
-4. run `doctor --url http://127.0.0.1:11434` as upstream Phase 4 environment prerequisite;
-5. `knowledge-validate` Phase 4 synthetic knowledge;
-6. build fresh Phase 4 approved knowledge index in `$env:RUNNER_TEMP` using `knowledge-index`;
-7. `playbook-validate` synthetic playbooks;
-8. `playbook-build` into `$env:RUNNER_TEMP`;
-9. `playbook-smoke` with temp work/report paths.
+4. doctor loopback as upstream Phase 4 prerequisite;
+5. validate Phase 4 synthetic knowledge;
+6. build fresh approved knowledge index in `RUNNER_TEMP`;
+7. playbook validate;
+8. playbook build in `RUNNER_TEMP`;
+9. playbook smoke with temp work/report paths.
 
-Runner labels:
+Use `runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]`, timeout 20, contents read only, no artifact upload/report printing.
 
-```yaml
-runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
-```
+- [ ] **Step 4: Write docs**
 
-Use `timeout-minutes: 20`, `permissions: contents: read`, no artifact upload, no report printing.
+Operational doc covers linkage, lifecycle, cardinality, step types, capability machine-only behavior, forbidden execution fields, fail-closed binding, sidecar order, business statuses versus integrity exceptions, Phase 7/8 boundary, synthetic policy, CLI, Dell commands.
 
-- [ ] **Step 4: Write operational docs**
-
-`docs/playbooks/phase-6.md` must document:
-
-- exact knowledge ID linkage;
-- lifecycle and 0..1 active cardinality;
-- INSTRUCTION/CHECK/ACTION_PROPOSAL;
-- machine-only capability;
-- no command/executor fields;
-- fail-closed source/catalog/knowledge binding;
-- sidecar-last write order;
-- business statuses versus integrity exceptions;
-- Phase 7 policy boundary and Phase 8 execution boundary;
-- synthetic-only repository policy;
-- CLI examples;
-- Dell homologation commands.
-
-README adds a concise Phase 6 section linking the spec and operational doc. It must not claim execution capability.
+README links spec and operational doc and does not claim execution capability.
 
 - [ ] **Step 5: Run GREEN and commit**
 
@@ -1381,37 +1148,17 @@ git commit -m "docs: add phase 6 playbook operations"
 
 ### Task 10: Exact-head completion gate
 
-**Files:** review entire Phase 6 diff. Do not merge in this task.
+**Do not merge in this task.**
 
-- [ ] **Step 1: Verify scope against approved spec head**
+- [ ] **Step 1: Verify scope**
 
 ```bash
 git diff --name-only 849d4e6017ba54cf839971556366c4c8ead5f8dc...HEAD
 ```
 
-Allowed implementation diff after the plan itself:
+Allowed files after the approved spec are only the plan plus Phase 6 files listed in this document. Any protected file triggers escalation.
 
-```text
-.github/workflows/phase6-playbook-smoke.yml
-README.md
-docs/playbooks/phase-6.md
-docs/superpowers/plans/2026-09-08-phase-6-playbooks.md
-playbooks/phase6_synthetic_playbooks.jsonl
-src/ai_service_desk/cli.py
-src/ai_service_desk/engine/playbook.py
-src/ai_service_desk/engine/playbook_resolution.py
-src/ai_service_desk/engine/playbook_smoke.py
-tests/engine/test_playbook.py
-tests/engine/test_playbook_resolution.py
-tests/engine/test_playbook_smoke.py
-tests/fixtures/phase6_playbook_cases.jsonl
-tests/test_playbook_cli.py
-tests/test_workflows.py
-```
-
-If any protected file appears, stop and apply the protected-file escalation rule below.
-
-- [ ] **Step 2: Run full regression**
+- [ ] **Step 2: Full regression**
 
 ```bash
 ruff check .
@@ -1419,39 +1166,37 @@ ruff format --check .
 pytest -q
 ```
 
-Required: zero lint errors, zero formatting drift, all tests pass, including all Phase 1-5 tests.
+Require zero lint errors, zero format drift, all tests passing including all Phase 1-5 tests.
 
-- [ ] **Step 3: Run explicit zero-execution scans**
+- [ ] **Step 3: Zero-execution scans**
 
 ```bash
 git grep -n -E "subprocess|Popen|os\.system|powershell|pwsh|requests|httpx|urllib\.request|shell=True" -- src/ai_service_desk/engine/playbook.py src/ai_service_desk/engine/playbook_resolution.py src/ai_service_desk/engine/playbook_smoke.py
 ```
 
-Expected: no matches.
+Expected no matches.
 
 ```bash
 git grep -n -E '"(command|script|powershell|shell|executable|args|api_url|http_method|credential|token)"\s*:' -- playbooks/phase6_synthetic_playbooks.jsonl
 ```
 
-Expected: no matches.
+Expected no matches.
 
-- [ ] **Step 4: Run privacy scans**
+- [ ] **Step 4: Privacy scans**
 
 ```bash
 git grep -n -E "base_ti_preparada|C:\\\\ai-service-desk-data|juparana|PEDRO" -- playbooks/phase6_synthetic_playbooks.jsonl tests/fixtures/phase6_playbook_cases.jsonl
 ```
 
-Expected: no matches.
+Expected no matches.
 
 ```bash
 git ls-files | grep -E "playbook-catalog\.json|playbook-provenance\.json|phase6.*report.*\.json"
 ```
 
-Expected: no generated runtime catalog, sidecar, or report tracked.
+Expected no generated catalog, provenance, or report tracked.
 
-- [ ] **Step 5: Run exact-candidate local functional smoke**
-
-On Dell PowerShell or an equivalent Windows environment:
+- [ ] **Step 5: Exact-candidate functional smoke on Windows**
 
 ```powershell
 $index = Join-Path $env:TEMP "phase6-knowledge-manual"
@@ -1486,7 +1231,7 @@ python -m ai_service_desk playbook-smoke `
 $LASTEXITCODE
 ```
 
-Expected final output includes:
+Expected final evidence:
 
 ```text
 PLAYBOOK SMOKE OK
@@ -1494,94 +1239,46 @@ Casos sinteticos: 10
 0
 ```
 
-The Phase 4 knowledge index setup uses the existing embedding prerequisite. Phase 6 validate/build/resolve/smoke code must not make LLM or embedding calls.
+The upstream Phase 4 index setup uses its existing embedding prerequisite. Phase 6 validate/build/load/resolve/smoke code itself makes no LLM or embedding call.
 
-- [ ] **Step 6: Open or update draft PR with evidence**
+- [ ] **Step 6: Draft PR evidence**
 
-Capture:
+Capture exact head, merge-base, clean status. PR body records spec/plan, TDD gates, protected status, zero-LLM/embedding/classifier/executor claim scoped to Phase 6, privacy, CI, Dell pending. Keep draft until same-head Dell passes.
 
-```bash
-git rev-parse HEAD
-git merge-base main HEAD
-git status --short
-```
+- [ ] **Step 7: Hosted CI**
 
-PR body records:
+Require exact-head Python 3.14, Ruff lint, Ruff format, complete pytest suite. On failure use systematic debugging and never weaken fail-closed tests.
 
-- exact final head;
-- approved spec and plan paths;
-- Gate 1-8 RED/GREEN evidence;
-- protected-file status;
-- zero LLM/embedding/classifier/executor statement for Phase 6;
-- privacy/synthetic-only statement;
-- hosted CI status;
-- Dell status initially pending.
+- [ ] **Step 8: Dell homologation on exact PR head**
 
-Keep PR draft until same-head Dell homologation passes.
+First `git rev-parse HEAD` must equal PR head. Then run Step 5 commands. Require validate/build success, `PLAYBOOK SMOKE OK`, 10 cases, exit 0. Do not print report unless safe diagnosis is needed.
 
-- [ ] **Step 7: Require hosted CI green on exact head**
+- [ ] **Step 9: Final review**
 
-Verify normal PR CI for that head includes Python 3.14, Ruff lint, Ruff format, complete pytest suite. On failure, invoke systematic debugging and preserve all safety tests.
+Verify exact-head equality, hosted CI green, Dell green, protected files absent, no unresolved threads, inactive content isolation, capability hidden in formatter, no generated artifacts, no corporate fixture data, all corruption paths raise.
 
-- [ ] **Step 8: Run Dell homologation on the exact PR head**
+Mark Ready for Review only after these checks. Do not merge.
 
-First:
+- [ ] **Step 10: Explicit merge gate**
 
-```powershell
-git rev-parse HEAD
-```
-
-It must equal the PR head under review.
-
-Then run Step 5 commands on the Dell environment with the known loopback Ollama prerequisite. Required Phase 6 evidence:
-
-```text
-playbook-validate success
-playbook-build success
-PLAYBOOK SMOKE OK
-Casos sinteticos: 10
-exit code 0
-```
-
-Do not print the aggregate report unless a failure requires safe metadata diagnosis.
-
-- [ ] **Step 9: Final review before Ready for Review**
-
-Verify all ten statements:
-
-1. PR head equals Dell-tested head.
-2. Hosted CI is green on that head.
-3. Dell smoke is green on that head.
-4. Protected files are absent from diff.
-5. No unresolved review thread remains.
-6. DRAFT/RETIRED operational catalog tests prove no step text/capability leakage.
-7. Formatter tests prove capability is hidden.
-8. No generated catalog/report artifact is tracked.
-9. No corporate data exists in Phase 6 fixtures.
-10. Every corruption path raises rather than returning a business status.
-
-Then mark PR Ready for Review. Do not merge.
-
-- [ ] **Step 10: Stop for explicit merge approval**
-
-Report exact head, CI evidence, Dell evidence, and PR state. Merge only after explicit user approval, using expected-head SHA protection, then verify `main` contains the merge.
+Report evidence and wait for user approval. Merge only with expected-head SHA protection and verify `main` afterward.
 
 ---
 
 ## Protected-File Escalation Rule
 
-If a gate appears to require changing any protected file, stop before editing it and produce:
+Before touching a protected file, produce all four:
 
-1. a focused reproducible failing test on the current head;
+1. focused reproducible failing test;
 2. root cause;
-3. smallest proposed change;
-4. regression and security risk assessment.
+3. smallest proposed protected-file change;
+4. regression/security risk assessment.
 
-No protected-file refactor for convenience is permitted.
+No protected refactor for convenience.
 
 ---
 
-## Gate Evidence Required in the PR
+## Gate Evidence Required in PR
 
 ```text
 Gate 1: schema RED -> GREEN
@@ -1600,22 +1297,22 @@ Gate 10: full Ruff + full pytest + privacy + CI + same-head Dell + review
 
 ## Definition of Done
 
-Phase 6 is complete only when all statements are evidenced:
+Phase 6 is complete only when:
 
-- exact `knowledge_id` lookup only;
-- no playbook selection via LLM, embedding, classification, scoring, or semantic retrieval;
+- lookup is exact `knowledge_id` only;
+- no playbook selection uses LLM, embeddings, classifier, score, or semantic retrieval;
 - current knowledge trust comes from validated `APPROVED_KNOWLEDGE`, not caller assertion;
-- only APPROVED playbooks contribute operational content;
-- inactive metadata contains no title, description, step, instruction, or capability;
-- 0..1 approved owner per knowledge is enforced at build and load;
+- only APPROVED contributes operational content;
+- inactive metadata has no title, description, step, instruction, capability;
+- 0..1 approved owner is enforced at build and load;
 - source, catalog, and current knowledge provenance are cryptographically bound;
 - missing/copied/tampered/truncated/mismatched artifacts fail closed;
 - integrity failure never degrades to `KNOWLEDGE_ONLY` or `PLAYBOOK_UNAVAILABLE`;
 - machine result carries symbolic capability for Phase 7;
-- user formatter hides capability and never claims policy or execution;
+- formatter hides capability and never claims policy/execution;
 - no executor/action implementation exists;
 - official smoke is 10/10 synthetic;
-- all Phase 1-5 regression tests remain green;
+- all Phase 1-5 regressions remain green;
 - hosted CI is green on exact final head;
 - Dell homologation is green on exact final head;
 - final PR review is clean;
