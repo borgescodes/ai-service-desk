@@ -850,7 +850,8 @@ Interface conceitual:
 
 ```python
 class CDMAdapter:
-    def get_access(self, email: str) -> AccessLookup: ...
+    def get_access(self, email: str) -> AccessLookup:
+        ...
 
     def create_access(
         self,
@@ -858,7 +859,8 @@ class CDMAdapter:
         username: str,
         email: str,
         role: str,
-    ) -> AccessCreationResult: ...
+    ) -> AccessCreationResult:
+        ...
 ```
 
 Playbook, Policy Engine e UI não contêm HTTP específico do CDM.
