@@ -166,57 +166,62 @@ Exemplo sintetico:
 }
 ```
 
-### 6.1 Regras dos campos
+### 6.1 Regras e limites dos campos
 
 `playbook_id`:
 
-- texto nao vazio;
-- maximo definido pela implementacao, recomendado 120 caracteres;
+- texto nao vazio com ate 120 caracteres;
 - unico em todo o source.
 
 `title`:
 
-- texto nao vazio;
+- texto nao vazio com ate 180 caracteres;
 - texto de apresentacao do procedimento.
 
 `description`:
 
-- texto nao vazio;
+- texto nao vazio com ate 1000 caracteres;
 - descreve o objetivo do playbook sem conter implementacao executavel.
 
 `knowledge_ids`:
 
-- lista com pelo menos um item;
-- cada item e texto nao vazio;
+- lista com 1 a 20 itens;
+- cada item e texto nao vazio com ate 120 caracteres;
 - sem duplicidade dentro do mesmo playbook;
 - a validacao estrutural nao consulta knowledge;
 - o build operacional exige que cada ID esteja presente no indice `APPROVED_KNOWLEDGE` validado.
 
 `steps`:
 
-- lista ordenada com pelo menos um step;
+- lista ordenada com 1 a 20 steps;
 - `step_id` unico dentro do playbook;
 - a ordem da lista e a ordem declarativa oficial.
 
 `source`:
 
-- texto nao vazio;
+- texto nao vazio com ate 120 caracteres;
 - identifica a origem administrativa do conteudo.
 
 `status`:
 
 - exatamente `DRAFT`, `APPROVED` ou `RETIRED`.
 
-`reviewed_by` e `reviewed_at`:
+`reviewed_by`:
 
-- `APPROVED` exige ambos preenchidos;
-- `reviewed_at` deve ser ISO 8601 com timezone;
-- `DRAFT` e `RETIRED` podem manter metadados administrativos, mas isso nao os torna operacionais.
+- texto com ate 120 caracteres;
+- `APPROVED` exige valor nao vazio.
+
+`reviewed_at`:
+
+- texto com ate 80 caracteres;
+- `APPROVED` exige ISO 8601 com timezone valido.
 
 `version`:
 
 - inteiro positivo;
 - mudanca material de steps, capability ou semantica operacional exige incremento de versao no processo de governanca.
+
+O source representa o estado corrente de cada `playbook_id`. Uma nova versao substitui o registro corrente do mesmo ID no source; o historico de alteracoes permanece no controle de versao do repositorio. Dois registros simultaneos com o mesmo `playbook_id`, mesmo com versoes diferentes, sao invalidos.
 
 Campos ausentes ou extras tornam o registro invalido.
 
@@ -265,7 +270,7 @@ Dois ou mais playbooks `APPROVED` que referenciem o mesmo `knowledge_id` tornam 
 
 Nao existe fallback para escolher um dos playbooks conflitantes.
 
-A validacao de conflito ocorre no build antes da publicacao do catalogo operacional.
+A validacao de conflito ocorre no build antes da publicacao do catalogo operacional. A carga do catalogo repete a validacao de cardinalidade para detectar adulteracao ou representacao interna inconsistente.
 
 ## 9. Step schema
 
@@ -278,6 +283,14 @@ title
 instruction
 capability
 ```
+
+Regras comuns:
+
+- `step_id`: texto nao vazio com ate 120 caracteres e unico dentro do playbook;
+- `title`: texto nao vazio com ate 180 caracteres;
+- `instruction`: texto nao vazio com ate 1500 caracteres;
+- `type`: um dos tres valores oficiais;
+- `capability`: texto com ate 120 caracteres e regras dependentes do tipo.
 
 Tipos permitidos:
 
@@ -307,7 +320,7 @@ Representa uma acao conceitual que uma fase futura pode submeter ao Policy Engin
 
 `capability` e obrigatoria e deve ser um identificador simbolico estavel, nao um comando.
 
-Formato recomendado para capability:
+Formato obrigatorio de capability:
 
 ```text
 ^[A-Z][A-Z0-9_]{2,119}$
@@ -342,7 +355,7 @@ Para `PLAYBOOK_FOUND`:
     "playbook_id": "PB-SYN-PRINT-001",
     "title": "Recuperar fila de impressao ficticia",
     "description": "Procedimento sintetico aprovado para diagnostico de uma fila ficticia.",
-    "version": 1,
+    "playbook_version": 1,
     "steps": [
       {
         "step_id": "STEP-02",
@@ -358,7 +371,26 @@ Para `PLAYBOOK_FOUND`:
 
 A Fase 6 nao replica `answer`, `question`, `system`, `intent`, `score`, `threshold` ou outros campos do objeto de knowledge.
 
-### 10.2 User-facing formatting
+O campo source `version` e projetado como `playbook_version` no resultado de runtime para evitar ambiguidade com versoes de outros dominios.
+
+### 10.2 Descritor de ACTION_PROPOSAL para a Fase 7
+
+A partir do machine result, cada `ACTION_PROPOSAL` possui uma projecao deterministica com exatamente os identificadores de maquina necessarios para policy:
+
+```json
+{
+  "knowledge_id": "KB-SYN-PRINT-001",
+  "playbook_id": "PB-SYN-PRINT-001",
+  "playbook_version": 1,
+  "step_id": "STEP-02",
+  "type": "ACTION_PROPOSAL",
+  "capability": "DEMO_PRINT_QUEUE_CLEAR"
+}
+```
+
+Essa projecao nao usa LLM e nao interpreta `instruction`.
+
+### 10.3 User-facing formatting
 
 O formatter voltado ao usuario pode mostrar:
 
@@ -449,12 +481,13 @@ Os seguintes casos nao sao `PLAYBOOK_UNAVAILABLE`:
 - provenance invalida;
 - dominio incorreto;
 - `catalog_hash` divergente;
-- source hash divergente;
+- `source_hash` divergente entre catalogo e provenance;
 - sidecar copiado de outro catalogo;
 - catalogo truncado ou parcial;
 - catalogo adulterado;
 - knowledge provenance divergente;
 - `knowledge_source_hash` divergente;
+- `knowledge_provenance_hash` divergente;
 - schema operacional invalido;
 - dois playbooks `APPROVED` para o mesmo `knowledge_id`;
 - representacao interna inconsistente.
@@ -478,11 +511,12 @@ Deve rejeitar pelo menos:
 - arquivo vazio;
 - campo ausente;
 - campo extra;
+- limite de tamanho excedido;
 - `playbook_id` vazio ou duplicado;
 - status fora do contrato;
 - `APPROVED` sem review valido;
-- `knowledge_ids` vazio ou com duplicidade interna;
-- `steps` vazio;
+- `knowledge_ids` vazio, acima do limite ou com duplicidade interna;
+- `steps` vazio ou acima do limite;
 - `step_id` duplicado dentro do playbook;
 - step type invalido;
 - `ACTION_PROPOSAL` sem capability valida;
@@ -506,20 +540,48 @@ Sequencia obrigatoria:
 1. carregar o indice de knowledge usando a validacao fail-closed existente da Fase 4;
 2. obter somente os `knowledge_id` presentes nesse indice aprovado;
 3. validar estruturalmente o source de playbooks;
-4. validar que cada `knowledge_id` referenciado existe no indice aprovado;
-5. tratar qualquer ID ausente do indice como referencia nao elegivel e rejeitar o build;
-6. validar cardinalidade de playbooks `APPROVED` por `knowledge_id`;
-7. compilar conteudo completo somente de playbooks `APPROVED`;
-8. compilar somente metadados minimos de lifecycle para `DRAFT` e `RETIRED`;
-9. compilar a lista de `eligible_knowledge_ids` do indice aprovado;
-10. escrever o catalogo completo de forma atomica;
-11. calcular e verificar o hash do catalogo publicado;
-12. escrever o sidecar de provenance somente depois do catalogo completo;
-13. reler catalogo e provenance e validar a combinacao antes de declarar sucesso.
+4. calcular `source_hash` SHA-256 sobre os bytes exatos do source de playbooks;
+5. calcular `knowledge_provenance_hash` sobre a representacao JSON canonica da provenance validada de knowledge;
+6. validar que cada `knowledge_id` referenciado existe no indice aprovado;
+7. tratar qualquer ID ausente do indice como referencia nao elegivel e rejeitar o build;
+8. validar cardinalidade de playbooks `APPROVED` por `knowledge_id`;
+9. compilar conteudo completo somente de playbooks `APPROVED`;
+10. compilar somente metadados minimos de lifecycle para `DRAFT` e `RETIRED`;
+11. compilar a lista de `eligible_knowledge_ids` do indice aprovado;
+12. incluir no catalogo o binding de source e da provenance de knowledge;
+13. escrever o catalogo completo de forma atomica;
+14. reler o catalogo publicado e validar seu schema;
+15. calcular `catalog_hash` sobre sua representacao JSON canonica;
+16. escrever o sidecar de provenance somente depois do catalogo completo e validado;
+17. reler catalogo e provenance e validar a combinacao antes de declarar sucesso.
 
 A Fase 6 nao precisa ler o source bruto da Fase 4 para diferenciar knowledge inexistente de knowledge `DRAFT` ou `RETIRED`. Se o ID nao esta no indice `APPROVED_KNOWLEDGE`, ele nao e elegivel para vinculo operacional.
 
-## 15. Catalogo operacional
+## 15. Canonicalizacao e hashes
+
+Para evitar diferencas de plataforma ou formatacao, os hashes logicos usam SHA-256 e as seguintes regras:
+
+`source_hash`:
+
+- SHA-256 dos bytes exatos do arquivo JSONL de playbooks usado no build.
+
+`catalog_hash`:
+
+- parse do catalogo JSON;
+- serializacao UTF-8 com chaves ordenadas;
+- sem whitespace insignificante;
+- sem conversao de caracteres Unicode para escapes quando a biblioteca permitir comportamento deterministico equivalente;
+- SHA-256 dos bytes da representacao canonica.
+
+`knowledge_provenance_hash`:
+
+- parse da provenance de knowledge ja validada pela Fase 4;
+- mesma serializacao JSON canonica usada no `catalog_hash`;
+- SHA-256 dos bytes canonicos.
+
+A implementacao deve possuir uma unica funcao interna de canonicalizacao JSON compartilhada pelas operacoes de build e load da Fase 6 para evitar recipes divergentes.
+
+## 16. Catalogo operacional
 
 Arquivos previstos no diretorio compilado:
 
@@ -534,6 +596,13 @@ O catalogo deve ter estrutura equivalente a:
 {
   "catalog_schema_version": 1,
   "domain": "APPROVED_PLAYBOOK",
+  "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "knowledge_binding": {
+    "domain": "APPROVED_KNOWLEDGE",
+    "schema_version": 1,
+    "source_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "provenance_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
   "eligible_knowledge_ids": [
     "KB-SYN-CIGAM-ACCESS-001",
     "KB-SYN-PRINT-001"
@@ -545,7 +614,15 @@ O catalogo deve ter estrutura equivalente a:
       "description": "Procedimento sintetico aprovado para diagnostico de uma fila ficticia.",
       "knowledge_ids": ["KB-SYN-PRINT-001"],
       "version": 1,
-      "steps": []
+      "steps": [
+        {
+          "step_id": "STEP-01",
+          "type": "CHECK",
+          "title": "Verificar a fila",
+          "instruction": "Confirme se existe um documento ficticio preso na fila.",
+          "capability": ""
+        }
+      ]
     }
   },
   "active_by_knowledge_id": {
@@ -563,14 +640,18 @@ O catalogo deve ter estrutura equivalente a:
 }
 ```
 
+Os hashes `aaaaaaaa...`, `bbbbbbbb...` e `cccccccc...` acima sao valores sinteticos ilustrativos de 64 caracteres hexadecimais, nao placeholders de implementacao.
+
 Regras:
 
 - `playbooks` contem somente playbooks `APPROVED` com conteudo operacional completo;
 - `active_by_knowledge_id` possui no maximo um playbook por knowledge;
 - `inactive_by_knowledge_id` nao contem `title`, `description`, `instruction`, `capability` nem step text de DRAFT/RETIRED;
-- `eligible_knowledge_ids` contem apenas IDs do indice `APPROVED_KNOWLEDGE` validado durante o build.
+- `eligible_knowledge_ids` contem apenas IDs do indice `APPROVED_KNOWLEDGE` validado durante o build;
+- `source_hash` do catalogo deve ser identico ao `source_hash` da provenance;
+- `knowledge_binding` deve ser identico ao binding equivalente registrado na provenance.
 
-## 16. Provenance do catalogo
+## 17. Provenance do catalogo
 
 Constantes conceituais:
 
@@ -593,6 +674,7 @@ source_hash
 catalog_hash
 approved_playbooks
 active_links
+inactive_links
 knowledge_domain
 knowledge_schema_version
 knowledge_source_hash
@@ -601,19 +683,20 @@ knowledge_provenance_hash
 
 Regras:
 
-- `source_hash` vincula a provenance ao source de playbooks usado no build;
-- `catalog_hash` vincula a provenance ao conteudo exato do catalogo operacional;
-- `knowledge_domain` deve corresponder a `APPROVED_KNOWLEDGE`;
-- `knowledge_schema_version` deve corresponder ao schema de knowledge validado;
-- `knowledge_source_hash` deve corresponder ao `source_hash` da provenance de knowledge;
-- `knowledge_provenance_hash` deve ser calculado a partir de uma representacao canonica da provenance validada de knowledge e vincula o catalogo a essa provenance completa;
+- `source_hash` vincula a provenance ao source de playbooks usado no build e deve igualar o `source_hash` gravado no catalogo;
+- `catalog_hash` vincula a provenance ao conteudo logico exato do catalogo operacional;
+- `knowledge_domain` deve corresponder a `APPROVED_KNOWLEDGE` e ao `knowledge_binding.domain` do catalogo;
+- `knowledge_schema_version` deve corresponder ao schema de knowledge validado e ao `knowledge_binding.schema_version`;
+- `knowledge_source_hash` deve corresponder ao `source_hash` da provenance de knowledge e ao `knowledge_binding.source_hash`;
+- `knowledge_provenance_hash` deve corresponder ao hash canonico da provenance validada de knowledge e ao `knowledge_binding.provenance_hash`;
+- `approved_playbooks`, `active_links` e `inactive_links` devem ser inteiros nao negativos coerentes com o catalogo;
 - qualquer divergencia faz a carga falhar;
 - sidecar ausente faz a carga falhar;
 - campos ausentes, extras ou invalidos fazem a carga falhar.
 
 A provenance e escrita apenas depois que o catalogo foi concluido. Se houver falha entre a escrita do catalogo e a escrita do sidecar, a proxima carga falha fechado por ausencia de provenance.
 
-## 17. Carga do PlaybookEngine
+## 18. Carga do PlaybookEngine
 
 O `PlaybookEngine` recebe o diretorio do catalogo e a provenance corrente do indice de knowledge usado pelo caller.
 
@@ -623,16 +706,21 @@ Na inicializacao ele deve:
 2. validar schema e dominio;
 3. ler `playbook-catalog.json`;
 4. validar schema operacional;
-5. recalcular `catalog_hash`;
-6. validar cardinalidade interna;
-7. validar que todo `active_by_knowledge_id` referencia playbook `APPROVED` presente no catalogo;
-8. validar que todos os IDs ativos e elegiveis sao consistentes;
-9. comparar `knowledge_domain`, `knowledge_schema_version`, `knowledge_source_hash` e `knowledge_provenance_hash` com a provenance corrente de knowledge;
-10. somente entao permitir resolucao.
+5. comparar o `source_hash` do catalogo com o sidecar;
+6. recalcular `catalog_hash` com a canonicalizacao oficial;
+7. validar contadores de playbooks e links;
+8. validar cardinalidade interna;
+9. validar que todo `active_by_knowledge_id` referencia playbook presente no catalogo aprovado;
+10. validar que todos os IDs ativos pertencem a `eligible_knowledge_ids`;
+11. validar que metadata inativa nao contem conteudo operacional;
+12. comparar o `knowledge_binding` do catalogo com os campos equivalentes do sidecar;
+13. recalcular a hash canonica da provenance corrente de knowledge;
+14. comparar `knowledge_domain`, `knowledge_schema_version`, `knowledge_source_hash` e `knowledge_provenance_hash` com a provenance corrente de knowledge;
+15. somente entao permitir resolucao.
 
 Qualquer falha interrompe a carga explicitamente.
 
-## 18. Resolucao
+## 19. Resolucao
 
 A operacao principal e deterministica.
 
@@ -652,7 +740,7 @@ resolve_knowledge_id(knowledge_id)
 
 Campos adicionais do objeto de knowledge nao sao copiados nem reinterpretados.
 
-Antes de resolver, `knowledge_id` deve existir em `eligible_knowledge_ids`. Um ID que nao pertença ao conjunto aprovado do catalogo e erro de entrada, nao `KNOWLEDGE_ONLY`.
+Antes de resolver, `knowledge_id` deve existir em `eligible_knowledge_ids`. Um ID que nao pertenca ao conjunto aprovado do catalogo e erro de entrada, nao `KNOWLEDGE_ONLY`.
 
 Algoritmo:
 
@@ -670,11 +758,11 @@ knowledge_id elegivel?
 
 Nao ha chamada de IA ou acesso semantico nesse fluxo.
 
-## 19. Contrato para a Fase 7
+## 20. Contrato para a Fase 7
 
 A Fase 7 nao deve reinterpretar `instruction` para descobrir uma acao.
 
-Para cada `ACTION_PROPOSAL`, a Fase 6 ja fornece identificacao de maquina suficiente:
+Para cada `ACTION_PROPOSAL`, a Fase 6 fornece a projecao deterministica definida na secao 10.2:
 
 ```text
 knowledge_id
@@ -683,19 +771,6 @@ playbook_version
 step_id
 type
 capability
-```
-
-Exemplo conceitual de entrada futura para o Policy Engine:
-
-```json
-{
-  "knowledge_id": "KB-SYN-PRINT-001",
-  "playbook_id": "PB-SYN-PRINT-001",
-  "playbook_version": 1,
-  "step_id": "STEP-02",
-  "type": "ACTION_PROPOSAL",
-  "capability": "DEMO_PRINT_QUEUE_CLEAR"
-}
 ```
 
 A Fase 7 podera decidir policy em termos como `ALLOWED`, `DENIED`, `REQUIRES_APPROVAL` ou outros definidos em sua propria spec.
@@ -712,7 +787,7 @@ A estabilidade entre fases depende de:
 - `type` estruturado;
 - `capability` simbolica para `ACTION_PROPOSAL`.
 
-## 20. Formatos CLI previstos
+## 21. Formatos CLI previstos
 
 A implementacao posterior deve prever:
 
@@ -744,7 +819,7 @@ playbook-smoke
 - nunca chama executor;
 - relatorio agregado nao inclui step text, capability ou answer aprovado.
 
-## 21. Fixtures sinteticas
+## 22. Fixtures sinteticas
 
 Arquivos previstos:
 
@@ -759,7 +834,7 @@ Fixtures negativas podem conter referencias inventadas apenas para provar rejeic
 
 Nenhum dado corporativo real deve ser versionado.
 
-## 22. Smoke da Fase 6
+## 23. Smoke da Fase 6
 
 O smoke oficial contem exatamente 10 casos sinteticos.
 
@@ -776,15 +851,16 @@ O smoke oficial contem exatamente 10 casos sinteticos.
 
 O smoke nao substitui os testes unitarios de todas as variantes de corrupcao.
 
-## 23. Testes obrigatorios
+## 24. Testes obrigatorios
 
 A implementacao deve incluir testes explicitos para, no minimo:
 
-### 23.1 Schema e lifecycle
+### 24.1 Schema e lifecycle
 
 - source valido;
 - campos ausentes;
 - campos extras;
+- limite de tamanho excedido;
 - `playbook_id` duplicado;
 - status invalido;
 - `APPROVED` sem review valido;
@@ -797,7 +873,7 @@ A implementacao deve incluir testes explicitos para, no minimo:
 - `knowledge_ids` vazio;
 - `knowledge_id` duplicado dentro do mesmo playbook.
 
-### 23.2 Referencias e cardinalidade
+### 24.2 Referencias e cardinalidade
 
 - knowledge elegivel no indice aprovado;
 - knowledge sem link retorna `KNOWLEDGE_ONLY`;
@@ -807,13 +883,14 @@ A implementacao deve incluir testes explicitos para, no minimo:
 - DRAFT e RETIRED nao entram em `active_by_knowledge_id`;
 - DRAFT e RETIRED nao carregam seus steps, instructions ou capabilities no catalogo operacional.
 
-### 23.3 Provenance fail-closed
+### 24.3 Provenance fail-closed
 
 Testes separados e explicitos para:
 
 - `playbook-provenance.json` ausente;
 - sidecar copiado de outro catalogo;
 - `catalog_hash` adulterado;
+- `source_hash` divergente entre catalogo e sidecar;
 - catalogo truncado;
 - catalogo parcial;
 - catalogo adulterado mantendo JSON valido;
@@ -821,16 +898,18 @@ Testes separados e explicitos para:
 - schema de provenance invalido;
 - `knowledge_source_hash` ligado a outro corpus;
 - `knowledge_provenance_hash` divergente;
-- source hash divergente;
+- binding de knowledge divergente entre catalogo e sidecar;
 - representacao interna com active link apontando para playbook inexistente;
-- representacao interna com conflito de dois APPROVED para o mesmo knowledge.
+- representacao interna com active link fora de `eligible_knowledge_ids`;
+- representacao interna com conflito de dois APPROVED para o mesmo knowledge;
+- metadata inativa contendo `instruction`, `capability` ou outro step text operacional.
 
 Todos esses casos devem resultar em erro explicito de build ou carga. Nenhum deles pode retornar `PLAYBOOK_UNAVAILABLE` ou `KNOWLEDGE_ONLY`.
 
-### 23.4 Machine result e formatter
+### 24.4 Machine result e formatter
 
 - machine result de `ACTION_PROPOSAL` contem `capability`;
-- machine result contem `knowledge_id`, `playbook_id`, `playbook_version`, `step_id` e `type` suficientes para Phase 7;
+- projecao Phase 7 contem `knowledge_id`, `playbook_id`, `playbook_version`, `step_id`, `type` e `capability`;
 - formatter para usuario nao exibe capability;
 - formatter nao exibe reviewer, hashes ou provenance;
 - formatter nao e obrigado a expor `PLAYBOOK_RETIRED` ou lifecycle especifico;
@@ -838,7 +917,7 @@ Todos esses casos devem resultar em erro explicito de build ou carga. Nenhum del
 - formatter nao afirma execucao;
 - formatter nao duplica o answer de knowledge.
 
-### 23.5 Zero execucao
+### 24.5 Zero execucao
 
 - resolver nao importa nem chama executor;
 - nenhum `subprocess` e necessario ao runtime Phase 6;
@@ -847,7 +926,7 @@ Todos esses casos devem resultar em erro explicito de build ou carga. Nenhum del
 - `ACTION_PROPOSAL` com capability valida continua sendo apenas dado estruturado;
 - teste deve usar spy/fake que falharia caso um executor fosse chamado, comprovando zero chamada.
 
-## 24. Relatorio de smoke e privacidade
+## 25. Relatorio de smoke e privacidade
 
 O relatorio agregado deve conter somente metadados seguros, por exemplo:
 
@@ -875,7 +954,7 @@ O relatorio nao inclui:
 - dado corporativo;
 - hash de corpus corporativo em output publico.
 
-## 25. Arquivos previstos para implementacao futura
+## 26. Arquivos previstos para implementacao futura
 
 Dominio:
 
@@ -919,7 +998,7 @@ docs/superpowers/specs/2026-09-08-phase-6-playbooks-design.md
 
 O plano de implementacao sera um artefato separado e so sera criado apos aprovacao explicita desta spec.
 
-## 26. Arquivos protegidos nesta fase
+## 27. Arquivos protegidos nesta fase
 
 Nao ha expectativa de alterar:
 
@@ -934,49 +1013,49 @@ src/ai_service_desk/engine/triage.py
 
 Qualquer necessidade de alterar esses arquivos exige primeiro um bloqueio tecnico reproduzivel, causa raiz documentada, menor mudanca possivel e avaliacao de regressao.
 
-## 27. Riscos de regressao e mitigacoes
+## 28. Riscos de regressao e mitigacoes
 
-### 27.1 Acoplamento com triagem
+### 28.1 Acoplamento com triagem
 
 Risco: transformar playbook em parte obrigatoria de `TriageEngine`.
 
 Mitigacao: resolver playbook somente depois de `KNOWLEDGE_FOUND`, por composicao externa.
 
-### 27.2 Duplicacao do dominio knowledge
+### 28.2 Duplicacao do dominio knowledge
 
 Risco: Fase 6 copiar answer, title, system, intent e outros campos.
 
 Mitigacao: resultado proprio contem apenas `status`, `reason`, `knowledge_id` e `playbook`.
 
-### 27.3 Conteudo inativo virar orientacao
+### 28.3 Conteudo inativo virar orientacao
 
 Risco critico: DRAFT/RETIRED fornecerem steps.
 
 Mitigacao: catalogo operacional mantem conteudo completo apenas de APPROVED. Inativos preservam somente metadata minima de lifecycle.
 
-### 27.4 Corrupcao mascarada como indisponibilidade
+### 28.4 Corrupcao mascarada como indisponibilidade
 
 Risco critico: provenance invalida ser apresentada como `PLAYBOOK_UNAVAILABLE`.
 
 Mitigacao: carga fail-closed antes de qualquer resolucao.
 
-### 27.5 Mudanca de knowledge sem rebuild do playbook
+### 28.5 Mudanca de knowledge sem rebuild do playbook
 
 Risco: catalogo permanecer ligado a uma base diferente.
 
-Mitigacao: `knowledge_source_hash` e `knowledge_provenance_hash` fazem parte da provenance do catalogo e sao comparados em runtime.
+Mitigacao: `knowledge_source_hash` e `knowledge_provenance_hash` fazem parte da provenance e do binding do catalogo e sao comparados em runtime.
 
-### 27.6 Capability virar executor escondido
+### 28.6 Capability virar executor escondido
 
 Risco: Phase 6 armazenar implementacao real dentro da capability.
 
 Mitigacao: capability e somente identificador simbolico com formato restrito. Nao existem campos de comando, argumentos ou endpoint.
 
-### 27.7 Regressao das Fases 1 a 5
+### 28.7 Regressao das Fases 1 a 5
 
 Mitigacao: implementacao aditiva, arquivos protegidos, suite completa anterior obrigatoriamente verde e smoke Phase 6 independente.
 
-## 28. Criterios de aceite da Fase 6
+## 29. Criterios de aceite da Fase 6
 
 A Fase 6 so pode ser considerada concluida quando houver evidencia de que:
 
@@ -996,6 +1075,7 @@ A Fase 6 so pode ser considerada concluida quando houver evidencia de que:
 - catalogo adulterado falha carga;
 - catalogo truncado falha carga;
 - sidecar de outro catalogo falha carga;
+- `source_hash` divergente falha carga;
 - provenance de knowledge divergente falha carga;
 - machine result preserva capability;
 - formatter de usuario nao exibe capability;
@@ -1007,7 +1087,7 @@ A Fase 6 so pode ser considerada concluida quando houver evidencia de que:
 - PR recebe revisao final;
 - merge ocorre somente apos aprovacao explicita.
 
-## 29. Fronteira formal entre Fase 6 e Fase 7
+## 30. Fronteira formal entre Fase 6 e Fase 7
 
 A Fase 6 responde:
 
@@ -1031,7 +1111,7 @@ Essas perguntas pertencem respectivamente ao Policy Engine e a Execucao Controla
 
 A Fase 7 deve consumir os identificadores estruturados da Fase 6 sem precisar analisar ou reescrever texto livre.
 
-## 30. Decisao arquitetural consolidada
+## 31. Decisao arquitetural consolidada
 
 O contrato da Fase 6 e:
 
