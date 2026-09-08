@@ -6,6 +6,7 @@ DEMO_WORKFLOW = ROOT / ".github" / "workflows" / "demo-retrieval-smoke.yml"
 PHASE3_WORKFLOW = ROOT / ".github" / "workflows" / "phase3-evaluation.yml"
 PHASE4_WORKFLOW = ROOT / ".github" / "workflows" / "phase4-knowledge-smoke.yml"
 PHASE5_WORKFLOW = ROOT / ".github" / "workflows" / "phase5-triage-smoke.yml"
+PHASE6_WORKFLOW = ROOT / ".github" / "workflows" / "phase6-playbook-smoke.yml"
 
 
 def test_real_corpus_workflow_is_manual_local_and_non_exporting() -> None:
@@ -134,6 +135,33 @@ def test_phase5_triage_workflow_is_manual_local_and_non_exporting() -> None:
         assert required in text
 
     for forbidden in ("upload-artifact", "Get-Content", "--show-history"):
+        assert forbidden not in text
+
+
+def test_phase6_playbook_workflow_is_manual_local_and_non_exporting() -> None:
+    assert PHASE6_WORKFLOW.exists()
+    text = PHASE6_WORKFLOW.read_text(encoding="utf-8")
+
+    for required in (
+        "workflow_dispatch:",
+        "target_ref:",
+        "self-hosted",
+        "Windows",
+        "X64",
+        "ai-service-desk",
+        "ollama",
+        "python -m ai_service_desk knowledge-index",
+        "python -m ai_service_desk playbook-validate",
+        "python -m ai_service_desk playbook-build",
+        "python -m ai_service_desk playbook-smoke",
+        "knowledge/phase4_synthetic_faq.jsonl",
+        "playbooks/phase6_synthetic_playbooks.jsonl",
+        "tests/fixtures/phase6_playbook_cases.jsonl",
+        "http://127.0.0.1:11434",
+    ):
+        assert required in text
+
+    for forbidden in ("upload-artifact", "Get-Content", "--show-history", "DEMO_PRINT_QUEUE_CLEAR"):
         assert forbidden not in text
 
 

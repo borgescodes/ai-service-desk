@@ -13,6 +13,8 @@ from ai_service_desk.engine.knowledge import build_knowledge_index, load_knowled
 from ai_service_desk.engine.knowledge_retrieval import KnowledgeEngine, format_knowledge_result
 from ai_service_desk.engine.knowledge_smoke import run_knowledge_smoke
 from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
+from ai_service_desk.engine.playbook import build_playbook_catalog, load_playbooks
+from ai_service_desk.engine.playbook_smoke import run_playbook_smoke
 from ai_service_desk.engine.real_smoke import run_demo_smoke, run_real_smoke
 from ai_service_desk.engine.retrieval import RetrievalEngine, format_result
 from ai_service_desk.engine.smoke import run_validation
@@ -94,6 +96,21 @@ def build_parser() -> argparse.ArgumentParser:
     triage_smoke.add_argument("--cases", type=Path, required=True)
     triage_smoke.add_argument("--report", type=Path, required=True)
     triage_smoke.add_argument("--url", default=DEFAULT_URL)
+
+    playbook_validate = sub.add_parser("playbook-validate")
+    playbook_validate.add_argument("--file", type=Path, required=True)
+
+    playbook_build = sub.add_parser("playbook-build")
+    playbook_build.add_argument("--file", type=Path, required=True)
+    playbook_build.add_argument("--knowledge-index", type=Path, required=True)
+    playbook_build.add_argument("--output", type=Path, required=True)
+
+    playbook_smoke = sub.add_parser("playbook-smoke")
+    playbook_smoke.add_argument("--knowledge-index", type=Path, required=True)
+    playbook_smoke.add_argument("--playbooks", type=Path, required=True)
+    playbook_smoke.add_argument("--cases", type=Path, required=True)
+    playbook_smoke.add_argument("--work-directory", type=Path, required=True)
+    playbook_smoke.add_argument("--report", type=Path, required=True)
 
     show_index = sub.add_parser("show-index")
     show_index.add_argument("--index", type=Path, required=True)
@@ -266,6 +283,41 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "triage-smoke":
             report = run_triage_smoke(args.index, args.cases, args.report, args.url)
             print("TRIAGE SMOKE OK" if report["ok"] else "TRIAGE SMOKE REQUER REVISAO")
+            print(f"Casos sinteticos: {len(report.get('cases', []))}")
+            print("Relatorio agregado local: " + str(args.report))
+            return 0 if report["ok"] else 1
+
+        if args.command == "playbook-validate":
+            playbooks = load_playbooks(args.file)
+            counts = {status: 0 for status in ("APPROVED", "DRAFT", "RETIRED")}
+            for playbook in playbooks:
+                counts[playbook["status"]] += 1
+            print(f"Total: {len(playbooks)}")
+            for status in ("APPROVED", "DRAFT", "RETIRED"):
+                print(f"{status}: {counts[status]}")
+            print("Nenhum step ou capability foi exibido. Nenhuma chamada de IA foi feita.")
+            return 0
+
+        if args.command == "playbook-build":
+            provenance = build_playbook_catalog(
+                args.file,
+                args.knowledge_index,
+                args.output,
+            )
+            print("Playbook catalog: " + str(provenance["domain"]))
+            print(f"Playbooks APPROVED: {provenance['approved_playbooks']}")
+            print(f"Links ativos: {provenance['active_links']}")
+            return 0
+
+        if args.command == "playbook-smoke":
+            report = run_playbook_smoke(
+                args.knowledge_index,
+                args.playbooks,
+                args.cases,
+                args.work_directory,
+                args.report,
+            )
+            print("PLAYBOOK SMOKE OK" if report["ok"] else "PLAYBOOK SMOKE REQUER REVISAO")
             print(f"Casos sinteticos: {len(report.get('cases', []))}")
             print("Relatorio agregado local: " + str(args.report))
             return 0 if report["ok"] else 1
