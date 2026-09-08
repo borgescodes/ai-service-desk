@@ -45,6 +45,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
+            docs/superpowers/plans/2026-09-08-phase-6-playbooks.md \
             src/ai_service_desk/engine/playbook.py \
             src/ai_service_desk/engine/playbook_resolution.py \
             src/ai_service_desk/engine/playbook_smoke.py \
@@ -52,5 +53,5 @@ jobs:
             tests/engine/test_playbook_resolution.py \
             tests/engine/test_playbook_smoke.py \
             tests/test_playbook_cli.py
-          git commit -m "style: apply ruff formatting diagnostics"
+          git commit -m "style: format phase 6 plan snippets"
           git push origin HEAD:phase6-format-diagnostic
