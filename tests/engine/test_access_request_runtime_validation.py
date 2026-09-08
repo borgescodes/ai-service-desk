@@ -8,7 +8,8 @@ from ai_service_desk.engine.access_request import (
 )
 
 
-def test_validate_access_request_context_rejects_unhashable_requested_role_as_domain_error() -> None:
+def test_validate_access_request_context_rejects_unhashable_requested_role_as_domain_error(
+) -> None:
     context = AccessRequestContext(
         requester=SessionIdentity(
             username="synthetic.user",
