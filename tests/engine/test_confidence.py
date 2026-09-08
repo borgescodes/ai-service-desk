@@ -1,5 +1,5 @@
-from dataclasses import replace
 import inspect
+from dataclasses import replace
 
 import pytest
 
