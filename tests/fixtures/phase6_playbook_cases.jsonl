@@ -1,0 +1,10 @@
+{"case_name":"approved-single-link","mode":"RESOLVE","knowledge_id":"KB-SYN-PRINT-001","expected_status":"PLAYBOOK_FOUND","expected_reason":"MATCH","expected_playbook_id":"PB-SYN-PRINT-001","mutation":""}
+{"case_name":"approved-shared-cigam","mode":"RESOLVE","knowledge_id":"KB-SYN-CIGAM-ACCESS-001","expected_status":"PLAYBOOK_FOUND","expected_reason":"MATCH","expected_playbook_id":"PB-SYN-ACCESS-SHARED-001","mutation":""}
+{"case_name":"approved-shared-siagri","mode":"RESOLVE","knowledge_id":"KB-SYN-SIAGRI-ACCESS-001","expected_status":"PLAYBOOK_FOUND","expected_reason":"MATCH","expected_playbook_id":"PB-SYN-ACCESS-SHARED-001","mutation":""}
+{"case_name":"knowledge-only","mode":"RESOLVE","knowledge_id":"KB-SYN-VPN-001","expected_status":"KNOWLEDGE_ONLY","expected_reason":"NO_PLAYBOOK","expected_playbook_id":"","mutation":""}
+{"case_name":"draft-only","mode":"RESOLVE","knowledge_id":"KB-SYN-SOFTWARE-001","expected_status":"PLAYBOOK_UNAVAILABLE","expected_reason":"PLAYBOOK_NOT_APPROVED","expected_playbook_id":"","mutation":""}
+{"case_name":"retired-only","mode":"RESOLVE","knowledge_id":"KB-SYN-OUTLOOK-001","expected_status":"PLAYBOOK_UNAVAILABLE","expected_reason":"PLAYBOOK_RETIRED","expected_playbook_id":"","mutation":""}
+{"case_name":"approved-conflict","mode":"BUILD_ERROR","knowledge_id":"KB-SYN-PRINT-001","expected_status":"BUILD_ERROR","expected_reason":"ValueError","expected_playbook_id":"","mutation":"APPROVED_CONFLICT"}
+{"case_name":"ineligible-reference","mode":"BUILD_ERROR","knowledge_id":"KB-SYN-NOT-ELIGIBLE-001","expected_status":"BUILD_ERROR","expected_reason":"ValueError","expected_playbook_id":"","mutation":"INELIGIBLE_REFERENCE"}
+{"case_name":"catalog-integrity","mode":"LOAD_ERROR","knowledge_id":"KB-SYN-PRINT-001","expected_status":"LOAD_ERROR","expected_reason":"ValueError","expected_playbook_id":"","mutation":"CATALOG_TAMPER"}
+{"case_name":"action-proposal-contract","mode":"ACTION_CONTRACT","knowledge_id":"KB-SYN-PRINT-001","expected_status":"PLAYBOOK_FOUND","expected_reason":"MATCH","expected_playbook_id":"PB-SYN-PRINT-001","mutation":""}
