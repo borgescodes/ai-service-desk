@@ -26,11 +26,17 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Ruff lint
-        run: python -m ruff check .
-
-      - name: Ruff format
-        run: python -m ruff format --check .
-
-      - name: Pytest
-        run: python -m pytest
+      - name: Diagnostic Ruff formatting patch
+        run: |
+          python -m ruff format .
+          python -m ruff check --fix .
+          python -m ruff format .
+          git diff -- \
+            src/ai_service_desk/engine/playbook.py \
+            src/ai_service_desk/engine/playbook_resolution.py \
+            src/ai_service_desk/engine/playbook_smoke.py \
+            tests/engine/test_playbook.py \
+            tests/engine/test_playbook_resolution.py \
+            tests/engine/test_playbook_smoke.py \
+            tests/test_playbook_cli.py
+          exit 1
