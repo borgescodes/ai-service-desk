@@ -55,8 +55,6 @@ def assess_confidence(context: AccessRequestContext) -> ConfidenceAssessment:
     area_match = _area_matches_revenda(context.requester.area)
     purpose_match = _purpose_matches_material_request(context.purpose)
     area_reason = AREA_MATCH_REVENDA if area_match else AREA_OUTSIDE_REVENDA
-    purpose_reason = (
-        PURPOSE_MATCH_MATERIAL_REQUEST if purpose_match else PURPOSE_NOT_CONFIRMED
-    )
+    purpose_reason = PURPOSE_MATCH_MATERIAL_REQUEST if purpose_match else PURPOSE_NOT_CONFIRMED
     level: Literal["HIGH", "LOW"] = "HIGH" if area_match and purpose_match else "LOW"
     return ConfidenceAssessment(level, (area_reason, purpose_reason))
