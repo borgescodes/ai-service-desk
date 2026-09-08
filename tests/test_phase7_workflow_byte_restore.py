@@ -9,7 +9,7 @@ def test_phase7_policy_workflow_restores_phase2_fixture_from_exact_head_blob() -
 
     for required in (
         "Restore line-ending-sensitive Phase 2 fixture from exact Git blob bytes",
-        "git show HEAD:tests/fixtures/phase2_corpus.csv",
+        '["git", "show", "HEAD:tests/fixtures/phase2_corpus.csv"]',
         "tests/fixtures/phase2_corpus_manifest.json",
         'manifest["expected"]["raw_sha256"]',
         "path.write_bytes(blob)",
