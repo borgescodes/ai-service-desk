@@ -75,15 +75,20 @@ ACTION_PROPOSAL descriptor da Fase 6
   capability
         ↓
 prepare_access_request(...)
+  CDM-specific na Fase 7
         ↓
 AccessRequestPreparation
         ↓ READY
 AccessRequestContext
         ├──────────────→ PolicyEngine.evaluate(...)
         │                    ↓
+        │        validate_access_request_context(...)
+        │                    ↓
         │              PolicyDecision
         │
         └──────────────→ assess_confidence(...)
+                             ↓
+                 validate_access_request_context(...)
                              ↓
                      ConfidenceAssessment
 ```
@@ -97,6 +102,8 @@ context = None
 ```
 
 Nesse caso `PolicyEngine` não recebe um contexto autorizável.
+
+`PolicyEngine.evaluate(...)` e `assess_confidence(...)` validam o `AccessRequestContext` de forma independente na própria entrada pública. Nenhum deles confia que o objeto necessariamente foi produzido por `prepare_access_request(...)` ou validado pela outra função. Essa propriedade é necessária para a revalidação futura da Fase 8, quando um contexto poderá ser reconstituído a partir de dados persistidos.
 
 A fase termina após produzir contexto, policy e confidence. `request_id`, persistência, `PENDING_APPROVAL`, aprovação humana, revalidação antes de execução, `ExecutionEngine`, `CDMAdapter` e API do CDM pertencem às Fases 8 e 9.
 
@@ -228,6 +235,8 @@ UNKNOWN
 
 `UNKNOWN` é um estado de preparação. Ele não entra em um `AccessRequestContext` pronto para policy.
 
+Na Fase 7, esse conjunto de roles e seu normalizador pertencem exclusivamente ao caso de acesso ao CDM. O normalizador não é um mecanismo genérico para sistemas futuros.
+
 A normalização de role é lexical, determinística e baseada somente no conteúdo do pedido relacionado ao role.
 
 Ela não usa:
@@ -295,6 +304,8 @@ Uma intenção privilegiada inequívoca de aprovação deve reconhecer pelo meno
 
 Uma expressão como `perfil privilegiado`, sem role específica determinável, permanece `UNKNOWN`.
 
+O normalizador só é chamado depois de `prepare_access_request(...)` comprovar que o pedido pertence ao domínio CDM suportado nesta fase. Sistemas ou capabilities futuros não podem reutilizar esse default `SOLICITANTE` sem uma extensão arquitetural explícita e seu próprio contrato de normalização.
+
 ### 5.4 Purpose
 
 `purpose` preserva evidência do usuário. Ele não é produzido nem reescrito por LLM.
@@ -342,7 +353,49 @@ UNKNOWN
 
 `UNKNOWN` não é convertido em `SOLICITANTE` por fallback.
 
-Erros estruturais não são representados como `NEEDS_CLARIFICATION`. Descriptor corrompido, identidade inválida, contexto de triagem inválido ou tipo diferente de `ACTION_PROPOSAL` resultam em erro explícito de domínio.
+`reason_code` possui conjunto fechado e corresponde exatamente à regra de precedência que encerrou a normalização:
+
+| Regra | status | requested_role | reason_code |
+| --- | --- | --- | --- |
+| conflito entre roles conhecidos | NEEDS_CLARIFICATION | UNKNOWN | `ROLE_CONFLICT` |
+| intenção privilegiada inequívoca | READY | role privilegiado correspondente | `ROLE_PRIVILEGED_INTENT_MATCH` |
+| role privilegiado nominal | READY | role privilegiado correspondente | `ROLE_PRIVILEGED_NOMINAL_MATCH` |
+| SOLICITANTE explícito | READY | SOLICITANTE | `ROLE_SOLICITANTE_EXPLICIT` |
+| expressão ambígua de privilégio | NEEDS_CLARIFICATION | UNKNOWN | `ROLE_PRIVILEGE_AMBIGUOUS` |
+| acesso genérico sem sinal de privilégio | READY | SOLICITANTE | `ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE` |
+| caso restante sem determinação segura | NEEDS_CLARIFICATION | UNKNOWN | `ROLE_UNRESOLVED` |
+
+Nenhum outro valor de `reason_code` é produzido por `AccessRequestPreparation` nesta fase.
+
+Casos normativos de reason code:
+
+```text
+"acesso ao CDM"
+-> SOLICITANTE
+-> ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE
+
+"quero acesso aprovador"
+-> APROVADOR
+-> ROLE_PRIVILEGED_NOMINAL_MATCH
+
+"quero poder aprovar solicitações"
+-> APROVADOR
+-> ROLE_PRIVILEGED_INTENT_MATCH
+
+"admin e superadmin"
+-> UNKNOWN
+-> ROLE_CONFLICT
+
+"perfil privilegiado"
+-> UNKNOWN
+-> ROLE_PRIVILEGE_AMBIGUOUS
+
+"solicitante e admin"
+-> UNKNOWN
+-> ROLE_CONFLICT
+```
+
+Erros estruturais ou pedidos fora do domínio CDM suportado não são representados como `AccessRequestPreparation`. Descriptor corrompido, identidade inválida, contexto de triagem inválido, tipo diferente de `ACTION_PROPOSAL` ou combinação fora do escopo CDM resultam em erro explícito de domínio.
 
 ### 5.6 AccessRequestContext
 
@@ -384,6 +437,24 @@ A Fase 8 poderá persistir exatamente esses valores sem reconstruir qual knowled
 
 A preparação deve rejeitar descriptors com campos ausentes, tipos inválidos, `playbook_version` não positivo, capability vazia ou `type` diferente de `ACTION_PROPOSAL`.
 
+`access_request.py` deve expor uma validação estrutural reutilizável:
+
+```python
+validate_access_request_context(context: AccessRequestContext) -> None
+```
+
+Essa validação é independente da preparação e verifica pelo menos:
+
+- `context` possui o tipo de domínio esperado.
+- `requester` é uma `SessionIdentity` estruturalmente válida.
+- `system`, `intent`, `purpose`, `knowledge_id`, `playbook_id`, `step_id` e `capability` são strings não vazias dentro dos limites do domínio.
+- `requested_role` é uma das quatro roles concretas aceitas pelo contrato da Fase 7.
+- `playbook_version` é inteiro positivo.
+
+A validação estrutural não decide policy e não exige que exista regra para a combinação recebida. Um contexto pode ser estruturalmente válido e ainda assim ser desconhecido pela policy, caso em que o resultado continua sendo `DENY / POLICY_NOT_FOUND`.
+
+A função também não aplica a normalização CDM. Ela apenas valida o objeto já construído. Isso permite que a Fase 8 revalide objetos reconstituídos sem refazer interpretação de texto.
+
 ### 5.7 PolicyDecision
 
 Contrato:
@@ -414,16 +485,61 @@ ConfidenceAssessment(
 
 `reason_codes` são códigos de máquina estáveis. Não há texto humano variável nesse contrato.
 
-Códigos mínimos:
+Conjunto fechado da Fase 7:
 
 ```text
+CONTEXT_NOT_CDM_ACCESS_REQUEST
 AREA_MATCH_REVENDA
-PURPOSE_MATCH_MATERIAL_REQUEST
 AREA_OUTSIDE_REVENDA
+PURPOSE_MATCH_MATERIAL_REQUEST
 PURPOSE_NOT_CONFIRMED
 ```
 
-Se o assessor receber um contexto válido fora do domínio CDM, pode usar um código determinístico adicional como `SYSTEM_NOT_CDM` e retornar `LOW`.
+A composição e a ordem são normativas.
+
+Para contexto CDM elegível ao assessor:
+
+```text
+system = CDM
+intent = PROBLEMA_ACESSO
+capability = CDM_ACCESS_REQUEST
+```
+
+`reason_codes` contém exatamente dois códigos e sempre nesta ordem:
+
+```text
+1. dimensão de área
+   AREA_MATCH_REVENDA
+   ou
+   AREA_OUTSIDE_REVENDA
+
+2. dimensão de purpose
+   PURPOSE_MATCH_MATERIAL_REQUEST
+   ou
+   PURPOSE_NOT_CONFIRMED
+```
+
+Portanto os únicos tuples válidos para contexto CDM da Fase 7 são:
+
+```python
+("AREA_MATCH_REVENDA", "PURPOSE_MATCH_MATERIAL_REQUEST")
+("AREA_MATCH_REVENDA", "PURPOSE_NOT_CONFIRMED")
+("AREA_OUTSIDE_REVENDA", "PURPOSE_MATCH_MATERIAL_REQUEST")
+("AREA_OUTSIDE_REVENDA", "PURPOSE_NOT_CONFIRMED")
+```
+
+O primeiro tuple resulta em `HIGH`. Os outros três resultam em `LOW`.
+
+Para um `AccessRequestContext` estruturalmente válido que não corresponda exatamente ao trio CDM acima, o assessor não aplica heurísticas de Revenda ou materiais. O resultado é exatamente:
+
+```python
+ConfidenceAssessment(
+    level="LOW",
+    reason_codes=("CONTEXT_NOT_CDM_ACCESS_REQUEST",),
+)
+```
+
+Não há códigos adicionais, omissões ou ordenação dinâmica nesta fase.
 
 A apresentação humana desses códigos pertence a uma camada futura.
 
@@ -436,8 +552,9 @@ SessionIdentity
 TriageState relevante
 ACTION_PROPOSAL descriptor
         ↓
-validação estrutural
-normalização determinística de requested_role
+validação estrutural de entrada
+validação de escopo CDM da Fase 7
+normalização determinística de requested_role CDM
 preservação de purpose
 preservação de provenance
         ↓
@@ -446,19 +563,26 @@ AccessRequestPreparation
 
 A preparação não consulta knowledge novamente e não resolve playbook novamente.
 
-Pré-condições para o caso CDM da primeira demonstração:
+Nesta fase, `prepare_access_request(...)` é explicitamente CDM-specific. Apesar do nome do contrato, ele não é um preparador genérico para sistemas ou capabilities futuras.
+
+Antes de chamar qualquer regra do normalizador de role, deve comprovar exatamente:
 
 ```text
-system = CDM
-intent = PROBLEMA_ACESSO
-capability = CDM_ACCESS_REQUEST
+TriageState.system = CDM
+TriageState.intent = PROBLEMA_ACESSO
+descriptor.type = ACTION_PROPOSAL
+descriptor.capability = CDM_ACCESS_REQUEST
 ```
 
 A capability vem do descriptor da Fase 6. Ela não é inferida do texto do usuário.
 
-A preparação não deve ocultar contexts válidos futuros de outros sistemas. Se `system` ou `capability` forem estruturalmente válidos, mas não tiverem policy cadastrada, isso poderá chegar ao Policy Engine e será bloqueado como policy desconhecida.
+Se `system`, `intent` ou `capability` não corresponderem ao trio suportado, `prepare_access_request(...)` encerra com erro explícito de domínio de pedido não suportado nesta fase. Ele não chama o RoleNormalizer, não aplica default `SOLICITANTE` e não produz `AccessRequestPreparation`.
 
-A única exceção é `requested_role = UNKNOWN`, que permanece contexto incompleto e não vira `AccessRequestContext` pronto.
+Isso é diferente de um `AccessRequestContext` já existente e estruturalmente válido que seja entregue diretamente ao `PolicyEngine`. O engine continua responsável por bloquear combinações sem policy com `DENY / POLICY_NOT_FOUND`.
+
+O RoleNormalizer da Fase 7 pertence ao domínio CDM. Sistemas ou capabilities futuros exigem preparador e normalização próprios antes de poderem produzir um contexto compatível. Nenhuma role CDM deve ser inferida para outro sistema apenas porque o texto contém uma expressão genérica de acesso.
+
+A única saída não excepcional sem contexto é `requested_role = UNKNOWN`, que permanece contexto incompleto e produz `NEEDS_CLARIFICATION` com um dos reason codes fechados definidos na seção 5.5.
 
 ## 7. Policy Engine
 
@@ -471,6 +595,16 @@ PolicyEngine.evaluate(context: AccessRequestContext) -> PolicyDecision
 ```
 
 O engine é puro, sem estado externo e sem I/O.
+
+Toda chamada pública começa obrigatoriamente por:
+
+```python
+validate_access_request_context(context)
+```
+
+Essa validação ocorre mesmo quando o chamador afirma que o contexto veio de `prepare_access_request(...)`. A Fase 8 poderá reconstruir um `AccessRequestContext` persistido e chamar `evaluate(...)` diretamente para revalidação. Portanto a segurança do engine não depende da preparação original.
+
+Se a validação estrutural falhar, `evaluate(...)` propaga um erro explícito de domínio e não produz `PolicyDecision`.
 
 A chave de policy deve considerar:
 
@@ -507,9 +641,32 @@ reason_code = CDM_PRIVILEGED_ACCESS_NOT_ALLOWED
 decision = DENY
 ```
 
-### 7.1 Fail-closed e distinção entre desconhecido e inválido
+### 7.1 Construção das regras e conflito de chave
 
-A Fase 7 distingue dois casos.
+Mesmo sem catálogo externo, as regras em código não podem depender de um `dict` literal que permita sobrescrita silenciosa de chave duplicada.
+
+A implementação deve declarar as regras como uma sequência explícita de entradas e construir o índice interno por uma função que valide unicidade da chave:
+
+```text
+(system, capability, requested_role)
+```
+
+Ao encontrar duas regras com a mesma chave, mesmo que tenham a mesma decisão, a construção deve falhar com erro explícito de configuração:
+
+```text
+PolicyConfigurationError
+reason_code = POLICY_RULE_CONFLICT
+```
+
+Nenhuma das regras conflitantes prevalece. Não existe `last write wins`, merge ou sobrescrita silenciosa.
+
+O engine com configuração conflitante não fica operacional e não pode produzir `REQUIRE_APPROVAL`. Esse comportamento é fail-closed e detectável por teste.
+
+A verificação de unicidade deve ocorrer na construção do engine ou do índice de regras antes da primeira decisão. O teste deve conseguir injetar uma sequência sintética com chave duplicada e observar `POLICY_RULE_CONFLICT`.
+
+### 7.2 Fail-closed e distinção entre desconhecido e inválido
+
+A Fase 7 distingue três casos.
 
 Contexto estruturalmente válido, porém sem regra conhecida:
 
@@ -529,6 +686,15 @@ erro explícito de domínio
 ```
 
 Não é permitido transformar corrupção de contrato em `POLICY_NOT_FOUND`.
+
+Configuração de policy conflitante:
+
+```text
+PolicyConfigurationError
+reason_code = POLICY_RULE_CONFLICT
+```
+
+Não é permitido escolher silenciosamente uma das regras conflitantes.
 
 Exemplos de erro estrutural:
 
@@ -559,18 +725,42 @@ não encontrei policy, então pode continuar
 assess_confidence(context: AccessRequestContext) -> ConfidenceAssessment
 ```
 
+Toda chamada pública começa obrigatoriamente por:
+
+```python
+validate_access_request_context(context)
+```
+
+Essa chamada é independente da validação feita pelo `PolicyEngine.evaluate(...)`. `assess_confidence(...)` não assume que policy já foi executada, nem que a preparação original ocorreu no mesmo processo.
+
+Se a validação estrutural falhar, `assess_confidence(...)` produz erro explícito de domínio e não retorna um `ConfidenceAssessment`.
+
 `PolicyEngine.evaluate(...)` não recebe `ConfidenceAssessment` nem valor de confidence.
 
 `assess_confidence(...)` não recebe ou altera `PolicyDecision`.
 
 A separação é estrutural, não apenas uma convenção.
 
-Regra mínima da demonstração:
+As regras de área e finalidade desta fase são CDM-specific. Elas só se aplicam quando:
+
+```text
+system = CDM
+intent = PROBLEMA_ACESSO
+capability = CDM_ACCESS_REQUEST
+```
+
+Se qualquer uma dessas três condições não for satisfeita em um contexto estruturalmente válido, o resultado é `LOW` com exatamente:
+
+```python
+reason_codes=("CONTEXT_NOT_CDM_ACCESS_REQUEST",)
+```
+
+Nesse caso nenhuma regra de Revenda ou materiais é avaliada.
+
+Para o contexto CDM suportado, a regra mínima da demonstração é:
 
 ```text
 requester.area contém o conceito lexical Revenda
-+
-system = CDM
 +
 purpose confirma solicitar materiais
 -> HIGH
@@ -580,17 +770,28 @@ Para a primeira versão, `AREA_MATCH_REVENDA` pode ser determinado pela presenç
 
 `PURPOSE_MATCH_MATERIAL_REQUEST` deve exigir evidência lexical determinística de solicitação de materiais no `purpose`. Não há LLM, embedding ou inferência aberta.
 
-Caso a área não corresponda:
+A composição é feita em duas dimensões, sempre na mesma ordem:
 
 ```text
-AREA_OUTSIDE_REVENDA
+area_code = AREA_MATCH_REVENDA
+            ou AREA_OUTSIDE_REVENDA
+
+purpose_code = PURPOSE_MATCH_MATERIAL_REQUEST
+               ou PURPOSE_NOT_CONFIRMED
+
+reason_codes = (area_code, purpose_code)
 ```
 
-Caso a finalidade não seja confirmada:
+`HIGH` exige simultaneamente:
 
-```text
-PURPOSE_NOT_CONFIRMED
+```python
+reason_codes == (
+    "AREA_MATCH_REVENDA",
+    "PURPOSE_MATCH_MATERIAL_REQUEST",
+)
 ```
+
+Qualquer outro tuple CDM válido resulta em `LOW`.
 
 Invariantes obrigatórias:
 
@@ -678,6 +879,8 @@ ExecutionEngine com executor fake
 
 Na futura revalidação, a Fase 8 deve usar os dados preservados da solicitação e o mesmo contrato de `PolicyEngine`. Ela não deve reconstruir provenance procurando novamente o playbook corrente, pois a versão corrente pode ter mudado desde a criação da solicitação.
 
+A Fase 8 poderá reconstruir `AccessRequestContext` a partir da solicitação persistida e chamar `PolicyEngine.evaluate(...)` diretamente. Por isso `evaluate(...)` valida o contexto independentemente de `prepare_access_request(...)`. Se a Fase 8 também recalcular confidence, `assess_confidence(...)` faz sua própria validação independente.
+
 A Fase 7 não implementa nenhuma dessas responsabilidades da Fase 8.
 
 ## 11. Alteração aditiva em classification.py
@@ -764,33 +967,42 @@ Casos obrigatórios:
 ```text
 "acesso ao CDM"
 -> SOLICITANTE
+-> ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE
 
 "quero acesso aprovador"
 -> APROVADOR
+-> ROLE_PRIVILEGED_NOMINAL_MATCH
 
 "quero poder aprovar solicitações"
 -> APROVADOR
+-> ROLE_PRIVILEGED_INTENT_MATCH
 
 "admin e superadmin"
 -> UNKNOWN
+-> ROLE_CONFLICT
 
 "perfil privilegiado"
 -> UNKNOWN
+-> ROLE_PRIVILEGE_AMBIGUOUS
 
 "solicitante e admin"
 -> UNKNOWN
+-> ROLE_CONFLICT
 ```
 
 Cobrir também:
 
-- `ADMIN` nominal isolado.
-- `SUPERADMIN` nominal isolado.
-- `SOLICITANTE` explícito isolado.
-- mais de uma role conhecida sempre gera `UNKNOWN`.
-- expressão privilegiada ambígua nunca cai no default.
-- acesso genérico usa `SOLICITANTE` somente depois de todas as verificações anteriores.
-- texto sem evidência suficiente e sem acesso genérico resulta em `UNKNOWN`.
+- `ADMIN` nominal isolado com `ROLE_PRIVILEGED_NOMINAL_MATCH`.
+- `SUPERADMIN` nominal isolado com `ROLE_PRIVILEGED_NOMINAL_MATCH`.
+- `SOLICITANTE` explícito isolado com `ROLE_SOLICITANTE_EXPLICIT`.
+- mais de uma role conhecida sempre gera `UNKNOWN / ROLE_CONFLICT`.
+- expressão privilegiada ambígua nunca cai no default e usa `ROLE_PRIVILEGE_AMBIGUOUS`.
+- acesso genérico usa `SOLICITANTE` somente depois de todas as verificações anteriores e usa `ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE`.
+- texto sem evidência suficiente e sem acesso genérico resulta em `UNKNOWN / ROLE_UNRESOLVED`.
 - role normalizer não recebe identidade como argumento ou, se a API de preparação possuir identidade, os testes provam que mudar identidade não muda o resultado da normalização para o mesmo pedido.
+- `prepare_access_request(...)` não chama o normalizador para sistema diferente de CDM.
+- `prepare_access_request(...)` não chama o normalizador para capability diferente de `CDM_ACCESS_REQUEST`.
+- um pedido genérico de acesso para sistema futuro não recebe `SOLICITANTE` por reutilização do default CDM.
 
 ### 13.2 Identidade
 
@@ -822,7 +1034,17 @@ Cobrir:
 - descriptor com campo obrigatório ausente rejeitado.
 - versão não positiva rejeitada.
 
-### 13.4 Policy
+### 13.4 Validação independente do contexto
+
+Cobrir:
+
+- `PolicyEngine.evaluate(...)` rejeita `AccessRequestContext` estruturalmente inválido mesmo sem passar por `prepare_access_request(...)`.
+- `assess_confidence(...)` rejeita o mesmo tipo de contexto inválido independentemente de policy.
+- um contexto reconstituído válido pode ser entregue diretamente a `PolicyEngine.evaluate(...)`.
+- um contexto reconstituído válido pode ser entregue diretamente a `assess_confidence(...)`.
+- `validate_access_request_context(...)` não exige existência de policy.
+
+### 13.5 Policy
 
 Cobrir matriz completa:
 
@@ -867,6 +1089,16 @@ Contrato inválido:
 -> erro explícito
 ```
 
+Conflito de rules:
+
+```text
+duas rules com a mesma chave
+(system, capability, requested_role)
+-> PolicyConfigurationError
+-> POLICY_RULE_CONFLICT
+-> nenhuma decisão produzida
+```
+
 Cobrir idempotência lógica da decisão:
 
 ```text
@@ -874,32 +1106,62 @@ mesmo AccessRequestContext avaliado repetidamente
 -> mesmo PolicyDecision
 ```
 
-### 13.5 Confidence
+### 13.6 Confidence
 
-Cobrir:
+Cobrir exatamente:
 
-```text
+```python
 Revenda + CDM + finalidade de solicitar materiais
--> HIGH
--> AREA_MATCH_REVENDA
--> PURPOSE_MATCH_MATERIAL_REQUEST
+-> ConfidenceAssessment(
+       level="HIGH",
+       reason_codes=(
+           "AREA_MATCH_REVENDA",
+           "PURPOSE_MATCH_MATERIAL_REQUEST",
+       ),
+   )
+
+Revenda + CDM + purpose sem evidência de materiais
+-> ConfidenceAssessment(
+       level="LOW",
+       reason_codes=(
+           "AREA_MATCH_REVENDA",
+           "PURPOSE_NOT_CONFIRMED",
+       ),
+   )
 
 Financeiro + CDM + finalidade de solicitar materiais
--> LOW
--> AREA_OUTSIDE_REVENDA
+-> ConfidenceAssessment(
+       level="LOW",
+       reason_codes=(
+           "AREA_OUTSIDE_REVENDA",
+           "PURPOSE_MATCH_MATERIAL_REQUEST",
+       ),
+   )
+
+Financeiro + CDM + purpose sem evidência de materiais
+-> ConfidenceAssessment(
+       level="LOW",
+       reason_codes=(
+           "AREA_OUTSIDE_REVENDA",
+           "PURPOSE_NOT_CONFIRMED",
+       ),
+   )
 ```
 
-Cobrir finalidade não confirmada:
+Para contexto estruturalmente válido fora do trio CDM suportado:
 
-```text
-Revenda + CDM + purpose sem evidência de materiais
--> LOW
--> PURPOSE_NOT_CONFIRMED
+```python
+-> ConfidenceAssessment(
+       level="LOW",
+       reason_codes=("CONTEXT_NOT_CDM_ACCESS_REQUEST",),
+   )
 ```
+
+Os testes devem provar a ordem `área` antes de `purpose` e que nenhum código é omitido quando o contexto pertence ao caso CDM.
 
 Os testes de confidence não devem importar ou executar regras internas de autorização para chegar ao nível de confidence.
 
-### 13.6 Isolamento de execução
+### 13.7 Isolamento de execução
 
 Deve existir teste que prove que os caminhos da Fase 7 não chamam integração externa ou executor.
 
@@ -1081,6 +1343,24 @@ Risco: introduzir HTTP, fake CDM ou adapter para provar o fluxo.
 
 Mitigação: nenhuma dependência de CDM existe na Fase 7. O smoke é totalmente local e determinístico.
 
+### 17.10 Normalizador CDM aplicado a domínio futuro
+
+Risco: um sistema futuro reutilizar `prepare_access_request(...)` e receber `SOLICITANTE` pelo default CDM.
+
+Mitigação: o preparador da Fase 7 exige exatamente `CDM + PROBLEMA_ACESSO + CDM_ACCESS_REQUEST` antes de normalizar role. Outro domínio recebe erro de pedido não suportado e precisa de preparador próprio.
+
+### 17.11 Revalidação confiar na preparação original
+
+Risco: Fase 8 reconstruir contexto persistido inválido e `PolicyEngine` assumir que ele já foi validado na criação.
+
+Mitigação: `PolicyEngine.evaluate(...)` e `assess_confidence(...)` chamam `validate_access_request_context(...)` independentemente em toda entrada pública.
+
+### 17.12 Regra duplicada sobrescrita silenciosamente
+
+Risco: duas policies com a mesma chave entrarem em um mapa e a última sobrescrever a anterior.
+
+Mitigação: índice de rules é construído por rotina que rejeita chave duplicada com `PolicyConfigurationError / POLICY_RULE_CONFLICT` antes de qualquer decisão.
+
 ## 18. Critérios de aceite da Fase 7
 
 A implementação futura só pode ser considerada concluída quando houver evidência de que:
@@ -1089,13 +1369,16 @@ A implementação futura só pode ser considerada concluída quando houver evid�
 - chat não altera username, name, email ou area.
 - role normalizer não usa identidade.
 - role normalizer é lexical e determinístico.
+- o role normalizer da Fase 7 só é aplicado ao domínio `CDM + PROBLEMA_ACESSO + CDM_ACCESS_REQUEST`.
+- sistemas e capabilities futuros não recebem roles CDM por meio de `prepare_access_request(...)`.
 - não existe LLM na normalização de role ou purpose.
 - `purpose` preserva `TriageState.problem_text` como evidência do usuário.
 - precedência fechada do normalizador está coberta por testes.
-- conflito entre roles conhecidas produz `UNKNOWN`.
-- intenção privilegiada inequívoca preserva role privilegiada.
-- expressão privilegiada ambígua produz `UNKNOWN`.
-- acesso genérico sem sinal de privilégio usa `SOLICITANTE` somente como última regra positiva.
+- cada saída de `AccessRequestPreparation` usa exatamente um dos sete `reason_code` definidos na seção 5.5.
+- conflito entre roles conhecidas produz `UNKNOWN / ROLE_CONFLICT`.
+- intenção privilegiada inequívoca preserva role privilegiada e usa `ROLE_PRIVILEGED_INTENT_MATCH`.
+- expressão privilegiada ambígua produz `UNKNOWN / ROLE_PRIVILEGE_AMBIGUOUS`.
+- acesso genérico sem sinal de privilégio usa `SOLICITANTE` somente como última regra positiva e usa `ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE`.
 - `UNKNOWN` nunca vira autorização implícita.
 - `AccessRequestContext` preserva `knowledge_id`, `playbook_id`, `playbook_version`, `step_id` e `capability`.
 - descriptor da Fase 6 é validado como `ACTION_PROPOSAL`.
@@ -1103,6 +1386,9 @@ A implementação futura só pode ser considerada concluída quando houver evid�
 - fixtures homologadas das Fases 4 e 6 permanecem inalteradas para o caso CDM.
 - `CDM` é adicionado a `SYSTEM_ALIASES` de forma estritamente aditiva.
 - `triage.py` permanece intacto.
+- `PolicyEngine.evaluate(...)` valida `AccessRequestContext` independentemente da preparação original.
+- `assess_confidence(...)` valida `AccessRequestContext` independentemente da preparação e de policy.
+- regra de policy duplicada é detectada como `PolicyConfigurationError / POLICY_RULE_CONFLICT` e nunca sobrescrita silenciosamente.
 - `SOLICITANTE` sempre produz `REQUIRE_APPROVAL` para `CDM_ACCESS_REQUEST`.
 - `APROVADOR`, `ADMIN` e `SUPERADMIN` sempre produzem `DENY` para `CDM_ACCESS_REQUEST`.
 - `SUPERADMIN` continua `DENY` mesmo com área Revenda e purpose perfeitamente coerente.
@@ -1110,7 +1396,9 @@ A implementação futura só pode ser considerada concluída quando houver evid�
 - `LOW` nunca converte `SOLICITANTE` em `DENY`.
 - contexto estruturalmente válido sem policy produz `DENY / POLICY_NOT_FOUND`.
 - contrato inválido ou corrompido produz erro explícito, não `POLICY_NOT_FOUND`.
-- `ConfidenceAssessment` usa `reason_codes` estáveis.
+- `ConfidenceAssessment` usa somente os `reason_codes` fechados da seção 5.8.
+- contexto CDM produz exatamente dois reason codes na ordem área, purpose.
+- contexto válido fora do trio CDM produz exatamente `LOW / (CONTEXT_NOT_CDM_ACCESS_REQUEST,)` e não aplica heurísticas CDM.
 - policy e confidence permanecem estruturalmente separados.
 - nenhum caminho chama Ollama, HTTP, subprocesso, executor ou CDM.
 - nenhum comportamento das Fases 4, 5 e 6 é duplicado sem necessidade.
@@ -1124,13 +1412,17 @@ Ao final da Fase 7, o sistema deve conseguir demonstrar de forma determinística
 ```text
 identidade confiável
 +
-pedido de acesso já triado
+pedido de acesso ao CDM já triado
 +
 ação proposta por playbook aprovado
         ↓
-role solicitada normalizada com fail-safe
+validação de que o pedido pertence ao domínio CDM suportado
+        ↓
+role CDM solicitada normalizada com fail-safe
         ↓
 contexto com provenance completa
+        ↓
+validação independente do contexto
         ↓
 policy determinística e fail-closed
         +
@@ -1143,8 +1435,13 @@ Exemplo permitido:
 SessionIdentity.area = Revenda
 pedido = "preciso de acesso ao CDM para solicitar materiais"
 requested_role = SOLICITANTE
+preparation_reason = ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE
 policy = REQUIRE_APPROVAL
 confidence = HIGH
+confidence_reason_codes = (
+    AREA_MATCH_REVENDA,
+    PURPOSE_MATCH_MATERIAL_REQUEST,
+)
 execução externa = nenhuma
 ```
 
@@ -1154,8 +1451,13 @@ Exemplo com contexto incomum:
 SessionIdentity.area = Financeiro
 pedido = "preciso de acesso ao CDM para solicitar materiais"
 requested_role = SOLICITANTE
+preparation_reason = ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE
 policy = REQUIRE_APPROVAL
 confidence = LOW
+confidence_reason_codes = (
+    AREA_OUTSIDE_REVENDA,
+    PURPOSE_MATCH_MATERIAL_REQUEST,
+)
 execução externa = nenhuma
 ```
 
@@ -1164,9 +1466,10 @@ Exemplo bloqueado:
 ```text
 pedido = "preciso de superadmin no CDM"
 requested_role = SUPERADMIN
+preparation_reason = ROLE_PRIVILEGED_NOMINAL_MATCH
 policy = DENY
 confidence = HIGH ou LOW sem efeito sobre policy
 execução externa = nenhuma
 ```
 
-A segurança da Fase 7 está na separação entre identidade confiável, normalização de pedido, provenance estruturada, policy determinística e confidence contextual. Aprovação, persistência e execução permanecem fora desta fronteira.
+A segurança da Fase 7 está na separação entre identidade confiável, preparação CDM-specific, normalização de pedido, provenance estruturada, validação independente de contexto, policy determinística e confidence contextual. Aprovação, persistência e execução permanecem fora desta fronteira.
