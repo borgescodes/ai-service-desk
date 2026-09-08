@@ -171,9 +171,7 @@ def valid_playbook(
         "playbook_id": playbook_id,
         "title": "Playbook sintetico",
         "description": "Procedimento totalmente sintetico para testes.",
-        "knowledge_ids": (
-            knowledge_ids if knowledge_ids is not None else ["KB-SYN-PRINT-001"]
-        ),
+        "knowledge_ids": (knowledge_ids if knowledge_ids is not None else ["KB-SYN-PRINT-001"]),
         "steps": steps if steps is not None else [valid_step()],
         "source": "SYNTHETIC_DEMO",
         "status": status,
@@ -308,8 +306,16 @@ ALLOWED_PLAYBOOK_STATUSES = {"DRAFT", "APPROVED", "RETIRED"}
 ALLOWED_STEP_TYPES = {"INSTRUCTION", "CHECK", "ACTION_PROPOSAL"}
 CAPABILITY_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,119}$")
 PLAYBOOK_FIELDS = {
-    "playbook_id", "title", "description", "knowledge_ids", "steps",
-    "source", "status", "reviewed_by", "reviewed_at", "version",
+    "playbook_id",
+    "title",
+    "description",
+    "knowledge_ids",
+    "steps",
+    "source",
+    "status",
+    "reviewed_by",
+    "reviewed_at",
+    "version",
 }
 STEP_FIELDS = {"step_id", "type", "title", "instruction", "capability"}
 ```
@@ -438,7 +444,9 @@ def test_one_approved_playbook_can_link_multiple_knowledge_ids(monkeypatch, tmp_
     assert provenance["active_links"] == 2
 
 
-def test_two_approved_playbooks_for_same_knowledge_reject_build(monkeypatch, tmp_path: Path) -> None:
+def test_two_approved_playbooks_for_same_knowledge_reject_build(
+    monkeypatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(
         "ai_service_desk.engine.playbook.load_knowledge_index",
         lambda path: trusted_index_double(["KB-SYN-PRINT-001"]),
