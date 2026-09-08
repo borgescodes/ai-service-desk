@@ -1,0 +1,100 @@
+name: Phase 6 playbook smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Branch or SHA to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  phase6-playbook-smoke:
+    name: Windows Phase 6 playbook smoke
+    runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref }}
+
+      - name: Verify Python 3.14
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+          Write-Host "Python: $version"
+          if (-not $version.StartsWith("3.14.")) {
+            throw "Phase 6 playbook smoke requires Python 3.14.x. Found $version"
+          }
+
+      - name: Install project
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Verify local models
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ai_service_desk doctor --url http://127.0.0.1:11434
+
+      - name: Validate synthetic knowledge
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ai_service_desk knowledge-validate `
+            --file knowledge/phase4_synthetic_faq.jsonl
+
+      - name: Build synthetic approved knowledge index
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $index = Join-Path $env:RUNNER_TEMP "phase6-knowledge-$env:GITHUB_RUN_ID"
+          if (Test-Path $index) { Remove-Item -Recurse -Force $index }
+          python -m ai_service_desk knowledge-index `
+            --file knowledge/phase4_synthetic_faq.jsonl `
+            --index "$index" `
+            --batch-size 10 `
+            --url http://127.0.0.1:11434
+
+      - name: Validate synthetic playbooks
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ai_service_desk playbook-validate `
+            --file playbooks/phase6_synthetic_playbooks.jsonl
+
+      - name: Build approved playbook catalog
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $index = Join-Path $env:RUNNER_TEMP "phase6-knowledge-$env:GITHUB_RUN_ID"
+          $catalog = Join-Path $env:RUNNER_TEMP "phase6-playbook-catalog-$env:GITHUB_RUN_ID"
+          if (Test-Path $catalog) { Remove-Item -Recurse -Force $catalog }
+          python -m ai_service_desk playbook-build `
+            --file playbooks/phase6_synthetic_playbooks.jsonl `
+            --knowledge-index "$index" `
+            --output "$catalog"
+
+      - name: Run Phase 6 playbook smoke
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $index = Join-Path $env:RUNNER_TEMP "phase6-knowledge-$env:GITHUB_RUN_ID"
+          $work = Join-Path $env:RUNNER_TEMP "phase6-playbook-work-$env:GITHUB_RUN_ID"
+          $report = Join-Path $env:RUNNER_TEMP "phase6-playbook-$env:GITHUB_RUN_ID.json"
+          if (Test-Path $work) { Remove-Item -Recurse -Force $work }
+          python -m ai_service_desk playbook-smoke `
+            --knowledge-index "$index" `
+            --playbooks playbooks/phase6_synthetic_playbooks.jsonl `
+            --cases tests/fixtures/phase6_playbook_cases.jsonl `
+            --work-directory "$work" `
+            --report "$report"

@@ -254,3 +254,13 @@ Os workflows locais são manuais e executam no runner Windows homologado.
 - Equivalência do motor 2.1: `docs/migration/engine-v2.1-equivalence.md`
 - Homologação local: `docs/environment/local-demo.md`
 - Roadmap: `docs/roadmap.md`
+
+## Fase 6: playbooks declarativos
+
+A Fase 6 adiciona conteúdo operacional aprovado e estruturado depois de `KNOWLEDGE_FOUND`. O vínculo é exclusivamente por `knowledge_id`, sem retrieval semântico, segunda classificação, LLM ou escolha probabilística. Um knowledge APPROVED pode ter no máximo um playbook APPROVED ativo, enquanto um playbook aprovado pode servir a vários knowledge IDs quando o procedimento é literalmente o mesmo.
+
+Os steps são `INSTRUCTION`, `CHECK` e `ACTION_PROPOSAL`. Uma `ACTION_PROPOSAL` carrega `capability` simbólica no contrato de máquina para a futura Fase 7, mas a Fase 6 não decide permissões e não executa comandos, scripts, PowerShell, APIs ou qualquer ação real. `playbook-validate`, `playbook-build` e `playbook-smoke` não instanciam `OllamaClient`; apenas a preparação upstream do índice de knowledge pode depender do embedding local da Fase 4.
+
+O catálogo e sua provenance falham fechado diante de sidecar ausente, hashes divergentes, adulteração, binding de knowledge incompatível ou conflito de dois playbooks APPROVED para o mesmo ID. `DRAFT` e `RETIRED` nunca fornecem conteúdo operacional.
+
+Detalhes: `docs/playbooks/phase-6.md`. Especificação: `docs/superpowers/specs/2026-09-08-phase-6-playbooks-design.md`. Homologação manual: `.github/workflows/phase6-playbook-smoke.yml`.
