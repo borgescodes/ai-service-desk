@@ -19,6 +19,8 @@ def test_phase7_policy_workflow_restores_phase2_fixture_from_exact_head_blob() -
     ):
         assert required in text
 
-    assert text.index("Verify Python 3.14") < text.index(
-        "Restore line-ending-sensitive Phase 2 fixture from exact Git blob bytes"
-    ) < text.index("Install project")
+    assert (
+        text.index("Verify Python 3.14")
+        < text.index("Restore line-ending-sensitive Phase 2 fixture from exact Git blob bytes")
+        < text.index("Install project")
+    )
