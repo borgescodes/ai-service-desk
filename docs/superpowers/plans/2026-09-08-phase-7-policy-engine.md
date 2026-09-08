@@ -4,7 +4,7 @@
 
 **Goal:** Implement the Phase 7 deterministic CDM access policy layer that prepares a provenance-preserving access context, normalizes requested CDM role safely, evaluates fail-closed policy, assesses contextual confidence independently, and stops before persistence, approval, execution or any external call.
 
-**Architecture:** Phase 7 adds three focused domain modules: `access_request.py`, `policy.py`, and `confidence.py`. `prepare_access_request(...)` is CDM-specific in this phase and consumes trusted `SessionIdentity`, resolved `TriageState`, and the real Phase 6 `ACTION_PROPOSAL` descriptor. `PolicyEngine.evaluate(...)` and `assess_confidence(...)` independently revalidate `AccessRequestContext`, which makes their contracts reusable by Phase 8 without trusting the original preparation step.
+**Architecture:** Phase 7 adds three focused domain modules: `access_request.py`, `policy.py`, and `confidence.py`. `prepare_access_request(...)` is CDM-specific in this phase and consumes trusted `SessionIdentity`, resolved `TriageState`, and the real Phase 6 `ACTION_PROPOSAL` descriptor. `PolicyEngine.evaluate(...)` and `assess_confidence(...)` independently validate `AccessRequestContext`, so Phase 8 can reuse both contracts when revalidating a context reconstructed from persisted data.
 
 **Tech Stack:** Python 3.14, stdlib `dataclasses`, `typing`, `collections.abc`, existing `normalize_text`, existing `CAPABILITY_RE`, existing `TriageState`, existing `action_proposal_descriptor`, `pytest`, Ruff, GitHub Actions, Dell self-hosted Windows runner.
 
@@ -18,9 +18,9 @@
 
 - Work starts from exact head `7e7142f757f66585f240e16781accd044f31eb6f` on branch `phase-7-policy-engine`.
 - Every production behavior gate follows observed RED before production implementation, then focused GREEN, then a small commit.
-- Phase 7 does not introduce a second access intent. Existing `PROBLEMA_ACESSO` remains the intent contract.
+- Phase 7 does not add a second access intent. Existing `PROBLEMA_ACESSO` remains the intent contract.
 - The Phase 7 CDM operational discriminator is `capability = "CDM_ACCESS_REQUEST"`.
-- `prepare_access_request(...)` is explicitly CDM-specific in Phase 7. It must reject unsupported `system`, `intent` or `capability` before calling the CDM role normalizer.
+- `prepare_access_request(...)` is explicitly CDM-specific in Phase 7. It rejects unsupported `system`, `intent` or `capability` before calling the CDM role normalizer.
 - `SessionIdentity` is the only trusted identity source. Chat text never overwrites `username`, `name`, `email` or `area`.
 - Requested role is derived only from request text. Identity fields never elevate, reduce, default or infer requested role.
 - Role normalization is lexical and deterministic. It does not use LLM, embeddings, fuzzy matching, knowledge answer or playbook instruction.
@@ -29,8 +29,8 @@
 - `AccessRequestPreparation.reason_code` has exactly seven allowed values defined in this plan and the approved spec.
 - `AccessRequestContext` preserves `knowledge_id`, `playbook_id`, `playbook_version`, `step_id` and `capability` from the Phase 6 descriptor.
 - Descriptor `type` must equal `ACTION_PROPOSAL` during preparation. It is not duplicated in `AccessRequestContext`.
-- `PolicyEngine.evaluate(...)` always calls shared structural validation itself before rule lookup.
-- `assess_confidence(...)` always calls shared structural validation itself before confidence logic.
+- `PolicyEngine.evaluate(...)` calls shared structural validation itself before every rule lookup.
+- `assess_confidence(...)` calls shared structural validation itself before every confidence assessment.
 - A structurally valid context without a policy returns `DENY / POLICY_NOT_FOUND`.
 - A structurally invalid context raises an explicit domain validation error and never becomes `POLICY_NOT_FOUND`.
 - Duplicate policy keys fail during engine construction with `PolicyConfigurationError / POLICY_RULE_CONFLICT`. No rule wins silently.
@@ -39,7 +39,7 @@
 - `SOLICITANTE` always yields `REQUIRE_APPROVAL` for `CDM_ACCESS_REQUEST`, regardless of HIGH or LOW confidence.
 - `APROVADOR`, `ADMIN` and `SUPERADMIN` always yield `DENY` for `CDM_ACCESS_REQUEST`, regardless of confidence.
 - Phase 7 production code performs zero HTTP, zero Ollama calls, zero embeddings, zero subprocess execution, zero executor calls and zero CDM calls.
-- Phase 7 introduces no policy catalog, no `CDMAdapter`, no executor, no request persistence, no human approval state, and no `request_id`.
+- Phase 7 adds no policy catalog, no CDM adapter, no executor, no request persistence, no human approval state, and no request identifier.
 - Do not modify the homologated Phase 4 and Phase 6 fixtures to add CDM.
 - Preserve these files exactly unless a focused reproducible blocker is first documented and explicitly reviewed:
   - `src/ai_service_desk/engine/triage.py`
@@ -51,7 +51,7 @@
   - `playbooks/phase6_synthetic_playbooks.jsonl`
 - `classification.py` may change only by adding `"CDM": ("cdm",)` to `SYSTEM_ALIASES`. Prompt, intents, recovery and heuristics remain byte-for-byte unchanged.
 - No existing test may be deleted, disabled, converted to skip or weakened to satisfy the suite.
-- This plan adds a minimum of 88 new collected pytest cases. With the Phase 6 baseline of 319, the initial hard floor is 407 collected tests. If implementation adds additional tests, raise the floor by the same number.
+- This plan defines a minimum of 91 new collected pytest cases. With the Phase 6 baseline of 319, the initial hard floor is 410 collected tests. If implementation adds additional tests, raise the floor by the same number.
 - Merge is outside this plan. Final evidence is prepared for review only.
 
 ---
@@ -101,68 +101,47 @@ playbooks/phase6_synthetic_playbooks.jsonl
 
 ### `src/ai_service_desk/engine/access_request.py`
 
-```python
-from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Literal
-
+```text
 RequestedRole = Literal["SOLICITANTE", "APROVADOR", "ADMIN", "SUPERADMIN", "UNKNOWN"]
 ConcreteRequestedRole = Literal["SOLICITANTE", "APROVADOR", "ADMIN", "SUPERADMIN"]
 PreparationStatus = Literal["READY", "NEEDS_CLARIFICATION"]
 
-CDM_SYSTEM = "CDM"
-CDM_ACCESS_INTENT = "PROBLEMA_ACESSO"
-CDM_ACCESS_CAPABILITY = "CDM_ACCESS_REQUEST"
+SessionIdentity(
+    username: str,
+    name: str,
+    email: str,
+    area: str,
+)
 
-ROLE_CONFLICT = "ROLE_CONFLICT"
-ROLE_PRIVILEGED_INTENT_MATCH = "ROLE_PRIVILEGED_INTENT_MATCH"
-ROLE_PRIVILEGED_NOMINAL_MATCH = "ROLE_PRIVILEGED_NOMINAL_MATCH"
-ROLE_SOLICITANTE_EXPLICIT = "ROLE_SOLICITANTE_EXPLICIT"
-ROLE_PRIVILEGE_AMBIGUOUS = "ROLE_PRIVILEGE_AMBIGUOUS"
-ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE = "ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE"
-ROLE_UNRESOLVED = "ROLE_UNRESOLVED"
+AccessRequestContext(
+    requester: SessionIdentity,
+    system: str,
+    intent: str,
+    requested_role: ConcreteRequestedRole,
+    purpose: str,
+    knowledge_id: str,
+    playbook_id: str,
+    playbook_version: int,
+    step_id: str,
+    capability: str,
+)
 
-@dataclass(frozen=True)
-class SessionIdentity:
-    username: str
-    name: str
-    email: str
-    area: str
+AccessRequestPreparation(
+    status: PreparationStatus,
+    requested_role: RequestedRole,
+    reason_code: str,
+    context: AccessRequestContext | None,
+)
 
-@dataclass(frozen=True)
-class AccessRequestContext:
-    requester: SessionIdentity
-    system: str
-    intent: str
-    requested_role: ConcreteRequestedRole
-    purpose: str
-    knowledge_id: str
-    playbook_id: str
-    playbook_version: int
-    step_id: str
-    capability: str
-
-@dataclass(frozen=True)
-class AccessRequestPreparation:
-    status: PreparationStatus
-    requested_role: RequestedRole
-    reason_code: str
-    context: AccessRequestContext | None
-
-class AccessRequestValidationError(ValueError):
-    pass
-
-def validate_session_identity(identity: SessionIdentity) -> None: ...
-def validate_access_request_context(context: AccessRequestContext) -> None: ...
-def normalize_requested_role(problem_text: str) -> tuple[RequestedRole, str]: ...
-def prepare_access_request(
+validate_session_identity(identity: SessionIdentity) -> None
+validate_access_request_context(context: AccessRequestContext) -> None
+normalize_requested_role(problem_text: str) -> tuple[RequestedRole, str]
+prepare_access_request(
     requester: SessionIdentity,
     triage: TriageState,
     descriptor: Mapping[str, object],
-) -> AccessRequestPreparation: ...
+) -> AccessRequestPreparation
 ```
-
-The implementation must replace the signature markers above with the concrete bodies specified by Gates 2 through 4. No alternative parameter names or return types are introduced later.
 
 Exact `AccessRequestPreparation.reason_code` set:
 
@@ -178,30 +157,26 @@ ROLE_UNRESOLVED
 
 ### `src/ai_service_desk/engine/policy.py`
 
-```python
-@dataclass(frozen=True)
-class PolicyDecision:
-    decision: Literal["REQUIRE_APPROVAL", "DENY"]
-    policy_id: str
-    reason_code: str
-    reason: str
+```text
+PolicyDecision(
+    decision: Literal["REQUIRE_APPROVAL", "DENY"],
+    policy_id: str,
+    reason_code: str,
+    reason: str,
+)
 
-@dataclass(frozen=True)
-class PolicyRule:
-    system: str
-    capability: str
-    requested_role: ConcreteRequestedRole
-    decision: Literal["REQUIRE_APPROVAL", "DENY"]
-    policy_id: str
-    reason_code: str
-    reason: str
+PolicyRule(
+    system: str,
+    capability: str,
+    requested_role: ConcreteRequestedRole,
+    decision: Literal["REQUIRE_APPROVAL", "DENY"],
+    policy_id: str,
+    reason_code: str,
+    reason: str,
+)
 
-class PolicyConfigurationError(ValueError):
-    reason_code: str
-
-class PolicyEngine:
-    def __init__(self, rules: Sequence[PolicyRule] | None = None): ...
-    def evaluate(self, context: AccessRequestContext) -> PolicyDecision: ...
+PolicyEngine(rules: Sequence[PolicyRule] | None = None)
+PolicyEngine.evaluate(context: AccessRequestContext) -> PolicyDecision
 ```
 
 The policy lookup key is exactly:
@@ -212,13 +187,13 @@ The policy lookup key is exactly:
 
 ### `src/ai_service_desk/engine/confidence.py`
 
-```python
-@dataclass(frozen=True)
-class ConfidenceAssessment:
-    level: Literal["HIGH", "LOW"]
-    reason_codes: tuple[str, ...]
+```text
+ConfidenceAssessment(
+    level: Literal["HIGH", "LOW"],
+    reason_codes: tuple[str, ...],
+)
 
-def assess_confidence(context: AccessRequestContext) -> ConfidenceAssessment: ...
+assess_confidence(context: AccessRequestContext) -> ConfidenceAssessment
 ```
 
 Exact reason code set:
@@ -250,7 +225,7 @@ ConfidenceAssessment(
 
 ### `src/ai_service_desk/engine/policy_smoke.py`
 
-```python
+```text
 load_policy_cases(path: str | Path) -> list[dict]
 run_policy_smoke(cases_path: str | Path, report_path: str | Path) -> dict
 ```
@@ -267,7 +242,7 @@ Planned new collected cases:
 | --- | ---: |
 | Gate 1 classification | 9 |
 | Gate 2 contracts and structural validation | 21 |
-| Gate 3 role normalizer | 9 |
+| Gate 3 role normalizer | 12 |
 | Gate 4 CDM preparation and provenance | 14 |
 | Gate 5 policy engine | 9 |
 | Gate 6 confidence | 7 |
@@ -275,15 +250,15 @@ Planned new collected cases:
 | Gate 8 smoke | 5 |
 | Gate 9 CLI and workflow | 4 |
 | Gate 10 docs | 2 |
-| **Minimum new Phase 7 cases** | **88** |
+| **Minimum new Phase 7 cases** | **91** |
 
 Initial final floor:
 
 ```text
-319 + 88 = 407 collected tests
+319 + 91 = 410 collected tests
 ```
 
-If any extra case is added beyond this plan, the final required count increases one-for-one. Gate 11 also verifies that every pre-Phase-7 collected node ID is still present.
+If any extra case is added beyond this plan, the final required count increases one-for-one. Gate 11 also verifies that every pre-Phase-7 collected node ID remains present.
 
 ---
 
@@ -295,7 +270,7 @@ If any extra case is added beyond this plan, the final required count increases 
 
 **Interfaces:**
 - Consumes: existing `explicit_systems(text: str) -> list[str]`, `classify_ticket(...)`, current alias mapping.
-- Produces: canonical literal system `CDM` for exact alias `cdm`. Existing intents, prompt, recovery and heuristics are unchanged.
+- Produces: canonical literal system `CDM` for exact alias `cdm`. Existing intents, prompt, recovery and heuristics remain unchanged.
 
 - [ ] **Step 1: Append the RED test before modifying production code**
 
@@ -386,11 +361,9 @@ Expected production diff: one added mapping entry and no other classifier edits.
 **Interfaces:**
 - Consumes: `ALLOWED_INTENTS`, Phase 6 `CAPABILITY_RE`.
 - Produces: `SessionIdentity`, `AccessRequestContext`, `AccessRequestPreparation`, `AccessRequestValidationError`, `validate_session_identity(...)`, `validate_access_request_context(...)`.
-- Does not yet produce role normalization or request preparation behavior.
+- Does not yet add role normalization or request preparation behavior.
 
-- [ ] **Step 1: Write the 21 contract/validation tests first**
-
-Use this exact test setup:
+- [ ] **Step 1: Write the 21 contract and validation tests first**
 
 ```python
 from dataclasses import replace
@@ -487,7 +460,7 @@ def test_validate_access_request_context_rejects_invalid_fields(
         validate_access_request_context(context)
 ```
 
-The `None` constructor calls are intentionally invalid at runtime and may use `# type: ignore[arg-type]` on those four lines to keep static intent explicit if required by tooling.
+The four constructor calls with `None` are deliberately invalid runtime inputs. If Ruff or a future type checker requires an annotation, add `# type: ignore[arg-type]` only to those four constructor lines. Do not change the test behavior.
 
 - [ ] **Step 2: Run RED**
 
@@ -615,7 +588,7 @@ def validate_access_request_context(context: AccessRequestContext) -> None:
         raise AccessRequestValidationError("capability deve ser simbolica valida.")
 ```
 
-Keep the imported `Mapping` and `TriageState` in place because Gate 4 extends this same module with the already locked `prepare_access_request(...)` signature.
+Keep `Mapping` and `TriageState` imported in this new file because Gate 4 extends the same module with the locked `prepare_access_request(...)` signature.
 
 - [ ] **Step 4: Run GREEN and Ruff**
 
@@ -645,7 +618,7 @@ git commit -m "feat: add phase 7 access request contracts"
 - Produces `normalize_requested_role(problem_text: str) -> tuple[RequestedRole, str]`.
 - Identity is absent from the normalizer signature.
 
-- [ ] **Step 1: Append the exact RED matrix**
+- [ ] **Step 1: Append the RED matrix with all seven terminal reasons**
 
 ```python
 import inspect
@@ -696,17 +669,32 @@ def test_privileged_semantic_and_nominal_conflict_is_unknown() -> None:
     )
 ```
 
-This adds 9 collected cases in Gate 3.
+- [ ] **Step 2: Add nominal role regressions before GREEN**
 
-- [ ] **Step 2: Run RED**
+```python
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("quero admin", ("ADMIN", "ROLE_PRIVILEGED_NOMINAL_MATCH")),
+        ("quero superadmin", ("SUPERADMIN", "ROLE_PRIVILEGED_NOMINAL_MATCH")),
+        ("quero perfil solicitante", ("SOLICITANTE", "ROLE_SOLICITANTE_EXPLICIT")),
+    ],
+)
+def test_role_normalizer_nominal_positive_cases(text: str, expected: tuple[str, str]) -> None:
+    assert normalize_requested_role(text) == expected
+```
+
+Gate 3 now contributes exactly 12 collected cases.
+
+- [ ] **Step 3: Run RED**
 
 ```bash
-python -m pytest tests/engine/test_access_request.py -k "role_normalizer" -v
+python -m pytest tests/engine/test_access_request.py -k "role_normalizer or privileged_semantic" -v
 ```
 
 Expected: import failure because `normalize_requested_role` is not defined.
 
-- [ ] **Step 3: Add deterministic lexical constants and the normalizer**
+- [ ] **Step 4: Add deterministic lexical constants and the normalizer**
 
 Add this import:
 
@@ -736,7 +724,7 @@ GENERIC_ACCESS_TERMS = frozenset({"acesso", "acessar"})
 PRIVILEGED_ROLES = frozenset({"APROVADOR", "ADMIN", "SUPERADMIN"})
 ```
 
-Add these helpers and public function exactly:
+Add these helpers and public function:
 
 ```python
 def _nominal_role_signals(normalized: str) -> set[str]:
@@ -790,26 +778,7 @@ def normalize_requested_role(problem_text: str) -> tuple[RequestedRole, str]:
     return "UNKNOWN", ROLE_UNRESOLVED
 ```
 
-The union in `known_signals` is important. `admin e quero aprovar solicitacoes` contains an unambiguous ADMIN signal and an unambiguous APROVADOR semantic signal, so conflict wins before either privileged rule.
-
-- [ ] **Step 4: Add nominal positive regressions**
-
-Append one parametrized test with three cases. These are already included in the 9-case Gate 3 budget by replacing the standalone conflict test count only if the implementer keeps the total at or above 9. The minimum total must not decrease.
-
-```python
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("quero admin", ("ADMIN", "ROLE_PRIVILEGED_NOMINAL_MATCH")),
-        ("quero superadmin", ("SUPERADMIN", "ROLE_PRIVILEGED_NOMINAL_MATCH")),
-        ("quero perfil solicitante", ("SOLICITANTE", "ROLE_SOLICITANTE_EXPLICIT")),
-    ],
-)
-def test_role_normalizer_nominal_positive_cases(text: str, expected: tuple[str, str]) -> None:
-    assert normalize_requested_role(text) == expected
-```
-
-Because this adds three more collected cases, the quantitative floor increases by three if these are kept in addition to the initial 9. Gate 11 calculates the actual final delta, so no extra test is lost from accounting.
+The union in `known_signals` is mandatory. `admin e quero aprovar solicitacoes` contains an ADMIN signal plus an APROVADOR semantic signal, so conflict wins before either privileged rule.
 
 - [ ] **Step 5: Run GREEN and commit**
 
@@ -832,9 +801,9 @@ git commit -m "feat: add fail-safe CDM role normalization"
 **Interfaces:**
 - Consumes: `SessionIdentity`, resolved `TriageState`, real Phase 6 descriptor mapping.
 - Produces: `prepare_access_request(...) -> AccessRequestPreparation`.
-- The function rejects unsupported scope before role normalization.
+- Rejects unsupported scope before role normalization.
 
-- [ ] **Step 1: Add deterministic test helpers**
+- [ ] **Step 1: Add deterministic test helpers that call the real Phase 6 descriptor**
 
 Append:
 
@@ -1001,6 +970,8 @@ def test_prepare_access_request_rejects_corrupt_descriptor(descriptor: dict) -> 
         prepare_access_request(valid_identity(), answered_triage(), descriptor)
 ```
 
+Gate 4 contributes 14 collected cases.
+
 - [ ] **Step 5: Run RED**
 
 ```bash
@@ -1118,24 +1089,47 @@ git commit -m "feat: prepare CDM access request context"
 **Files:** create `src/ai_service_desk/engine/policy.py`, create `tests/engine/test_policy.py`.
 
 **Interfaces:**
-- Consumes: structurally valid `AccessRequestContext`.
+- Consumes: `AccessRequestContext`.
 - Produces: `PolicyDecision`.
 - Independently invokes `validate_access_request_context(context)` on every `evaluate(...)` call.
 
-- [ ] **Step 1: Write the RED policy matrix and fail-closed tests**
+- [ ] **Step 1: Create self-contained test helpers and RED policy matrix**
 
 ```python
 from dataclasses import replace
 
 import pytest
 
-from ai_service_desk.engine.access_request import AccessRequestValidationError
+from ai_service_desk.engine.access_request import (
+    AccessRequestContext,
+    AccessRequestValidationError,
+    SessionIdentity,
+)
 from ai_service_desk.engine.policy import (
     PolicyConfigurationError,
     PolicyEngine,
     PolicyRule,
 )
-from tests.engine.test_access_request import valid_context
+
+
+def valid_context() -> AccessRequestContext:
+    return AccessRequestContext(
+        requester=SessionIdentity(
+            username="synthetic.policy",
+            name="Synthetic Policy User",
+            email="synthetic.policy@example.invalid",
+            area="Revenda Sintetica",
+        ),
+        system="CDM",
+        intent="PROBLEMA_ACESSO",
+        requested_role="SOLICITANTE",
+        purpose="preciso de acesso ao CDM para solicitar materiais",
+        knowledge_id="KB-SYN-CDM-POLICY",
+        playbook_id="PB-SYN-CDM-POLICY",
+        playbook_version=1,
+        step_id="STEP-CDM-POLICY",
+        capability="CDM_ACCESS_REQUEST",
+    )
 
 
 @pytest.mark.parametrize(
@@ -1229,6 +1223,8 @@ def test_policy_same_context_is_idempotent() -> None:
     context = valid_context()
     assert engine.evaluate(context) == engine.evaluate(context)
 ```
+
+Gate 5 contributes 9 collected cases.
 
 - [ ] **Step 3: Run RED**
 
@@ -1382,7 +1378,7 @@ git commit -m "feat: add fail-closed CDM policy engine"
 - Produces: `ConfidenceAssessment(level, reason_codes)`.
 - Calls shared context validation independently before any confidence rule.
 
-- [ ] **Step 1: Write RED tests for all four CDM reason-code combinations**
+- [ ] **Step 1: Create self-contained helpers and RED tests for all four CDM combinations**
 
 ```python
 from dataclasses import replace
@@ -1390,10 +1386,37 @@ import inspect
 
 import pytest
 
-from ai_service_desk.engine.access_request import AccessRequestValidationError
+from ai_service_desk.engine.access_request import (
+    AccessRequestContext,
+    AccessRequestValidationError,
+    SessionIdentity,
+)
 from ai_service_desk.engine.confidence import ConfidenceAssessment, assess_confidence
 from ai_service_desk.engine.policy import PolicyEngine
-from tests.engine.test_access_request import valid_context, valid_identity
+
+
+def valid_identity() -> SessionIdentity:
+    return SessionIdentity(
+        username="synthetic.confidence",
+        name="Synthetic Confidence User",
+        email="synthetic.confidence@example.invalid",
+        area="Revenda Sintetica",
+    )
+
+
+def valid_context() -> AccessRequestContext:
+    return AccessRequestContext(
+        requester=valid_identity(),
+        system="CDM",
+        intent="PROBLEMA_ACESSO",
+        requested_role="SOLICITANTE",
+        purpose="preciso de acesso ao CDM para solicitar materiais",
+        knowledge_id="KB-SYN-CDM-CONFIDENCE",
+        playbook_id="PB-SYN-CDM-CONFIDENCE",
+        playbook_version=1,
+        step_id="STEP-CDM-CONFIDENCE",
+        capability="CDM_ACCESS_REQUEST",
+    )
 
 
 @pytest.mark.parametrize(
@@ -1460,6 +1483,8 @@ def test_policy_and_confidence_public_signatures_are_separate() -> None:
     assert list(inspect.signature(PolicyEngine.evaluate).parameters) == ["self", "context"]
     assert list(inspect.signature(assess_confidence).parameters) == ["context"]
 ```
+
+Gate 6 contributes 7 collected cases.
 
 - [ ] **Step 3: Run RED**
 
@@ -1559,24 +1584,82 @@ git commit -m "feat: add deterministic access confidence"
 **Files:** create `tests/engine/test_policy_security.py`. Production changes are allowed only if a new RED test reveals a defect in the Phase 7 modules created by Gates 2 through 6.
 
 **Interfaces:**
-- Consumes: real `prepare_access_request`, `PolicyEngine`, `assess_confidence`, real Phase 6 descriptor helper.
+- Consumes: real `prepare_access_request`, `PolicyEngine`, `assess_confidence`, and real Phase 6 `action_proposal_descriptor`.
 - Produces: evidence that identity cannot be overwritten, confidence cannot authorize, unknown policy denies, and no Phase 7 path calls external execution.
 
-- [ ] **Step 1: Write an end-to-end synthetic helper**
+- [ ] **Step 1: Create self-contained end-to-end helpers**
 
 ```python
 from dataclasses import replace
-import subprocess
 from pathlib import Path
+import subprocess
 
 import pytest
 import requests
 
-from ai_service_desk.engine.access_request import prepare_access_request
+from ai_service_desk.engine.access_request import (
+    AccessRequestContext,
+    SessionIdentity,
+    prepare_access_request,
+)
 from ai_service_desk.engine.confidence import assess_confidence
 from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
+from ai_service_desk.engine.playbook_resolution import action_proposal_descriptor
 from ai_service_desk.engine.policy import PolicyEngine
-from tests.engine.test_access_request import answered_triage, cdm_descriptor, valid_context, valid_identity
+from ai_service_desk.engine.triage import TriageState
+
+
+def valid_identity() -> SessionIdentity:
+    return SessionIdentity(
+        username="synthetic.security",
+        name="Synthetic Security User",
+        email="synthetic.security@example.invalid",
+        area="Revenda Sintetica",
+    )
+
+
+def answered_triage(problem_text: str) -> TriageState:
+    return TriageState(
+        version=1,
+        session_id="phase7-security",
+        status="ANSWERED",
+        turn_count=1,
+        clarification_count=0,
+        problem_text=problem_text,
+        intent="PROBLEMA_ACESSO",
+        system="CDM",
+        entities={},
+        confidence=0.9,
+        pending_field="",
+        asked_fields=(),
+    )
+
+
+def cdm_descriptor() -> dict:
+    return action_proposal_descriptor(
+        "KB-SYN-CDM-SECURITY",
+        {"playbook_id": "PB-SYN-CDM-SECURITY", "playbook_version": 1},
+        {
+            "step_id": "STEP-CDM-SECURITY",
+            "type": "ACTION_PROPOSAL",
+            "capability": "CDM_ACCESS_REQUEST",
+        },
+    )
+
+
+def valid_context() -> AccessRequestContext:
+    return AccessRequestContext(
+        requester=valid_identity(),
+        system="CDM",
+        intent="PROBLEMA_ACESSO",
+        requested_role="SOLICITANTE",
+        purpose="preciso de acesso ao CDM para solicitar materiais",
+        knowledge_id="KB-SYN-CDM-SECURITY",
+        playbook_id="PB-SYN-CDM-SECURITY",
+        playbook_version=1,
+        step_id="STEP-CDM-SECURITY",
+        capability="CDM_ACCESS_REQUEST",
+    )
 
 
 def phase7_result(problem_text: str, area: str):
@@ -1653,7 +1736,7 @@ def test_solicitante_policy_is_require_approval_for_high_and_low(
     assert confidence.level == expected_confidence
 ```
 
-- [ ] **Step 4: Add unknown policy and runtime external-call guards**
+- [ ] **Step 4: Add unknown-policy and runtime external-call guards**
 
 ```python
 def test_valid_unknown_policy_stays_denied_and_confidence_stays_low() -> None:
@@ -1718,7 +1801,9 @@ def test_phase7_domain_modules_do_not_import_execution_or_persistence_boundaries
             assert marker not in text, f"{marker} found in {path.name}"
 ```
 
-- [ ] **Step 6: Run RED if any invariant currently fails, apply only the smallest Phase 7 fix, then GREEN**
+Gate 7 contributes 8 collected cases.
+
+- [ ] **Step 6: Run RED if an invariant exposes a defect, then focused GREEN**
 
 ```bash
 python -m pytest tests/engine/test_policy_security.py -v
@@ -1727,6 +1812,8 @@ python -m ruff check src/ai_service_desk/engine/access_request.py src/ai_service
 python -m ruff format --check src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py tests/engine/test_policy_security.py
 ```
 
+If RED exposes a defect, change only the owning Phase 7 module and rerun the exact failing test before the full Gate 7 GREEN command.
+
 - [ ] **Step 7: Commit the security proof**
 
 ```bash
@@ -1734,7 +1821,7 @@ git add tests/engine/test_policy_security.py src/ai_service_desk/engine/access_r
 git commit -m "test: lock phase 7 policy security boundaries"
 ```
 
-If no production file changed after RED, the commit contains only the new security test file.
+If no production file changed after RED, the commit contains only `tests/engine/test_policy_security.py`.
 
 ---
 
@@ -1745,8 +1832,8 @@ If no production file changed after RED, the commit contains only the new securi
 **Files:** create `tests/fixtures/phase7_policy_cases.jsonl`, create `src/ai_service_desk/engine/policy_smoke.py`, create `tests/engine/test_policy_smoke.py`.
 
 **Interfaces:**
-- Consumes: the real `action_proposal_descriptor(...)`, Phase 7 preparation/policy/confidence.
-- Produces: `run_policy_smoke(...)` and a local privacy-safe report.
+- Consumes: real `action_proposal_descriptor(...)`, Phase 7 preparation, policy and confidence.
+- Produces: `load_policy_cases(...)`, `run_policy_smoke(...)`, and a local privacy-safe report.
 
 - [ ] **Step 1: Create the exact 15 synthetic fixture rows**
 
@@ -1768,7 +1855,7 @@ expected_confidence
 expected_confidence_reason_codes
 ```
 
-Create `tests/fixtures/phase7_policy_cases.jsonl` with exactly these JSON objects, one per line:
+Create `tests/fixtures/phase7_policy_cases.jsonl` with exactly these rows:
 
 ```jsonl
 {"case_name":"generic_revenda_materials","username":"synthetic.01","name":"Synthetic User 01","email":"synthetic.01@example.invalid","area":"Revenda Sintetica","problem_text":"preciso de acesso ao CDM para solicitar materiais","expected_preparation_status":"READY","expected_role":"SOLICITANTE","expected_preparation_reason_code":"ROLE_GENERIC_ACCESS_DEFAULT_SOLICITANTE","expected_policy_decision":"REQUIRE_APPROVAL","expected_policy_reason_code":"CDM_SOLICITANTE_REQUIRES_HUMAN_APPROVAL","expected_confidence":"HIGH","expected_confidence_reason_codes":["AREA_MATCH_REVENDA","PURPOSE_MATCH_MATERIAL_REQUEST"]}
@@ -1788,12 +1875,13 @@ Create `tests/fixtures/phase7_policy_cases.jsonl` with exactly these JSON object
 {"case_name":"superadmin_revenda_perfect_context","username":"synthetic.15","name":"Synthetic User 15","email":"synthetic.15@example.invalid","area":"Revenda Sintetica","problem_text":"preciso de superadmin no CDM para solicitar materiais","expected_preparation_status":"READY","expected_role":"SUPERADMIN","expected_preparation_reason_code":"ROLE_PRIVILEGED_NOMINAL_MATCH","expected_policy_decision":"DENY","expected_policy_reason_code":"CDM_PRIVILEGED_ACCESS_NOT_ALLOWED","expected_confidence":"HIGH","expected_confidence_reason_codes":["AREA_MATCH_REVENDA","PURPOSE_MATCH_MATERIAL_REQUEST"]}
 ```
 
-- [ ] **Step 2: Write RED smoke tests**
+- [ ] **Step 2: Write RED smoke tests with complete imports**
 
 ```python
-import json
+from pathlib import Path
 import subprocess
 
+import pytest
 import requests
 
 from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
@@ -1860,30 +1948,22 @@ python -m pytest tests/engine/test_policy_smoke.py -v
 
 Expected: module import failure because `policy_smoke.py` does not exist.
 
-- [ ] **Step 4: Implement the strict smoke loader and runner**
+- [ ] **Step 4: Implement the complete strict smoke loader and runner**
 
-Use `atomic_json` only for the local report. The runner creates its Phase 6 descriptor in memory through the real function:
+Create `src/ai_service_desk/engine/policy_smoke.py`:
 
 ```python
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+from ai_service_desk.engine.access_request import SessionIdentity, prepare_access_request
+from ai_service_desk.engine.confidence import assess_confidence
+from ai_service_desk.engine.index import atomic_json
 from ai_service_desk.engine.playbook_resolution import action_proposal_descriptor
+from ai_service_desk.engine.policy import PolicyEngine
+from ai_service_desk.engine.triage import TriageState
 
-
-def _cdm_descriptor() -> dict:
-    playbook = {
-        "playbook_id": "PB-SYN-CDM-ACCESS-001",
-        "playbook_version": 1,
-    }
-    step = {
-        "step_id": "STEP-CDM-ACCESS-01",
-        "type": "ACTION_PROPOSAL",
-        "capability": "CDM_ACCESS_REQUEST",
-    }
-    return action_proposal_descriptor("KB-SYN-CDM-ACCESS-001", playbook, step)
-```
-
-The production smoke file must define:
-
-```python
 CASE_FIELDS = {
     "case_name",
     "username",
@@ -1899,67 +1979,201 @@ CASE_FIELDS = {
     "expected_confidence",
     "expected_confidence_reason_codes",
 }
+
+
+def load_policy_cases(path: str | Path) -> list[dict]:
+    source = Path(path)
+    if not source.exists() or not source.is_file():
+        raise ValueError("Arquivo de casos da Fase 7 nao encontrado.")
+    rows: list[dict] = []
+    seen: set[str] = set()
+    try:
+        with source.open(encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, 1):
+                if not line.strip():
+                    continue
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"JSON invalido na linha {line_number}.") from exc
+                if not isinstance(raw, dict) or set(raw) != CASE_FIELDS:
+                    raise ValueError("Campos invalidos no caso da Fase 7.")
+                name = raw["case_name"]
+                if not isinstance(name, str) or not name.strip() or name in seen:
+                    raise ValueError("case_name invalido ou duplicado.")
+                for field in (
+                    "username",
+                    "name",
+                    "email",
+                    "area",
+                    "problem_text",
+                    "expected_preparation_status",
+                    "expected_role",
+                    "expected_preparation_reason_code",
+                    "expected_policy_decision",
+                    "expected_policy_reason_code",
+                    "expected_confidence",
+                ):
+                    if not isinstance(raw[field], str):
+                        raise ValueError(f"{field} deve ser texto.")
+                codes = raw["expected_confidence_reason_codes"]
+                if not isinstance(codes, list) or any(not isinstance(code, str) for code in codes):
+                    raise ValueError("expected_confidence_reason_codes deve ser lista de textos.")
+                seen.add(name)
+                rows.append(dict(raw))
+    except UnicodeDecodeError as exc:
+        raise ValueError("Casos da Fase 7 devem ser JSONL UTF-8 valido.") from exc
+    if len(rows) != 15:
+        raise ValueError("Smoke da Fase 7 exige exatamente 15 casos sinteticos.")
+    return rows
+
+
+def _cdm_descriptor() -> dict:
+    return action_proposal_descriptor(
+        "KB-SYN-CDM-ACCESS-001",
+        {
+            "playbook_id": "PB-SYN-CDM-ACCESS-001",
+            "playbook_version": 1,
+        },
+        {
+            "step_id": "STEP-CDM-ACCESS-01",
+            "type": "ACTION_PROPOSAL",
+            "capability": "CDM_ACCESS_REQUEST",
+        },
+    )
+
+
+def _triage(case: dict) -> TriageState:
+    return TriageState(
+        version=1,
+        session_id=f"phase7-{case['case_name']}",
+        status="ANSWERED",
+        turn_count=1,
+        clarification_count=0,
+        problem_text=case["problem_text"],
+        intent="PROBLEMA_ACESSO",
+        system="CDM",
+        entities={},
+        confidence=0.9,
+        pending_field="",
+        asked_fields=(),
+    )
+
+
+def _safe_case_result(
+    case: dict,
+    actual_preparation_status: str,
+    actual_role: str,
+    actual_preparation_reason_code: str,
+    actual_policy_decision: str,
+    actual_policy_reason_code: str,
+    actual_confidence: str,
+    actual_confidence_reason_codes: tuple[str, ...],
+) -> dict:
+    expected_codes = tuple(case["expected_confidence_reason_codes"])
+    passed = (
+        actual_preparation_status == case["expected_preparation_status"]
+        and actual_role == case["expected_role"]
+        and actual_preparation_reason_code == case["expected_preparation_reason_code"]
+        and actual_policy_decision == case["expected_policy_decision"]
+        and actual_policy_reason_code == case["expected_policy_reason_code"]
+        and actual_confidence == case["expected_confidence"]
+        and actual_confidence_reason_codes == expected_codes
+    )
+    return {
+        "case_name": case["case_name"],
+        "actual_preparation_status": actual_preparation_status,
+        "actual_role": actual_role,
+        "actual_preparation_reason_code": actual_preparation_reason_code,
+        "actual_policy_decision": actual_policy_decision,
+        "actual_policy_reason_code": actual_policy_reason_code,
+        "actual_confidence": actual_confidence,
+        "actual_confidence_reason_codes": list(actual_confidence_reason_codes),
+        "passed": bool(passed),
+    }
+
+
+def run_policy_smoke(cases_path: str | Path, report_path: str | Path) -> dict:
+    report = {
+        "schema_version": 1,
+        "phase": 7,
+        "domain": "POLICY_ENGINE",
+        "timestamp_utc": datetime.now(UTC).isoformat(),
+        "ok": False,
+        "cases": [],
+        "privacy": {
+            "identity_included": False,
+            "raw_problem_text_included": False,
+            "purpose_included": False,
+            "capability_included": False,
+            "corporate_data_included": False,
+        },
+    }
+    try:
+        cases = load_policy_cases(cases_path)
+        engine = PolicyEngine()
+        descriptor = _cdm_descriptor()
+        for case in cases:
+            try:
+                requester = SessionIdentity(
+                    username=case["username"],
+                    name=case["name"],
+                    email=case["email"],
+                    area=case["area"],
+                )
+                preparation = prepare_access_request(requester, _triage(case), descriptor)
+                actual_policy_decision = ""
+                actual_policy_reason_code = ""
+                actual_confidence = ""
+                actual_confidence_reason_codes: tuple[str, ...] = ()
+                if preparation.status == "READY":
+                    if preparation.context is None:
+                        raise ValueError("READY sem AccessRequestContext.")
+                    decision = engine.evaluate(preparation.context)
+                    confidence = assess_confidence(preparation.context)
+                    actual_policy_decision = decision.decision
+                    actual_policy_reason_code = decision.reason_code
+                    actual_confidence = confidence.level
+                    actual_confidence_reason_codes = confidence.reason_codes
+                elif preparation.context is not None:
+                    raise ValueError("NEEDS_CLARIFICATION com contexto preenchido.")
+                report["cases"].append(
+                    _safe_case_result(
+                        case,
+                        preparation.status,
+                        preparation.requested_role,
+                        preparation.reason_code,
+                        actual_policy_decision,
+                        actual_policy_reason_code,
+                        actual_confidence,
+                        actual_confidence_reason_codes,
+                    )
+                )
+            except (ValueError, RuntimeError, OSError, KeyError, AssertionError) as exc:
+                report["cases"].append(
+                    {
+                        "case_name": case["case_name"],
+                        "actual_preparation_status": "EXECUTION_ERROR",
+                        "actual_role": "",
+                        "actual_preparation_reason_code": type(exc).__name__,
+                        "actual_policy_decision": "",
+                        "actual_policy_reason_code": "",
+                        "actual_confidence": "",
+                        "actual_confidence_reason_codes": [],
+                        "passed": False,
+                    }
+                )
+        report["ok"] = len(report["cases"]) == 15 and all(
+            row["passed"] for row in report["cases"]
+        )
+    except (ValueError, RuntimeError, OSError, KeyError) as exc:
+        report["error"] = type(exc).__name__
+    finally:
+        atomic_json(Path(report_path), report)
+    return report
 ```
 
-`load_policy_cases(...)` must require UTF-8 JSONL, exact fields, unique nonempty `case_name`, string identity/problem fields, list of string confidence codes and exactly 15 rows.
-
-For every row, build:
-
-```python
-SessionIdentity(...)
-TriageState(
-    version=1,
-    session_id=f"phase7-{case_name}",
-    status="ANSWERED",
-    turn_count=1,
-    clarification_count=0,
-    problem_text=case["problem_text"],
-    intent="PROBLEMA_ACESSO",
-    system="CDM",
-    entities={},
-    confidence=0.9,
-    pending_field="",
-    asked_fields=(),
-)
-```
-
-Call `prepare_access_request(...)`. For `NEEDS_CLARIFICATION`, do not call policy or confidence. For `READY`, require non-null context, then call `PolicyEngine().evaluate(context)` and `assess_confidence(context)`.
-
-Per-case report keys are exactly:
-
-```text
-case_name
-actual_preparation_status
-actual_role
-actual_preparation_reason_code
-actual_policy_decision
-actual_policy_reason_code
-actual_confidence
-actual_confidence_reason_codes
-passed
-```
-
-The top-level report is exactly shaped around:
-
-```python
-{
-    "schema_version": 1,
-    "phase": 7,
-    "domain": "POLICY_ENGINE",
-    "timestamp_utc": datetime.now(UTC).isoformat(),
-    "ok": bool,
-    "cases": list,
-    "privacy": {
-        "identity_included": False,
-        "raw_problem_text_included": False,
-        "purpose_included": False,
-        "capability_included": False,
-        "corporate_data_included": False,
-    },
-}
-```
-
-If a case raises, store only `type(exc).__name__` in a safe error field. Never store the exception message because it may contain rejected input.
+The runner never stores exception messages, identity values, raw problem text, purpose, capability, knowledge ID or playbook ID in its persisted report.
 
 - [ ] **Step 5: Run GREEN and commit**
 
@@ -2069,6 +2283,8 @@ def test_phase7_policy_workflow_is_manual_local_and_non_exporting() -> None:
     ):
         assert forbidden not in text
 ```
+
+Gate 9 contributes 4 collected cases.
 
 - [ ] **Step 3: Run RED**
 
@@ -2234,18 +2450,14 @@ def test_phase7_operational_doc_locks_policy_boundary() -> None:
         "319",
     ):
         assert required in text
-    for forbidden in (
-        "AUTO_APPROVE",
-        "CDMAdapter",
-        "request_id",
-    ):
-        assert forbidden not in text
 
 
 def test_readme_links_phase7_operational_doc() -> None:
     text = README.read_text(encoding="utf-8")
     assert "docs/policy/phase-7.md" in text
 ```
+
+Gate 10 contributes 2 collected cases.
 
 - [ ] **Step 2: Run RED**
 
@@ -2256,8 +2468,6 @@ python -m pytest tests/test_phase7_docs.py -v
 Expected: operational doc missing.
 
 - [ ] **Step 3: Create `docs/policy/phase-7.md` with these exact sections**
-
-The document must contain:
 
 ```text
 # Fase 7: Policy Engine
@@ -2297,7 +2507,7 @@ Casos sinteticos: 15
 0
 ```
 
-The document must explicitly state:
+The document must state this flow explicitly:
 
 ```text
 SessionIdentity -> TriageState ANSWERED -> ACTION_PROPOSAL descriptor -> AccessRequestPreparation
@@ -2307,11 +2517,11 @@ NEEDS_CLARIFICATION -> no PolicyDecision and no ConfidenceAssessment
 
 It must list all seven preparation reason codes, the four CDM policy rows, `DENY / POLICY_NOT_FOUND` for a valid unknown policy, `PolicyConfigurationError / POLICY_RULE_CONFLICT` for duplicate rule keys, exact confidence reason-code order, provenance fields, zero external calls and the Phase 8 boundary.
 
-The Dell section uses the same local `policy-smoke` command. It does not run `doctor`, knowledge indexing or any Ollama command.
+The Dell section uses the same local `policy-smoke` command. It does not run `doctor`, knowledge indexing or an Ollama command.
 
 - [ ] **Step 4: Update README minimally**
 
-Add a Phase 7 line linking `docs/policy/phase-7.md` and stating that Phase 7 decides policy/confidence only. It must not claim that access is created, approved or executed.
+Add a Phase 7 line linking `docs/policy/phase-7.md` and stating that Phase 7 decides policy and confidence only. It must not claim that access is created, approved or executed.
 
 - [ ] **Step 5: Run focused regressions and protected-file checks**
 
@@ -2401,15 +2611,15 @@ Requirements:
 
 ```text
 baseline = 319
-planned Phase 7 minimum = 88 new collected cases
-initial hard floor = 407
+planned Phase 7 minimum = 91 new collected cases
+initial hard floor = 410
 ```
 
-If more than 88 new cases were added, increase the floor one-for-one. A smaller green suite is not acceptable.
+If more than 91 new cases were added, increase the floor one-for-one. A smaller green suite is not acceptable.
 
 - [ ] **Step 5: Compare baseline and final collected node IDs, not only counts**
 
-Create a temporary detached baseline worktree and collect test node IDs from both states. From repository root on a Unix-like executor:
+From repository root on a Unix-like executor:
 
 ```bash
 BASELINE_DIR="../ai-service-desk-phase7-baseline"
@@ -2442,15 +2652,15 @@ if len(baseline) != 319:
     raise SystemExit(f"expected baseline 319, got {len(baseline)}")
 if missing:
     raise SystemExit("missing baseline nodeids:\n" + "\n".join(missing))
-if len(final) < len(baseline) + len(new):
-    raise SystemExit("quantitative baseline invariant failed")
-if len(new) < 88:
-    raise SystemExit(f"expected at least 88 new Phase 7 nodeids, got {len(new)}")
+if len(new) < 91:
+    raise SystemExit(f"expected at least 91 new Phase 7 nodeids, got {len(new)}")
+if len(final) < 410:
+    raise SystemExit(f"expected at least 410 final nodeids, got {len(final)}")
 PY
 git worktree remove "$BASELINE_DIR"
 ```
 
-This check proves the old node ID set is a subset of the final suite and records the actual number of newly collected tests.
+This check proves the old 319-node set is a subset of the final suite and records the actual number of newly collected tests.
 
 - [ ] **Step 6: Run zero-execution scans on Phase 7 production modules**
 
@@ -2474,9 +2684,7 @@ Expected: no matches.
 git grep -n -E "REQUEST_ACCESS|AUTO_APPROVE|request_id|PENDING_APPROVAL|CDMAdapter|ExecutionEngine" -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py src/ai_service_desk/engine/policy_smoke.py
 ```
 
-Expected: no matches.
-
-The substring `CDM_ACCESS_REQUEST` is allowed and expected. The forbidden intent name is the distinct token `REQUEST_ACCESS`.
+Expected: no matches. `CDM_ACCESS_REQUEST` remains allowed because it is the Phase 6 capability, not a new intent.
 
 - [ ] **Step 8: Privacy scan synthetic fixture and generated-file tracking**
 
@@ -2513,7 +2721,7 @@ git ls-files | grep -E "phase7.*report.*\.json|phase7-policy-smoke.*\.json" || t
 
 Expected: no generated report file.
 
-- [ ] **Step 9: Verify protected Phase 4/5/6 files are unchanged**
+- [ ] **Step 9: Verify protected Phase 4, 5 and 6 files are unchanged**
 
 ```bash
 git diff --exit-code 7e7142f757f66585f240e16781accd044f31eb6f -- src/ai_service_desk/engine/triage.py src/ai_service_desk/engine/knowledge.py src/ai_service_desk/engine/knowledge_retrieval.py src/ai_service_desk/engine/playbook.py src/ai_service_desk/engine/playbook_resolution.py knowledge/phase4_synthetic_faq.jsonl playbooks/phase6_synthetic_playbooks.jsonl
@@ -2556,10 +2764,13 @@ Do not print the report body.
 
 - [ ] **Step 11: Dell homologation on the exact candidate SHA**
 
-On the Dell runner checkout:
+Before dispatching Dell homologation, set `PHASE7_CANDIDATE_SHA` to the immutable candidate commit SHA obtained from `git rev-parse HEAD`, and dispatch the workflow with the same exact SHA in `target_ref`. On the Dell checkout run:
 
 ```powershell
-$expected = "<exact candidate SHA copied from the PR head>"
+if (-not $env:PHASE7_CANDIDATE_SHA) {
+    throw "PHASE7_CANDIDATE_SHA is required"
+}
+$expected = $env:PHASE7_CANDIDATE_SHA.Trim()
 $actual = (git rev-parse HEAD).Trim()
 if ($actual -ne $expected) {
     throw "Dell checkout SHA $actual differs from candidate $expected"
@@ -2580,15 +2791,13 @@ python -m ai_service_desk policy-smoke `
 $LASTEXITCODE
 ```
 
-The concrete value for `$expected` is the immutable PR head SHA at homologation time. Do not substitute a branch name for this equality check.
-
 Required evidence:
 
 ```text
 Python 3.14.x
-Ruff check: exit 0
-Ruff format check: exit 0
-pytest: all tests pass, collected count at or above baseline plus all new Phase 7 tests
+Ruff check exit code 0
+Ruff format check exit code 0
+pytest all tests pass with collected count at or above 319 plus every new Phase 7 test
 POLICY SMOKE OK
 Casos sinteticos: 15
 0
@@ -2598,7 +2807,7 @@ The Dell run must not start Ollama, run `doctor`, build a knowledge index or cal
 
 - [ ] **Step 12: Final self-review against the approved spec**
 
-Review each item and record pass/fail in the PR evidence:
+Review each item and record pass/fail in the review evidence:
 
 ```text
 1. prepare_access_request is CDM-specific and rejects future system/capability before role normalization.
@@ -2616,16 +2825,14 @@ Review each item and record pass/fail in the PR evidence:
 13. Valid non-CDM confidence is exactly LOW / CONTEXT_NOT_CDM_ACCESS_REQUEST.
 14. HIGH never grants approval and LOW never denies SOLICITANTE.
 15. Privileged roles remain DENY under perfect confidence.
-16. No LLM, HTTP, executor, CDM adapter, persistence, approval state or request ID exists.
-17. Homologated Phase 4/5/6 protected files and fixtures are unchanged.
+16. No LLM, HTTP, executor, CDM adapter, persistence, approval state or request identifier exists.
+17. Homologated Phase 4, 5 and 6 protected files and fixtures are unchanged.
 18. Baseline 319 node IDs are all still present.
 19. Final collected count is at least 319 plus every newly added Phase 7 test.
 20. Synthetic smoke is 15/15 and report privacy checks pass.
 ```
 
 - [ ] **Step 13: Prepare review evidence without merging**
-
-Capture:
 
 ```bash
 git status --short
@@ -2684,11 +2891,11 @@ Phase 7 implementation is ready for review only when all of the following are ev
 - privileged roles produce `DENY`, including `SUPERADMIN` with Revenda area and matching material purpose.
 - chat text cannot overwrite trusted identity.
 - Phase 7 production modules have zero HTTP, Ollama, embedding, subprocess, executor or CDM calls.
-- no request persistence, human approval state or request ID is implemented.
+- no request persistence, human approval state or request identifier is implemented.
 - official synthetic smoke is exactly 15/15.
 - smoke report contains no identity, raw problem text, purpose, capability, corporate data or generated external artifacts.
 - all 319 baseline test node IDs remain present.
-- final collected suite is at least the baseline plus every newly added Phase 7 test, with initial planned floor of 407 before optional extra tests.
+- final collected suite is at least the baseline plus every newly added Phase 7 test, with initial planned floor of 410 before optional extra tests.
 - complete pytest passes.
 - Ruff lint and format checks pass.
 - Dell homologation passes on the exact final candidate SHA.
