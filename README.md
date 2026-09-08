@@ -240,6 +240,7 @@ A homologação local é separada:
 - `.github/workflows/phase3-evaluation.yml` executa o benchmark sintético, a decisão de calibração e as invariantes seguras da demo no Dell.
 - `.github/workflows/phase4-knowledge-smoke.yml` valida a FAQ sintética aprovada e as invariantes fail-closed da Fase 4 no Dell.
 - `.github/workflows/phase5-triage-smoke.yml` valida os 10 cenários sintéticos da triagem no Dell sem publicar transcript ou answer.
+- `.github/workflows/phase7-policy-smoke.yml` valida policy e confidence no SHA exato informado, sem Ollama ou chamada externa.
 
 Os workflows locais são manuais e executam no runner Windows homologado.
 
@@ -250,6 +251,7 @@ Os workflows locais são manuais e executam no runner Windows homologado.
 - Avaliação e calibração: `docs/evaluation/phase-3.md`
 - FAQ e base de conhecimento: `docs/knowledge/phase-4.md`
 - Triagem conversacional: `docs/triage/phase-5.md`
+- Policy Engine: `docs/policy/phase-7.md`
 - Manifesto seguro da Fase 2: `docs/data/phase-2-corpus-v1.json`
 - Equivalência do motor 2.1: `docs/migration/engine-v2.1-equivalence.md`
 - Homologação local: `docs/environment/local-demo.md`
@@ -264,3 +266,7 @@ Os steps são `INSTRUCTION`, `CHECK` e `ACTION_PROPOSAL`. Uma `ACTION_PROPOSAL` 
 O catálogo e sua provenance falham fechado diante de sidecar ausente, hashes divergentes, adulteração, binding de knowledge incompatível ou conflito de dois playbooks APPROVED para o mesmo ID. `DRAFT` e `RETIRED` nunca fornecem conteúdo operacional.
 
 Detalhes: `docs/playbooks/phase-6.md`. Especificação: `docs/superpowers/specs/2026-09-08-phase-6-playbooks-design.md`. Homologação manual: `.github/workflows/phase6-playbook-smoke.yml`.
+
+## Fase 7: Policy Engine
+
+A Fase 7 decide policy e confidence de forma deterministica para o fluxo de acesso ao CDM. Ela nao cria solicitacao persistida, nao aprova acesso e nao executa acao externa. Detalhes operacionais: `docs/policy/phase-7.md`.
