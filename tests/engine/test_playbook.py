@@ -336,3 +336,256 @@ def test_provenance_sidecar_is_last_write(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(module, "atomic_json", recording_atomic)
     build_playbook_catalog(source, tmp_path / "knowledge", tmp_path / "catalog")
     assert writes == ["playbook-catalog.json", "playbook-provenance.json"]
+
+
+def test_load_rejects_missing_sidecar(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    monkeypatch.setattr(
+        "ai_service_desk.engine.playbook.load_knowledge_index",
+        lambda path: trusted_index_double(["KB-SYN-PRINT-001"]),
+    )
+    source = tmp_path / "playbooks.jsonl"
+    out = tmp_path / "catalog"
+    write_jsonl(source, [valid_playbook()])
+    build_playbook_catalog(source, tmp_path / "knowledge", out)
+    (out / "playbook-provenance.json").unlink()
+    with pytest.raises(ValueError, match="provenance"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def _build_valid_catalog(monkeypatch, tmp_path: Path, rows=None, ids=None, name="catalog"):
+    trusted_ids = ids or ["KB-SYN-PRINT-001"]
+    monkeypatch.setattr(
+        "ai_service_desk.engine.playbook.load_knowledge_index",
+        lambda path: trusted_index_double(trusted_ids),
+    )
+    source = tmp_path / f"{name}.jsonl"
+    write_jsonl(source, rows or [valid_playbook()])
+    out = tmp_path / name
+    build_playbook_catalog(source, tmp_path / "knowledge", out)
+    return source, out
+
+
+def _read_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _rewrite_catalog_and_refresh_hash(out: Path, mutate) -> None:
+    from ai_service_desk.engine.playbook import canonical_json_bytes, sha256_bytes
+
+    catalog_path = out / "playbook-catalog.json"
+    sidecar_path = out / "playbook-provenance.json"
+    catalog = _read_json(catalog_path)
+    mutate(catalog)
+    _write_json(catalog_path, catalog)
+    sidecar = _read_json(sidecar_path)
+    sidecar["catalog_hash"] = sha256_bytes(canonical_json_bytes(catalog))
+    _write_json(sidecar_path, sidecar)
+
+
+def test_load_rejects_sidecar_from_other_catalog(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, first = _build_valid_catalog(monkeypatch, tmp_path, name="first")
+    changed = valid_playbook("PB-SYN-OTHER")
+    changed["title"] = "Outro playbook sintetico"
+    _, second = _build_valid_catalog(monkeypatch, tmp_path, rows=[changed], name="second")
+    (first / "playbook-provenance.json").write_bytes(
+        (second / "playbook-provenance.json").read_bytes()
+    )
+    with pytest.raises(ValueError):
+        load_playbook_catalog(first, tmp_path / "knowledge")
+
+
+def test_load_rejects_catalog_hash_mismatch(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, out = _build_valid_catalog(monkeypatch, tmp_path)
+    catalog = _read_json(out / "playbook-catalog.json")
+    catalog["playbooks"]["PB-SYN-001"]["title"] = "Adulterado"
+    _write_json(out / "playbook-catalog.json", catalog)
+    with pytest.raises(ValueError, match="hash|diverg"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_truncated_catalog(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, out = _build_valid_catalog(monkeypatch, tmp_path)
+    path = out / "playbook-catalog.json"
+    raw = path.read_bytes()
+    path.write_bytes(raw[: len(raw) // 2])
+    with pytest.raises(ValueError):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_partial_catalog_schema(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, out = _build_valid_catalog(monkeypatch, tmp_path)
+    _rewrite_catalog_and_refresh_hash(out, lambda c: c.pop("active_by_knowledge_id"))
+    with pytest.raises(ValueError, match="catalogo"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_wrong_catalog_domain(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, out = _build_valid_catalog(monkeypatch, tmp_path)
+    _rewrite_catalog_and_refresh_hash(out, lambda c: c.__setitem__("domain", "HISTORICO_NAO_VALIDADO"))
+    with pytest.raises(ValueError, match="dominio"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_wrong_sidecar_domain(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, out = _build_valid_catalog(monkeypatch, tmp_path)
+    sidecar_path = out / "playbook-provenance.json"
+    sidecar = _read_json(sidecar_path)
+    sidecar["domain"] = "OTHER_DOMAIN"
+    _write_json(sidecar_path, sidecar)
+    with pytest.raises(ValueError, match="provenance"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_extra_provenance_field(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, out = _build_valid_catalog(monkeypatch, tmp_path)
+    sidecar_path = out / "playbook-provenance.json"
+    sidecar = _read_json(sidecar_path)
+    sidecar["unexpected"] = True
+    _write_json(sidecar_path, sidecar)
+    with pytest.raises(ValueError, match="provenance"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_wrong_knowledge_source_hash(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, out = _build_valid_catalog(monkeypatch, tmp_path)
+    sidecar_path = out / "playbook-provenance.json"
+    sidecar = _read_json(sidecar_path)
+    sidecar["knowledge_source_hash"] = "e" * 64
+    _write_json(sidecar_path, sidecar)
+    with pytest.raises(ValueError, match="knowledge"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_wrong_knowledge_provenance_hash(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, out = _build_valid_catalog(monkeypatch, tmp_path)
+    sidecar_path = out / "playbook-provenance.json"
+    sidecar = _read_json(sidecar_path)
+    sidecar["knowledge_provenance_hash"] = "e" * 64
+    _write_json(sidecar_path, sidecar)
+    with pytest.raises(ValueError, match="knowledge"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_catalog_sidecar_binding_mismatch(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, out = _build_valid_catalog(monkeypatch, tmp_path)
+    def mutate(c):
+        c["knowledge_binding"]["source_hash"] = "e" * 64
+    _rewrite_catalog_and_refresh_hash(out, mutate)
+    with pytest.raises(ValueError, match="knowledge|binding"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_active_link_to_missing_playbook(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, out = _build_valid_catalog(monkeypatch, tmp_path)
+    def mutate(c):
+        c["active_by_knowledge_id"]["KB-SYN-PRINT-001"] = "PB-SYN-MISSING"
+    _rewrite_catalog_and_refresh_hash(out, mutate)
+    with pytest.raises(ValueError, match="active|playbook|propriet"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_active_link_outside_eligible_ids(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, out = _build_valid_catalog(monkeypatch, tmp_path)
+    def mutate(c):
+        c["active_by_knowledge_id"]["KB-SYN-NOT-ELIGIBLE-001"] = "PB-SYN-001"
+    _rewrite_catalog_and_refresh_hash(out, mutate)
+    with pytest.raises(ValueError, match="elegivel|active|propriet"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_inactive_instruction(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    rows = [valid_playbook("PB-SYN-D", status="DRAFT")]
+    _, out = _build_valid_catalog(monkeypatch, tmp_path, rows=rows)
+    def mutate(c):
+        c["inactive_by_knowledge_id"]["KB-SYN-PRINT-001"][0]["instruction"] = "Nao pode aparecer"
+    _rewrite_catalog_and_refresh_hash(out, mutate)
+    with pytest.raises(ValueError, match="inativ|metadata"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_inactive_capability(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    rows = [valid_playbook("PB-SYN-D", status="DRAFT")]
+    _, out = _build_valid_catalog(monkeypatch, tmp_path, rows=rows)
+    def mutate(c):
+        c["inactive_by_knowledge_id"]["KB-SYN-PRINT-001"][0]["capability"] = "DEMO_X"
+    _rewrite_catalog_and_refresh_hash(out, mutate)
+    with pytest.raises(ValueError, match="inativ|metadata"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_rejects_two_approved_owners_even_if_active_map_has_one(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    _, out = _build_valid_catalog(monkeypatch, tmp_path)
+    def mutate(c):
+        second = dict(c["playbooks"]["PB-SYN-001"])
+        second["playbook_id"] = "PB-SYN-SECOND"
+        c["playbooks"]["PB-SYN-SECOND"] = second
+    _rewrite_catalog_and_refresh_hash(out, mutate)
+    sidecar_path = out / "playbook-provenance.json"
+    sidecar = _read_json(sidecar_path)
+    sidecar["approved_playbooks"] = 2
+    _write_json(sidecar_path, sidecar)
+    with pytest.raises(ValueError, match="mais de um|propriet"):
+        load_playbook_catalog(out, tmp_path / "knowledge")
+
+
+def test_load_revalidates_current_knowledge_index(monkeypatch, tmp_path: Path) -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    calls: list[Path] = []
+    trusted = trusted_index_double(["KB-SYN-PRINT-001"])
+    def fake_loader(path):
+        calls.append(Path(path))
+        return trusted
+    monkeypatch.setattr("ai_service_desk.engine.playbook.load_knowledge_index", fake_loader)
+    source = tmp_path / "playbooks.jsonl"
+    out = tmp_path / "catalog"
+    write_jsonl(source, [valid_playbook()])
+    build_playbook_catalog(source, tmp_path / "knowledge", out)
+    calls.clear()
+    load_playbook_catalog(out, tmp_path / "knowledge")
+    assert calls == [tmp_path / "knowledge"]
+
+
+def test_load_public_signature_has_only_validated_knowledge_index() -> None:
+    from ai_service_desk.engine.playbook import load_playbook_catalog
+
+    assert list(inspect.signature(load_playbook_catalog).parameters) == [
+        "directory",
+        "knowledge_index_directory",
+    ]

@@ -367,3 +367,181 @@ def build_playbook_catalog(
     if final_provenance["catalog_hash"] != sha256_bytes(canonical_json_bytes(final_catalog)):
         raise ValueError("catalogo e provenance divergentes apos publicacao.")
     return final_provenance
+
+
+def _validate_operational_playbook(playbook_id: str, raw: object) -> dict:
+    expected = {"playbook_id", "title", "description", "knowledge_ids", "version", "steps"}
+    if not isinstance(raw, dict) or set(raw) != expected:
+        raise ValueError("playbook operacional invalido.")
+    row = dict(raw)
+    if row.get("playbook_id") != playbook_id:
+        raise ValueError("playbook operacional com identidade divergente.")
+    _required_text(row["playbook_id"], "playbook_id", 120)
+    _required_text(row["title"], "title", 180)
+    _required_text(row["description"], "description", 1000)
+    version = row["version"]
+    if isinstance(version, bool) or not isinstance(version, int) or version <= 0:
+        raise ValueError("playbook operacional com version invalida.")
+    knowledge_ids = row["knowledge_ids"]
+    if not isinstance(knowledge_ids, list) or not 1 <= len(knowledge_ids) <= 20:
+        raise ValueError("playbook operacional com knowledge_ids invalidos.")
+    seen: set[str] = set()
+    for knowledge_id in knowledge_ids:
+        value = _required_text(knowledge_id, "knowledge_id", 120)
+        if value in seen:
+            raise ValueError("playbook operacional com knowledge_id duplicado.")
+        seen.add(value)
+    steps = row["steps"]
+    if not isinstance(steps, list) or not 1 <= len(steps) <= 20:
+        raise ValueError("playbook operacional com steps invalidos.")
+    step_ids: set[str] = set()
+    validated_steps: list[dict] = []
+    for raw_step in steps:
+        step = _validate_step(raw_step)
+        if step["step_id"] in step_ids:
+            raise ValueError("playbook operacional com step_id duplicado.")
+        step_ids.add(step["step_id"])
+        validated_steps.append(step)
+    row["steps"] = validated_steps
+    return row
+
+
+def _validate_hash(value: object, label: str) -> str:
+    if not isinstance(value, str) or len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+        raise ValueError(f"{label} invalido.")
+    return value
+
+
+def _validate_loaded_catalog(catalog: dict) -> tuple[set[str], dict[str, str]]:
+    _validate_catalog_build_shape(catalog)
+    binding = catalog["knowledge_binding"]
+    if binding.get("domain") != "APPROVED_KNOWLEDGE":
+        raise ValueError("binding de knowledge pertence a outro dominio.")
+    schema_version = binding.get("schema_version")
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version <= 0:
+        raise ValueError("binding de knowledge com schema invalido.")
+    _validate_hash(binding.get("source_hash"), "knowledge source_hash")
+    _validate_hash(binding.get("provenance_hash"), "knowledge provenance_hash")
+
+    eligible_raw = catalog["eligible_knowledge_ids"]
+    eligible_ids: set[str] = set()
+    for raw_id in eligible_raw:
+        knowledge_id = _required_text(raw_id, "knowledge_id elegivel", 120)
+        if knowledge_id in eligible_ids:
+            raise ValueError("catalogo possui knowledge_id elegivel duplicado.")
+        eligible_ids.add(knowledge_id)
+    if not eligible_ids:
+        raise ValueError("catalogo sem knowledge elegivel valido.")
+
+    reconstructed: dict[str, str] = {}
+    for playbook_id, raw_playbook in catalog["playbooks"].items():
+        if not isinstance(playbook_id, str):
+            raise ValueError("playbook operacional com chave invalida.")
+        playbook = _validate_operational_playbook(playbook_id, raw_playbook)
+        for knowledge_id in playbook["knowledge_ids"]:
+            if knowledge_id not in eligible_ids:
+                raise ValueError("playbook aprovado referencia knowledge nao elegivel.")
+            if knowledge_id in reconstructed:
+                raise ValueError(
+                    f"knowledge_id possui mais de um proprietario APPROVED: {knowledge_id}"
+                )
+            reconstructed[knowledge_id] = playbook_id
+
+    active = catalog["active_by_knowledge_id"]
+    for knowledge_id, playbook_id in active.items():
+        _required_text(knowledge_id, "active knowledge_id", 120)
+        _required_text(playbook_id, "active playbook_id", 120)
+        if knowledge_id not in eligible_ids:
+            raise ValueError("active link referencia knowledge nao elegivel.")
+        if playbook_id not in catalog["playbooks"]:
+            raise ValueError("active link referencia playbook inexistente.")
+    if active != reconstructed:
+        raise ValueError("active map diverge dos proprietarios APPROVED reconstruidos.")
+
+    inactive = catalog["inactive_by_knowledge_id"]
+    for knowledge_id, rows in inactive.items():
+        _required_text(knowledge_id, "inactive knowledge_id", 120)
+        if knowledge_id not in eligible_ids:
+            raise ValueError("metadata inativa referencia knowledge nao elegivel.")
+        if not isinstance(rows, list) or not rows:
+            raise ValueError("metadata inativa invalida.")
+        for raw in rows:
+            if not isinstance(raw, dict) or set(raw) != {"playbook_id", "status", "version"}:
+                raise ValueError("metadata inativa contem conteudo operacional ou campos invalidos.")
+            _required_text(raw["playbook_id"], "playbook_id inativo", 120)
+            if raw["status"] not in {"DRAFT", "RETIRED"}:
+                raise ValueError("metadata inativa com status invalido.")
+            version = raw["version"]
+            if isinstance(version, bool) or not isinstance(version, int) or version <= 0:
+                raise ValueError("metadata inativa com version invalida.")
+    return eligible_ids, reconstructed
+
+
+def _validate_loaded_provenance(provenance: dict) -> None:
+    _validate_provenance_build_shape(provenance)
+    for field in (
+        "source_hash",
+        "catalog_hash",
+        "knowledge_source_hash",
+        "knowledge_provenance_hash",
+    ):
+        _validate_hash(provenance.get(field), field)
+    for field in ("approved_playbooks", "active_links", "inactive_links"):
+        value = provenance.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError("playbook provenance possui contadores invalidos.")
+    if provenance.get("knowledge_domain") != "APPROVED_KNOWLEDGE":
+        raise ValueError("playbook provenance possui knowledge domain invalido.")
+    schema = provenance.get("knowledge_schema_version")
+    if isinstance(schema, bool) or not isinstance(schema, int) or schema <= 0:
+        raise ValueError("playbook provenance possui knowledge schema invalido.")
+
+
+def load_playbook_catalog(
+    directory: str | Path,
+    knowledge_index_directory: str | Path,
+) -> tuple[dict, dict]:
+    root = Path(directory)
+    provenance = _read_json_object(root / PLAYBOOK_PROVENANCE_FILE, "playbook provenance")
+    _validate_loaded_provenance(provenance)
+
+    catalog = _read_json_object(root / PLAYBOOK_CATALOG_FILE, "catalogo de playbook")
+    eligible_ids, _ = _validate_loaded_catalog(catalog)
+
+    if catalog["source_hash"] != provenance["source_hash"]:
+        raise ValueError("source_hash diverge entre catalogo e playbook provenance.")
+    actual_catalog_hash = sha256_bytes(canonical_json_bytes(catalog))
+    if actual_catalog_hash != provenance["catalog_hash"]:
+        raise ValueError("catalog_hash divergente da playbook provenance.")
+
+    inactive_links = sum(len(rows) for rows in catalog["inactive_by_knowledge_id"].values())
+    if (
+        provenance["approved_playbooks"] != len(catalog["playbooks"])
+        or provenance["active_links"] != len(catalog["active_by_knowledge_id"])
+        or provenance["inactive_links"] != inactive_links
+    ):
+        raise ValueError("contadores de playbook provenance divergem do catalogo.")
+
+    binding = catalog["knowledge_binding"]
+    if (
+        provenance["knowledge_domain"] != binding["domain"]
+        or provenance["knowledge_schema_version"] != binding["schema_version"]
+        or provenance["knowledge_source_hash"] != binding["source_hash"]
+        or provenance["knowledge_provenance_hash"] != binding["provenance_hash"]
+    ):
+        raise ValueError("knowledge binding diverge entre catalogo e provenance.")
+
+    data, _, current_knowledge_provenance = load_knowledge_index(knowledge_index_directory)
+    current_hash = sha256_bytes(canonical_json_bytes(current_knowledge_provenance))
+    current_ids = set(data["knowledge_id"].astype(str).tolist()) if "knowledge_id" in data.columns else set()
+    if current_ids != eligible_ids:
+        raise ValueError("knowledge elegivel atual diverge do catalogo de playbook.")
+    if (
+        current_knowledge_provenance.get("domain") != provenance["knowledge_domain"]
+        or current_knowledge_provenance.get("knowledge_schema_version")
+        != provenance["knowledge_schema_version"]
+        or current_knowledge_provenance.get("source_hash") != provenance["knowledge_source_hash"]
+        or current_hash != provenance["knowledge_provenance_hash"]
+    ):
+        raise ValueError("knowledge provenance atual diverge do catalogo de playbook.")
+    return catalog, provenance
