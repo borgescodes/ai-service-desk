@@ -99,4 +99,6 @@ Despache `.github/workflows/phase7-policy-smoke.yml` com `target_ref` igual ao S
 
 ## Baseline de regressao
 
-O baseline historico imutavel possui `319` node IDs. Com `105` novos node IDs planejados, incluindo os dois casos runtime adicionais autorizados no Gate 5, o piso final inicial e `424` testes coletados. Nenhum dos 319 node IDs historicos pode desaparecer.
+A execucao desta fase iniciou obrigatoriamente no head `f1da66a728eb519a3400f7d538ce75b33d4ad428`. O baseline historico imutavel para comparacao e preservacao permanece `7e7142f757f66585f240e16781accd044f31eb6f`; ele nao e um alvo de checkout da implementacao.
+
+O baseline historico possui `319` node IDs. Com `105` novos node IDs planejados, incluindo os dois casos runtime adicionais autorizados no Gate 5, o piso final inicial e `424` testes coletados. Nenhum dos 319 node IDs historicos pode desaparecer.
