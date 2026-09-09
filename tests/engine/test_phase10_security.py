@@ -138,9 +138,7 @@ def _routing_services():
         policy_engine=PolicyEngine(),
         clock=FixedClock(),
     )
-    technician = TechnicianIdentity(
-        "TECH-CDM", "tech.cdm", "Tech CDM", "tech.cdm@example.invalid"
-    )
+    technician = TechnicianIdentity("TECH-CDM", "tech.cdm", "Tech CDM", "tech.cdm@example.invalid")
     authorization = TechnicianAuthorizationRegistry(
         [TechnicianRegistryEntry(technician, frozenset({"CDM_ACCESS_REQUEST"}))]
     )
@@ -190,9 +188,7 @@ def test_unknown_route_fails_closed():
         clock=FixedClock(),
     )
     authorization = TechnicianAuthorizationRegistry([])
-    routing = RoutingService(
-        RoutingRegistry([], authorization), InMemoryRoutingAssignmentStore()
-    )
+    routing = RoutingService(RoutingRegistry([], authorization), InMemoryRoutingAssignmentStore())
     pending = lifecycle.create_request(make_context())
     with pytest.raises(RouteNotFoundError) as exc:
         routing.route(pending)
@@ -200,12 +196,8 @@ def test_unknown_route_fails_closed():
 
 
 def test_conflicting_and_incompatible_route_configuration_fails_closed():
-    first = TechnicianIdentity(
-        "TECH-A", "tech.a", "Tech A", "tech.a@example.invalid"
-    )
-    second = TechnicianIdentity(
-        "TECH-B", "tech.b", "Tech B", "tech.b@example.invalid"
-    )
+    first = TechnicianIdentity("TECH-A", "tech.a", "Tech A", "tech.a@example.invalid")
+    second = TechnicianIdentity("TECH-B", "tech.b", "Tech B", "tech.b@example.invalid")
     authorization = TechnicianAuthorizationRegistry(
         [
             TechnicianRegistryEntry(first, frozenset({"CDM_ACCESS_REQUEST"})),
@@ -213,9 +205,7 @@ def test_conflicting_and_incompatible_route_configuration_fails_closed():
         ]
     )
     with pytest.raises(RoutingRuleConfigurationError) as incompatible:
-        RoutingRegistry(
-            [RoutingRule("CDM", "CDM_ACCESS_REQUEST", second)], authorization
-        )
+        RoutingRegistry([RoutingRule("CDM", "CDM_ACCESS_REQUEST", second)], authorization)
     assert incompatible.value.reason_code == "ROUTING_TECHNICIAN_NOT_AUTHORIZED"
     with pytest.raises(RoutingRuleConfigurationError) as conflict:
         RoutingRegistry(
