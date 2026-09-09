@@ -1,12 +1,4 @@
-from __future__ import annotations
-
 from collections.abc import Mapping
-
-from ai_service_desk.engine.request_lifecycle import (
-    AccessRequestRecord,
-    AuditEvent,
-)
-from ai_service_desk.engine.routing import RoutingAssignment
 
 
 _STATE_LABELS = {
@@ -39,7 +31,7 @@ def _iso(value):
     return value.isoformat() if value is not None else None
 
 
-def _confidence(record: AccessRequestRecord, metadata: Mapping[str, object]) -> dict:
+def _confidence(record, metadata: Mapping[str, object]) -> dict:
     raw = metadata.get("classification_confidence")
     percent = None
     if type(raw) in {int, float} and not isinstance(raw, bool) and 0 <= raw <= 1:
@@ -52,7 +44,7 @@ def _confidence(record: AccessRequestRecord, metadata: Mapping[str, object]) -> 
     }
 
 
-def present_timeline(events: tuple[AuditEvent, ...]) -> list[dict]:
+def present_timeline(events) -> list[dict]:
     return [
         {
             "event_type": event.event_type,
@@ -69,11 +61,11 @@ def present_timeline(events: tuple[AuditEvent, ...]) -> list[dict]:
 
 
 def present_request(
-    record: AccessRequestRecord,
-    audit: tuple[AuditEvent, ...],
+    record,
+    audit,
     metadata: Mapping[str, object],
     *,
-    assignment: RoutingAssignment | None = None,
+    assignment=None,
     include_internal: bool = False,
 ) -> dict:
     policy = {
