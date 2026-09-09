@@ -7,8 +7,8 @@ from ai_service_desk.engine.request_repository import InMemoryRequestRepository
 from ai_service_desk.engine.routing import (
     ApprovalQueue,
     InMemoryRoutingAssignmentStore,
-    RouteNotFoundError,
     RoutedRequestService,
+    RouteNotFoundError,
     RoutingRegistry,
     RoutingRule,
     RoutingService,
