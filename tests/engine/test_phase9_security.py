@@ -13,12 +13,20 @@ PROTECTED_BLOBS = {
     "src/ai_service_desk/engine/access_request.py": "f34fc3f0e22d82b8bf8f13439ed78a7d31d5869d",
     "src/ai_service_desk/engine/policy.py": "60a4f3ae785353009c30b37f71e1ce91865b899e",
     "src/ai_service_desk/engine/confidence.py": "ffc0c212b455978f79a3591578f323ca0e9612dc",
-    "src/ai_service_desk/engine/request_lifecycle.py": "dfd194ff8a364a0eb0d803409dad252ced216279",
-    "src/ai_service_desk/engine/request_repository.py": "5ccda3d30484729faa1a568cf64e20bfe55e595f",
-    "src/ai_service_desk/engine/technician_authorization.py": "ca7fad92b5ad7422cbd8d0b844aa0fe6cd47c1f4",
+    "src/ai_service_desk/engine/request_lifecycle.py": (
+        "dfd194ff8a364a0eb0d803409dad252ced216279"
+    ),
+    "src/ai_service_desk/engine/request_repository.py": (
+        "5ccda3d30484729faa1a568cf64e20bfe55e595f"
+    ),
+    "src/ai_service_desk/engine/technician_authorization.py": (
+        "ca7fad92b5ad7422cbd8d0b844aa0fe6cd47c1f4"
+    ),
     "src/ai_service_desk/engine/approval.py": "ae64166a6c2595ff65fd65af7fd5b98ed71a5bb8",
     "src/ai_service_desk/engine/execution.py": "908ceade729daa3e18b7b604549f635b33d4688f",
-    "src/ai_service_desk/engine/controlled_execution_smoke.py": "e26766fdc35ff450d69a40a2516d193b7a90cb75",
+    "src/ai_service_desk/engine/controlled_execution_smoke.py": (
+        "e26766fdc35ff450d69a40a2516d193b7a90cb75"
+    ),
 }
 HTTP_FREE_MODULES = (
     "access_request.py",
