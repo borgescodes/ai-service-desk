@@ -39,12 +39,21 @@ export function renderAppHeader({ activeRoute, selectedIdentityId, identities = 
   </header>`;
 }
 
+function renderMessageBody(text) {
+  return String(text ?? '')
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
+    .join('');
+}
+
 function renderMessage(message) {
   const role = message.role === 'USER' ? 'Você' : 'Jup';
   const klass = message.role === 'USER' ? 'conversation-message--user' : 'conversation-message--jup';
   return `<article class="conversation-message ${klass}">
     <div class="message-author">${message.role === 'JUP' ? renderJupAvatar({ compact: true }) : `<span class="user-avatar" aria-hidden="true">${escapeHtml(initials(role))}</span>`}<strong>${role}</strong></div>
-    <p>${escapeHtml(message.text)}</p>
+    ${renderMessageBody(message.text)}
   </article>`;
 }
 
