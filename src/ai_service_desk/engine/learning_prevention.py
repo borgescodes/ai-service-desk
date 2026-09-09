@@ -1,3 +1,5 @@
+import hashlib
+import json
 import re
 from collections import Counter, defaultdict
 from collections.abc import Mapping
@@ -25,6 +27,15 @@ OUTCOMES = frozenset(
         "EXECUTION_COMPLETED",
         "EXECUTION_FAILED",
     }
+)
+
+OPPORTUNITY_CATEGORIES = (
+    "KNOWLEDGE_GAP",
+    "PLAYBOOK_GAP",
+    "HUMAN_DEPENDENCY",
+    "AUTOMATION_CANDIDATE",
+    "PREVENTION_CANDIDATE",
+    "EXECUTION_RELIABILITY_ISSUE",
 )
 
 _MACHINE_CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,119}$")
@@ -77,8 +88,20 @@ class PatternAggregate:
     occurrence_count: int
     evidence_ids: tuple[str, ...]
     outcome_counts: tuple[tuple[str, int], ...]
+    knowledge_count: int
     knowledge_ids: tuple[str, ...]
+    playbook_count: int
     playbook_ids: tuple[str, ...]
+    reason_codes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PreventionOpportunity:
+    opportunity_id: str
+    category: str
+    key: PatternKey
+    occurrence_count: int
+    evidence_ids: tuple[str, ...]
     reason_codes: tuple[str, ...]
 
 
@@ -314,9 +337,11 @@ class PatternAggregator:
                     occurrence_count=len(rows),
                     evidence_ids=tuple(sorted(row.interaction_id for row in rows)),
                     outcome_counts=tuple(sorted(outcomes.items())),
+                    knowledge_count=sum(bool(row.knowledge_id) for row in rows),
                     knowledge_ids=tuple(
                         sorted({row.knowledge_id for row in rows if row.knowledge_id})
                     ),
+                    playbook_count=sum(bool(row.playbook_id) for row in rows),
                     playbook_ids=tuple(
                         sorted({row.playbook_id for row in rows if row.playbook_id})
                     ),
@@ -326,3 +351,71 @@ class PatternAggregator:
                 )
             )
         return tuple(patterns)
+
+
+def _opportunity_id(category: str, key: PatternKey) -> str:
+    payload = {
+        "category": category,
+        "key": {
+            "area": key.area,
+            "capability": key.capability,
+            "intent": key.intent,
+            "system": key.system,
+        },
+    }
+    canonical = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16].upper()
+    return f"OPP-{digest}"
+
+
+class OpportunityEngine:
+    def generate(
+        self,
+        patterns: tuple[PatternAggregate, ...],
+    ) -> tuple[PreventionOpportunity, ...]:
+        opportunities: list[PreventionOpportunity] = []
+        for pattern in patterns:
+            if pattern.occurrence_count < MIN_RECURRENCE:
+                continue
+
+            outcomes = dict(pattern.outcome_counts)
+            all_human = outcomes.get("ROUTED_TO_HUMAN", 0) == pattern.occurrence_count
+            categories: set[str] = {"PREVENTION_CANDIDATE"}
+
+            if all_human:
+                categories.add("HUMAN_DEPENDENCY")
+                if pattern.knowledge_count == 0:
+                    categories.add("KNOWLEDGE_GAP")
+                elif (
+                    pattern.knowledge_count == pattern.occurrence_count
+                    and pattern.playbook_count == 0
+                ):
+                    categories.add("PLAYBOOK_GAP")
+                if (
+                    pattern.key.capability
+                    and pattern.playbook_count == pattern.occurrence_count
+                    and len(pattern.playbook_ids) == 1
+                ):
+                    categories.add("AUTOMATION_CANDIDATE")
+
+            if outcomes.get("EXECUTION_FAILED", 0) >= MIN_RECURRENCE:
+                categories.add("EXECUTION_RELIABILITY_ISSUE")
+
+            for category in sorted(categories):
+                opportunities.append(
+                    PreventionOpportunity(
+                        opportunity_id=_opportunity_id(category, pattern.key),
+                        category=category,
+                        key=pattern.key,
+                        occurrence_count=pattern.occurrence_count,
+                        evidence_ids=pattern.evidence_ids,
+                        reason_codes=pattern.reason_codes,
+                    )
+                )
+
+        return tuple(
+            sorted(
+                opportunities,
+                key=lambda item: (item.key, item.category, item.opportunity_id),
+            )
+        )
