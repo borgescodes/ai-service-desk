@@ -93,9 +93,7 @@ def _domain_configuration():
 
 def _request_stack():
     repository = InMemoryRequestRepository()
-    lifecycle = RequestLifecycleService(
-        repository, policy_engine=PolicyEngine(), clock=_clock
-    )
+    lifecycle = RequestLifecycleService(repository, policy_engine=PolicyEngine(), clock=_clock)
     authorization, registry, technicians = _domain_configuration()
     assignments = InMemoryRoutingAssignmentStore()
     routing = RoutingService(registry, assignments)
@@ -145,9 +143,7 @@ def run_routing_escalation_smoke() -> dict[str, object]:
 
     replay = routing.route(pending)
     actual = (
-        "ONE_ASSIGNMENT"
-        if replay == assigned and len(assignments.snapshot()) == 1
-        else "FAILED"
+        "ONE_ASSIGNMENT" if replay == assigned and len(assignments.snapshot()) == 1 else "FAILED"
     )
     results.append(_result("IDEMPOTENT_ROUTING", "ONE_ASSIGNMENT", actual))
 
@@ -159,9 +155,7 @@ def run_routing_escalation_smoke() -> dict[str, object]:
         and all(item.request.request_id != denied.request_id for item in queue.pending())
         else "FAILED"
     )
-    results.append(
-        _result("DENIED_POLICY_OUTSIDE_QUEUE", "DENIED_POLICY:ZERO_QUEUE", actual)
-    )
+    results.append(_result("DENIED_POLICY_OUTSIDE_QUEUE", "DENIED_POLICY:ZERO_QUEUE", actual))
 
     empty_store = InMemoryRoutingAssignmentStore()
     empty_routing = RoutingService(RoutingRegistry([], authorization), empty_store)
