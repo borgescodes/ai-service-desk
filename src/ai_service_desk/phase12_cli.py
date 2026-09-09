@@ -2,6 +2,8 @@ import argparse
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 COMMANDS = frozenset({"web-demo", "web-demo-smoke"})
+DEMO_MODES = ("DETERMINISTIC", "LOCAL_AI")
+DEFAULT_DEMO_MODE = "DETERMINISTIC"
 
 
 def handles(argv: list[str]) -> bool:
@@ -15,15 +17,16 @@ def _parser() -> argparse.ArgumentParser:
     web_demo = subparsers.add_parser("web-demo")
     web_demo.add_argument("--host", default="127.0.0.1")
     web_demo.add_argument("--port", type=int, default=8000)
+    web_demo.add_argument("--mode", choices=DEMO_MODES, default=DEFAULT_DEMO_MODE)
 
     subparsers.add_parser("web-demo-smoke")
     return parser
 
 
-def run_web_demo(host: str, port: int) -> None:
+def run_web_demo(host: str, port: int, mode: str) -> None:
     from ai_service_desk.web.api import run_web_demo as run
 
-    run(host=host, port=port)
+    run(host=host, port=port, mode=mode)
 
 
 def run_web_demo_smoke() -> dict:
@@ -39,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
             _parser().error("web-demo aceita somente host loopback.")
         if not 1 <= args.port <= 65535:
             _parser().error("port deve estar entre 1 e 65535.")
-        run_web_demo(args.host, args.port)
+        run_web_demo(args.host, args.port, args.mode)
         return 0
 
     report = run_web_demo_smoke()
