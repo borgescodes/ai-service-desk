@@ -208,7 +208,7 @@ def compute_metrics(cases: list[dict], results: list[dict], k: int = 3) -> dict:
         latency = result.get("total_seconds")
         if (
             not failed
-            and isinstance(latency, (int, float))
+            and isinstance(latency, int | float)
             and not isinstance(latency, bool)
             and math.isfinite(latency)
             and latency >= 0
@@ -265,7 +265,7 @@ def _valid_thresholds(thresholds: list[float]) -> list[float]:
     for threshold in thresholds:
         if (
             isinstance(threshold, bool)
-            or not isinstance(threshold, (int, float))
+            or not isinstance(threshold, int | float)
             or not math.isfinite(threshold)
             or not 0 <= threshold <= 1
         ):
