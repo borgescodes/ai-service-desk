@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
@@ -213,8 +214,13 @@ class DemoRuntime:
 
         def classifier(text):
             if self.mode == "LOCAL_AI":
-                return classify_ticket(text, self._ollama_client.chat)
-            return classify_ticket(text, self.demo_classifier_client.chat)
+                classification = classify_ticket(text, self._ollama_client.chat)
+            else:
+                classification = classify_ticket(text, self.demo_classifier_client.chat)
+            normalized = " ".join(text.casefold().split())
+            if classification.system.casefold() == "que" and "sistema que " in normalized:
+                return replace(classification, system="")
+            return classification
 
         engine = TriageEngine(session_id, self.knowledge_engine, classifier)
         return engine, engine.initial_state()
