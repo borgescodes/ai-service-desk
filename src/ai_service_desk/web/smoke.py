@@ -8,7 +8,7 @@ def _case(name: str, passed: bool, actual: str) -> dict:
 
 
 def run_web_demo_smoke() -> dict:
-    runtime = DemoRuntime.create()
+    runtime = DemoRuntime.create(mode="DETERMINISTIC")
     cases: list[dict] = []
     try:
         requester = runtime.identity_provider.requester_identity("pedro-miranda")
