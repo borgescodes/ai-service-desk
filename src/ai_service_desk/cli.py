@@ -4,6 +4,7 @@ import sys
 import time
 from pathlib import Path
 
+from ai_service_desk.engine.controlled_execution_smoke import run_controlled_execution_smoke
 from ai_service_desk.engine.corpus import audit_corpus, ensure_external_path, write_safe_report
 from ai_service_desk.engine.data import load_corpus, prepare_tiflux
 from ai_service_desk.engine.demo_subset import build_demo_subset
@@ -112,6 +113,10 @@ def build_parser() -> argparse.ArgumentParser:
     playbook_smoke.add_argument("--cases", type=Path, required=True)
     playbook_smoke.add_argument("--work-directory", type=Path, required=True)
     playbook_smoke.add_argument("--report", type=Path, required=True)
+
+    controlled_smoke = sub.add_parser("controlled-execution-smoke")
+    controlled_smoke.add_argument("--cases", type=Path, required=True)
+    controlled_smoke.add_argument("--report", type=Path, required=True)
 
     policy_smoke = sub.add_parser("policy-smoke")
     policy_smoke.add_argument("--cases", type=Path, required=True)
@@ -323,6 +328,17 @@ def main(argv: list[str] | None = None) -> int:
                 args.report,
             )
             print("PLAYBOOK SMOKE OK" if report["ok"] else "PLAYBOOK SMOKE REQUER REVISAO")
+            print(f"Casos sinteticos: {len(report.get('cases', []))}")
+            print("Relatorio agregado local: " + str(args.report))
+            return 0 if report["ok"] else 1
+
+        if args.command == "controlled-execution-smoke":
+            report = run_controlled_execution_smoke(args.cases, args.report)
+            print(
+                "CONTROLLED EXECUTION SMOKE OK"
+                if report["ok"]
+                else "CONTROLLED EXECUTION SMOKE REQUER REVISAO"
+            )
             print(f"Casos sinteticos: {len(report.get('cases', []))}")
             print("Relatorio agregado local: " + str(args.report))
             return 0 if report["ok"] else 1

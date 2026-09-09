@@ -211,3 +211,48 @@ def test_gitignore_blocks_real_corpus_and_generated_index_files() -> None:
         "phase-2-data/",
     ):
         assert required in text
+
+
+PHASE8_WORKFLOW = ROOT / ".github/workflows/phase8-controlled-execution-smoke.yml"
+
+
+def test_phase8_controlled_execution_workflow_is_exact_head_and_non_exporting():
+    text = PHASE8_WORKFLOW.read_text(encoding="utf-8")
+    for required in (
+        "workflow_dispatch:",
+        "target_ref:",
+        "required: true",
+        "type: string",
+        "ref: ${{ inputs.target_ref }}",
+        "^[0-9a-f]{40}$",
+        "[self-hosted, Windows, X64, ai-service-desk]",
+        'StartsWith("3.14.")',
+        "git rev-parse HEAD",
+        "$actual -ne $expected",
+        "$LASTEXITCODE -ne 0",
+        "python -m ruff check .",
+        "python -m ruff format --check .",
+        "python -m pytest -q",
+        "python -m ai_service_desk controlled-execution-smoke",
+        "tests/fixtures/phase8_controlled_execution_cases.jsonl",
+        '"HEAD:tests/fixtures/phase2_corpus.csv"',
+        "path.write_bytes(blob)",
+        'manifest["expected"]["raw_sha256"]',
+        "fixture_raw_sha_after=",
+        "candidate_sha_after_fixture_restore=",
+        "RUNNER_TEMP",
+    ):
+        assert required in text
+    for forbidden in (
+        "upload-artifact",
+        "ollama",
+        "http://",
+        "https://",
+        "CDMAdapter",
+        "git commit",
+    ):
+        assert forbidden not in text
+    assert text.count("write_bytes(") == 1
+    assert "write_text(" not in text
+    assert text.index("path.write_bytes(blob)") < text.index("candidate_sha_after_fixture_restore=")
+    assert text.index("candidate_sha_after_fixture_restore=") < text.index("python -m pytest -q")
