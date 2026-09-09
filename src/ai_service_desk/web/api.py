@@ -67,11 +67,19 @@ def create_app(runtime: DemoRuntime | None = None, *, demo_mode: bool = True) ->
 
     @app.exception_handler(ConcurrencyConflictError)
     async def version_conflict_handler(_request: Request, exc: ConcurrencyConflictError):
-        return _error(409, exc.reason_code, "A solicitação foi alterada. Recarregue e tente novamente.")
+        return _error(
+            409,
+            exc.reason_code,
+            "A solicitação foi alterada. Recarregue e tente novamente.",
+        )
 
     @app.exception_handler(InvalidStateTransitionError)
     async def transition_error_handler(_request: Request, exc: InvalidStateTransitionError):
-        return _error(409, exc.reason_code, "A solicitação não aceita esta operação no estado atual.")
+        return _error(
+            409,
+            exc.reason_code,
+            "A solicitação não aceita esta operação no estado atual.",
+        )
 
     @app.exception_handler(Exception)
     async def safe_internal_error_handler(_request: Request, _exc: Exception):
