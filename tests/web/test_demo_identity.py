@@ -24,11 +24,12 @@ def test_pedro_miranda_resolves_exact_requester_identity() -> None:
     assert requester.area == "Revenda - Matriz"
 
 
-def test_tecnico_cdm_resolves_exact_technician_identity() -> None:
-    technician = DemoIdentityProvider().technician_identity("tecnico-cdm")
+def test_tecnico_cdm_resolves_exact_technician_identity_and_provider_capability() -> None:
+    provider = DemoIdentityProvider()
+    technician = provider.technician_identity("tecnico-cdm")
 
     assert technician.technician_id == "TECH-CDM"
-    assert technician.capabilities == frozenset({"CDM_ACCESS_REQUEST"})
+    assert provider.technician_capabilities("tecnico-cdm") == frozenset({"CDM_ACCESS_REQUEST"})
 
 
 def test_unknown_identity_fails_closed() -> None:
