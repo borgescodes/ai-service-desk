@@ -7,6 +7,7 @@ import {
   renderErrorState,
   renderPrimaryNavigation,
   renderStatus,
+  renderUnauthorizedState,
 } from '../src/render.mjs';
 
 test('escapeHtml neutralizes active markup and quotes', () => {
@@ -32,6 +33,13 @@ test('status carries text and icon, never color alone', () => {
 test('error state gives a recovery action', () => {
   const html = renderErrorState('Não foi possível carregar.');
   assert.match(html, /Tentar novamente/);
+});
+
+test('unauthorized state is explicit and points to identity recovery', () => {
+  const html = renderUnauthorizedState('Esta identidade não tem acesso a esta operação.');
+  assert.match(html, /Perfil sem acesso/);
+  assert.match(html, /identidade demo/i);
+  assert.doesNotMatch(html, /Tentar novamente/);
 });
 
 test('empty state explains the next useful action', () => {
