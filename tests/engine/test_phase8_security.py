@@ -28,7 +28,7 @@ CORE_MODULES = (
     "approval.py",
     "execution.py",
 )
-RUNTIME_MODULES = CORE_MODULES
+RUNTIME_MODULES = CORE_MODULES + ("controlled_execution_smoke.py",)
 
 
 @pytest.mark.parametrize(
