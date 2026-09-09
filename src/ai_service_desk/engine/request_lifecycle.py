@@ -199,6 +199,14 @@ def _validate_record_timestamps(record: AccessRequestRecord) -> None:
         value = getattr(record, field_name)
         if value is not None and not _is_aware_datetime(value):
             _invalid_record(f"{field_name} deve ser datetime timezone-aware.")
+    for earlier, later in (
+        (record.created_at, record.updated_at),
+        (record.created_at, record.decided_at),
+        (record.decided_at, record.execution_started_at),
+        (record.execution_started_at, record.execution_finished_at),
+    ):
+        if earlier is not None and later is not None and earlier > later:
+            _invalid_record("Cronologia do record deve ser nao decrescente.")
 
 
 def _validate_record_state_fields(record: AccessRequestRecord) -> None:

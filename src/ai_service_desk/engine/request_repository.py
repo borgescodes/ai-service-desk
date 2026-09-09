@@ -46,6 +46,8 @@ def _validate_delta(current: AccessRequestRecord, record: AccessRequestRecord):
         raise InvalidStateTransitionError("INVALID_STATE_TRANSITION", "Transicao fora da matriz.")
     if record.version != current.version + 1:
         _record_invalid()
+    if record.updated_at < current.updated_at:
+        _record_invalid()
     for field in ("request_id", "context", "creation_policy", "confidence", "created_at"):
         if getattr(record, field) != getattr(current, field):
             _record_invalid()
@@ -142,6 +144,11 @@ class InMemoryRequestRepository:
         validate_access_request_record(record)
         _validate_delta(current, record)
         _validate_events(record, audit_events, current)
+        previous = self._audit[record.request_id][-1].occurred_at
+        for event in audit_events:
+            if event.occurred_at < previous:
+                _audit_invalid()
+            previous = event.occurred_at
         self._before_final_cas()
         self._records[record.request_id] = record
         self._audit[record.request_id].extend(audit_events)
