@@ -43,8 +43,20 @@ from ai_service_desk.web.errors import WebDemoError
 from ai_service_desk.web.presentation import present_prevention, present_request
 
 
+DEMO_MODES = frozenset({"DETERMINISTIC", "LOCAL_AI"})
+DEFAULT_DEMO_MODE = "DETERMINISTIC"
+
+
 class DemoRuntime:
-    def __init__(self, *, fail_cdm_request_ids: set[str] | frozenset[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        mode: str = DEFAULT_DEMO_MODE,
+        fail_cdm_request_ids: set[str] | frozenset[str] | None = None,
+    ) -> None:
+        if mode not in DEMO_MODES:
+            raise ValueError(f"Modo de demo invalido: {mode!r}.")
+        self.mode = mode
         self.identity_provider = DemoIdentityProvider()
         self._fail_cdm_request_ids = frozenset(fail_cdm_request_ids or ())
         self._temp = None
@@ -56,9 +68,10 @@ class DemoRuntime:
     def create(
         cls,
         *,
+        mode: str = DEFAULT_DEMO_MODE,
         fail_cdm_request_ids: set[str] | frozenset[str] | None = None,
     ) -> DemoRuntime:
-        return cls(fail_cdm_request_ids=fail_cdm_request_ids)
+        return cls(mode=mode, fail_cdm_request_ids=fail_cdm_request_ids)
 
     def _close_knowledge_resources(self) -> None:
         triage = getattr(self, "_triage", None)
