@@ -15,7 +15,9 @@ from ai_service_desk.engine.technician_authorization import (
 )
 
 
-def _technician(technician_id: str, capability: str) -> tuple[TechnicianIdentity, TechnicianRegistryEntry]:
+def _technician(
+    technician_id: str, capability: str
+) -> tuple[TechnicianIdentity, TechnicianRegistryEntry]:
     identity = TechnicianIdentity(
         technician_id=technician_id,
         username=technician_id.lower(),
