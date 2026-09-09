@@ -15,6 +15,7 @@ from ai_service_desk.engine.learning_prevention import (
     OutcomeCollector,
     PatternAggregator,
 )
+from ai_service_desk.engine.ollama import OllamaClient, OllamaError
 from ai_service_desk.engine.playbook import build_playbook_catalog
 from ai_service_desk.engine.playbook_resolution import (
     PlaybookEngine,
@@ -62,6 +63,17 @@ class DemoRuntime:
     ) -> None:
         if mode not in DEMO_MODES:
             raise ValueError(f"Modo de demo invalido: {mode!r}.")
+        if mode == "LOCAL_AI":
+            client = OllamaClient()
+            try:
+                client.model_info("qwen3.5:4b")
+            except OllamaError as exc:
+                raise WebDemoError(
+                    "LOCAL_AI_UNAVAILABLE",
+                    "Não foi possível validar o modelo local qwen3.5:4b no Ollama.",
+                ) from exc
+            finally:
+                client.close()
         self.mode = mode
         self.identity_provider = DemoIdentityProvider()
         self._fail_cdm_request_ids = frozenset(fail_cdm_request_ids or ())
