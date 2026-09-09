@@ -33,9 +33,12 @@ def categories(rows: tuple[OutcomeRecord, ...]) -> tuple[str, ...]:
 
 def test_threshold_is_explicit_and_two_occurrences_produce_no_opportunity() -> None:
     assert MIN_RECURRENCE == 3
-    assert OpportunityEngine().generate(
-        PatternAggregator.aggregate((record("INT-001"), record("INT-002")))
-    ) == ()
+    assert (
+        OpportunityEngine().generate(
+            PatternAggregator.aggregate((record("INT-001"), record("INT-002")))
+        )
+        == ()
+    )
 
 
 def test_recurrent_knowledge_resolution_is_prevention_only() -> None:
@@ -185,9 +188,7 @@ def test_opportunity_ids_and_order_are_deterministic() -> None:
     first = OpportunityEngine().generate(patterns)
     second = OpportunityEngine().generate(tuple(reversed(patterns)))
     assert first == second
-    assert tuple(item.category for item in first) == tuple(
-        sorted(item.category for item in first)
-    )
+    assert tuple(item.category for item in first) == tuple(sorted(item.category for item in first))
     assert len({item.opportunity_id for item in first}) == len(first)
     for item in first:
         assert item.opportunity_id.startswith("OPP-")
