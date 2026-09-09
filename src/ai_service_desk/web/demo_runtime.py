@@ -63,24 +63,29 @@ class DemoRuntime:
     ) -> None:
         if mode not in DEMO_MODES:
             raise ValueError(f"Modo de demo invalido: {mode!r}.")
+        self._ollama_client = None
         if mode == "LOCAL_AI":
             client = OllamaClient()
             try:
                 client.model_info("qwen3.5:4b")
             except OllamaError as exc:
+                client.close()
                 raise WebDemoError(
                     "LOCAL_AI_UNAVAILABLE",
                     "Não foi possível validar o modelo local qwen3.5:4b no Ollama.",
                 ) from exc
-            finally:
-                client.close()
+            self._ollama_client = client
         self.mode = mode
         self.identity_provider = DemoIdentityProvider()
         self._fail_cdm_request_ids = frozenset(fail_cdm_request_ids or ())
         self._temp = None
         self.fake_cdm_server = None
         self._fake_cdm_thread = None
-        self.reset()
+        try:
+            self.reset()
+        except Exception:
+            self.close()
+            raise
 
     @classmethod
     def create(
@@ -202,6 +207,8 @@ class DemoRuntime:
         session_id = f"demo-{identity_id}-{len(self.conversations.get(identity_id, [])) + 1}"
 
         def classifier(text):
+            if self.mode == "LOCAL_AI":
+                return classify_ticket(text, self._ollama_client.chat)
             return classify_ticket(text, self.demo_classifier_client.chat)
 
         engine = TriageEngine(session_id, self.knowledge_engine, classifier)
@@ -420,4 +427,9 @@ class DemoRuntime:
         )
 
     def close(self) -> None:
-        self._close_mutable_resources()
+        try:
+            self._close_mutable_resources()
+        finally:
+            if self._ollama_client is not None:
+                self._ollama_client.close()
+                self._ollama_client = None
