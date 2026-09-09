@@ -314,9 +314,15 @@ class PatternAggregator:
                     occurrence_count=len(rows),
                     evidence_ids=tuple(sorted(row.interaction_id for row in rows)),
                     outcome_counts=tuple(sorted(outcomes.items())),
-                    knowledge_ids=tuple(sorted({row.knowledge_id for row in rows if row.knowledge_id})),
-                    playbook_ids=tuple(sorted({row.playbook_id for row in rows if row.playbook_id})),
-                    reason_codes=tuple(sorted({row.reason_code for row in rows if row.reason_code})),
+                    knowledge_ids=tuple(
+                        sorted({row.knowledge_id for row in rows if row.knowledge_id})
+                    ),
+                    playbook_ids=tuple(
+                        sorted({row.playbook_id for row in rows if row.playbook_id})
+                    ),
+                    reason_codes=tuple(
+                        sorted({row.reason_code for row in rows if row.reason_code})
+                    ),
                 )
             )
         return tuple(patterns)
