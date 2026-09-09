@@ -40,7 +40,11 @@ from ai_service_desk.engine.technician_authorization import (
 from ai_service_desk.engine.triage import TriageEngine
 from ai_service_desk.integrations.cdm import CDMAdapter
 from ai_service_desk.integrations.cdm_fake_api import CDMFakeStore, build_cdm_server
-from ai_service_desk.web.conversation import greeting_message, is_social_greeting
+from ai_service_desk.web.conversation import (
+    greeting_message,
+    is_social_greeting,
+    operational_message,
+)
 from ai_service_desk.web.demo_ai import DemoClassifierClient, DemoEmbedder
 from ai_service_desk.web.demo_data import (
     demo_outcomes,
@@ -286,6 +290,12 @@ class DemoRuntime:
                 "assistant_message": greeting_message(message, requester.name, chat),
             }
 
+        result = self._send_operational_message(identity_id, message, requester)
+        chat = self._ollama_client.chat if self.mode == "LOCAL_AI" else None
+        result["assistant_message"] = operational_message(result, message, chat)
+        return result
+
+    def _send_operational_message(self, identity_id: str, message: str, requester) -> dict:
         current = self._triage.get(identity_id)
         if current is None or current[1].status != "ACTIVE":
             current = self._new_triage(identity_id)
