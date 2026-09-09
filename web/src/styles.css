@@ -219,6 +219,8 @@ button:disabled { cursor: not-allowed; opacity: 0.62; }
 .state-panel p { margin: 6px 0 0; color: var(--ink-muted); line-height: 1.5; }
 .state-panel--empty { justify-content: flex-start; }
 .state-panel--error { border-color: #efc3bf; background: var(--danger-soft); }
+.state-panel--unauthorized { border-color: #efd582; background: #fffbeb; }
+.state-panel--unauthorized .state-mark { background: #fff7dc; color: var(--warning); }
 .state-mark { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-quiet); color: var(--brand-green); font-size: 22px; }
 
 .request-list, .approval-queue, .prevention-list { display: grid; gap: 12px; }
