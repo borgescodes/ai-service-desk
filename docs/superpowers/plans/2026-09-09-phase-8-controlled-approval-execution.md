@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Spec canônica aprovada: `24d411987d991b1d7f8fce04131dd19afa2c7af5`.
+- Spec canônica aprovada e imutável: `24d411987d991b1d7f8fce04131dd19afa2c7af5`.
 - Regression baseline imutável: `2f583b5b4921cd7b40ddde2978a2852ecca2251d`.
 - Historical baseline: exatamente `426` node IDs. Nenhum node ID histórico pode desaparecer, ser renomeado silenciosamente, removido ou convertido em skip.
 - A implementação deve iniciar no head aprovado da própria branch depois do aceite deste plano. O worktree de implementação não pode ser resetado, movido ou destacado para a spec head ou para o regression baseline.
@@ -21,7 +21,7 @@
 - Estados terminais da Fase 8: `REJECTED`, `DENIED_POLICY`, `COMPLETED`, `FAILED`.
 - `FAILED` não possui retry, requeue, reset para `APPROVED` nem nova transição para `EXECUTING`.
 - `RequestLifecycleService.create_request(context)` valida o `AccessRequestContext` homologado, reavalia `PolicyEngine.evaluate(context)` e calcula `assess_confidence(context)` separadamente.
-- `create_request` não aceita `PolicyDecision` fornecido pelo caller como autoridade.
+- `create_request(...)` nunca aceita `PolicyDecision` fornecido pelo caller como autoridade.
 - Policy de criação `DENY` cria registro auditável em `DENIED_POLICY`; policy `REQUIRE_APPROVAL` cria `PENDING_APPROVAL`.
 - `DENIED_POLICY` nunca é aprovável nem rejeitável. Com versão vigente, decisão humana falha por estado inválido; caller stale falha antes com `VERSION_CONFLICT`.
 - `AccessRequestRecord` é imutável. `request_id`, `context`, `creation_policy`, `confidence` e `created_at` nunca mudam depois da criação.
@@ -32,7 +32,10 @@
 - `True`, `False`, `3.0`, `"3"`, `None`, zero e inteiros negativos produzem `EXPECTED_VERSION_INVALID`, sem mutação, sem audit append, sem policy e sem executor quando aplicável.
 - Depois da validação estrutural, `expected_version != current.version` produz `VERSION_CONFLICT`.
 - `ApprovalService.approve/reject` segue exatamente: get request -> validar `expected_version` -> comparar com `current.version` -> se diferente `VERSION_CONFLICT` -> exigir `PENDING_APPROVAL` -> technician identity/capability -> self-decision -> lifecycle transition -> repository CAS novamente.
-- `ExecutionEngine.execute` segue exatamente: get request -> validar `expected_version` -> comparar com `current.version` -> se diferente `VERSION_CONFLICT` com zero policy/executor calls -> exigir `APPROVED` -> revalidar policy -> preparar `DENIED_POLICY` ou `EXECUTING` -> repository CAS novamente -> somente então executor.
+- `ExecutionEngine.execute` segue exatamente: get request -> validar `expected_version` -> comparar com `current.version` -> se diferente `VERSION_CONFLICT` com zero policy/executor calls -> exigir `APPROVED` -> revalidar policy -> capturar um único `operation_timestamp = clock()` -> preparar `DENIED_POLICY` ou `EXECUTING` -> repository CAS novamente -> somente então executor.
+- `ExecutionEngine.execute(...)` chama o clock operacional exatamente uma vez em toda execução que ultrapassa expected_version/state e obtém uma policy revalidada. Stale execution e invalid-state falham antes desse clock.
+- O mesmo `operation_timestamp` é passado explicitamente como `occurred_at=` a `transition_to_denied_policy`, `transition_to_executing`, `transition_to_completed` e `transition_to_failed` em qualquer caminho usado por `ExecutionEngine`.
+- Em execução iniciada, `execution_started_at` e `execution_finished_at` podem ser iguais. Igualdade é válida e version/append order definem a ordem.
 - O compare preliminar não substitui o CAS final. O CAS final fecha a race entre leitura/validações e persistência e garante no máximo uma executor call.
 - `InMemoryRequestRepository.save(...)` exige `new_record.version == expected_version + 1`.
 - `InMemoryRequestRepository.save(...)` exige `new_record.updated_at >= current_record.updated_at`; igualdade é permitida.
@@ -71,16 +74,18 @@
 - Confidence permanece informacional. `HIGH` ou `LOW` nunca autoriza, nega, remove aprovação nem altera execução.
 - `InMemoryRequestRepository` é a única persistência de requests/audit da Fase 8.
 - Execução externa é zero. O runtime da Fase 8 não pode usar HTTP, `requests`, `httpx`, `urllib.request`, `CDMAdapter`, API fake do CDM, subprocess, shell, PowerShell, Ollama, LLM, embedding, SQLite, banco, JSON persistente ou cache externo.
+- `subprocess` é permitido exclusivamente nos testes de segurança para consultar objetos Git e no workflow para restaurar byte-exact o fixture Phase 2. Ele permanece proibido nos módulos runtime da Fase 8.
 - Fase 9 não pode ser antecipada: nenhum adapter, credential, lookup externo, idempotência externa, HTTP ou executor real de CDM.
 - Fase 10 não pode ser antecipada: nenhum routing, seleção automática de técnico, fila automática ou distribuição de workload.
 - Arquivos protegidos devem permanecer byte-equivalent ao regression baseline durante toda a implementação:
   - `src/ai_service_desk/engine/access_request.py`
   - `src/ai_service_desk/engine/policy.py`
   - `src/ai_service_desk/engine/confidence.py`
-- Blobs homologados desses arquivos no spec head:
-  - `access_request.py`: `f34fc3f0e22d82b8bf8f13439ed78a7d31d5869d`
-  - `policy.py`: `60a4f3ae785353009c30b37f71e1ce91865b899e`
-  - `confidence.py`: `ffc0c212b455978f79a3591578f323ca0e9612dc`
+- Blobs Git homologados desses arquivos:
+  - `src/ai_service_desk/engine/access_request.py` = `f34fc3f0e22d82b8bf8f13439ed78a7d31d5869d`
+  - `src/ai_service_desk/engine/policy.py` = `60a4f3ae785353009c30b37f71e1ce91865b899e`
+  - `src/ai_service_desk/engine/confidence.py` = `ffc0c212b455978f79a3591578f323ca0e9612dc`
+- Testes de protected blob devem consultar o objeto Git de `HEAD` com `git rev-parse HEAD:<path>`. É proibido calcular blob SHA com `Path.read_bytes()` do working tree.
 - `tests/fixtures/phase2_corpus.csv` e `tests/fixtures/phase2_corpus_manifest.json` não podem ser alterados em Git.
 - Escopo proibido: HTTP, `requests/httpx/urllib` para execução, `CDMAdapter`, API fake do CDM, SQLite, JSON persistente, banco, routing, frontend, LLM/Ollama/embedding e retry de `FAILED`.
 
@@ -88,16 +93,16 @@
 
 ## Existing Phase 7 Patterns Inspected
 
-Antes da decomposição foram inspecionados os padrões homologados existentes e este plano os preserva:
+O executor deste plano deve preservar os padrões já homologados:
 
-- `src/ai_service_desk/cli.py`: comandos smoke são subcommands aditivos; `policy-smoke` recebe `--cases` e `--report` e retorna antes de qualquer construção de `OllamaClient`.
-- `src/ai_service_desk/engine/policy_smoke.py`: loader JSONL com schema fechado, execução determinística, relatório agregado privacy-safe e escrita pelo helper `atomic_json`.
-- `tests/engine/test_policy_smoke.py`: valida schema, quantidade exata de casos, privacy e runtime zero-external com monkeypatch de requests, subprocess, Ollama e embeddings.
-- `tests/test_policy_cli.py`: valida parser, stdout seguro, ausência de dependências Ollama e exit code não-zero em smoke reprovado.
-- `.github/workflows/phase7-policy-smoke.yml`: `workflow_dispatch`, `target_ref` exato, runner Windows self-hosted, Python 3.14, restauração byte-exact do fixture Phase 2 a partir do blob do próprio `HEAD`, Ruff, suíte completa e smoke.
-- `tests/test_workflows.py`: valida workflows estruturalmente e proíbe export/artifacts e superfícies não autorizadas.
-- `.github/workflows/ci.yml`: PR hosted CI usa Python 3.14, Ruff lint, Ruff format e pytest.
-- Nenhum desses padrões autoriza refatoração dos três módulos protegidos da Fase 7.
+- `src/ai_service_desk/cli.py`: smoke como subcommand aditivo e dispatch antes da construção de `OllamaClient`.
+- `src/ai_service_desk/engine/policy_smoke.py`: JSONL sintético com schema fechado, execução determinística, relatório agregado privacy-safe e escrita por `atomic_json`.
+- `tests/engine/test_policy_smoke.py`: schema, quantidade exata de casos, privacy e runtime zero-external.
+- `tests/test_policy_cli.py`: parser, stdout seguro, exit code e garantia de não construir Ollama.
+- `.github/workflows/phase7-policy-smoke.yml`: `workflow_dispatch`, `target_ref` exact-head, runner Windows self-hosted, Python 3.14, restauração byte-exact do fixture Phase 2, Ruff, suíte completa e smoke.
+- `tests/test_workflows.py`: validação estrutural do workflow, sem upload/export e sem dependências proibidas.
+- `.github/workflows/ci.yml`: hosted CI em PR com Python 3.14, Ruff lint, Ruff format e pytest.
+- Nenhum padrão acima autoriza refatoração dos módulos protegidos da Fase 7.
 
 ---
 
@@ -105,30 +110,31 @@ Antes da decomposição foram inspecionados os padrões homologados existentes e
 
 ### Create
 
-- `src/ai_service_desk/engine/request_lifecycle.py`: estados, record, audit event, erros/invariantes, clock UTC e `RequestLifecycleService`.
-- `src/ai_service_desk/engine/request_repository.py`: `RequestRepository`, `InMemoryRequestRepository`, IDs determinísticos, optimistic concurrency e append-only audit.
-- `src/ai_service_desk/engine/technician_authorization.py`: identidade de técnico, entradas do registry, validação fail-closed, índices únicos e capability exata.
-- `src/ai_service_desk/engine/approval.py`: `ApprovalService`, stale ordering, autorização e self-decision.
+- `src/ai_service_desk/engine/request_lifecycle.py`: estados, dataclasses, reason-code errors, validators, transition matrix e `RequestLifecycleService`.
+- `src/ai_service_desk/engine/request_repository.py`: `RequestRepository`, `InMemoryRequestRepository`, IDs determinísticos, optimistic concurrency e audit append-only.
+- `src/ai_service_desk/engine/technician_authorization.py`: `TechnicianIdentity`, registry entry, validação fail-closed, índices únicos e capability exata.
+- `src/ai_service_desk/engine/approval.py`: `ApprovalService`, gate ordering, capability e self-decision.
 - `src/ai_service_desk/engine/execution.py`: `ActionExecutionResult`, `ActionExecutor`, `FakeActionExecutor` e `ExecutionEngine`.
 - `src/ai_service_desk/engine/controlled_execution_smoke.py`: smoke sintético determinístico e privacy-safe.
-- `tests/engine/phase8_helpers.py`: factories sintéticas compartilhadas pelos testes da Fase 8.
-- `tests/engine/test_request_lifecycle.py`: state machine, record/audit contracts, criação e transições.
-- `tests/engine/test_request_repository.py`: IDs, create/save, version e snapshots de audit.
-- `tests/engine/test_phase8_audit_temporal.py`: timezone-awareness, cronologia e monotonicidade entre versões/eventos.
-- `tests/engine/test_technician_authorization.py`: registry fail-closed, conflitos e autorização exata.
-- `tests/engine/test_approval.py`: approve/reject, capability, self-decision e stale ordering.
-- `tests/engine/test_execution.py`: gates de execução, policy revalidation, executor result e falhas seguras.
-- `tests/engine/test_phase8_concurrency.py`: CAS concorrente, dupla decisão, dupla execução e `expected_version` em todos os entrypoints.
-- `tests/engine/test_phase8_security.py`: protected blob hashes, forbidden surfaces e zero external execution.
-- `tests/engine/test_controlled_execution_smoke.py`: schema, seis fluxos, privacy e runtime zero-external.
+- `tests/engine/phase8_helpers.py`: factories sintéticas, clocks determinísticos e policy doubles.
+- `tests/engine/test_request_lifecycle.py`: state machine, contracts, criação e lifecycle transitions.
+- `tests/engine/test_request_repository.py`: IDs, create/save, expected_version e snapshots de audit.
+- `tests/engine/test_phase8_audit_temporal.py`: timezone-awareness, cronologia e monotonicidade temporal.
+- `tests/engine/test_technician_authorization.py`: registry fail-closed, conflitos normalizados e capability exata.
+- `tests/engine/test_approval.py`: approve/reject, stale ordering, self-decision e zero execution.
+- `tests/engine/test_execution.py`: state gate, policy revalidation, single operation timestamp, executor result e safe failure.
+- `tests/engine/test_phase8_concurrency.py`: final CAS, dupla decisão, dupla execução e races.
+- `tests/engine/test_phase8_security.py`: criado na Task 8 junto do RED de atomic CAS; consulta Git blobs via `git rev-parse`, static scans e runtime zero-external.
+- `tests/engine/test_controlled_execution_smoke.py`: seis fluxos sintéticos, schema, privacy e zero-external.
 - `tests/test_controlled_execution_cli.py`: parser, stdout seguro e exit codes.
 - `tests/fixtures/phase8_controlled_execution_cases.jsonl`: seis casos sintéticos sem dados corporativos.
 - `.github/workflows/phase8-controlled-execution-smoke.yml`: workflow manual exact-head para Dell.
 
 ### Modify
 
-- `src/ai_service_desk/cli.py`: adicionar somente `controlled-execution-smoke` e dispatch correspondente.
-- `tests/test_workflows.py`: adicionar somente o contrato do workflow da Fase 8.
+- `src/ai_service_desk/cli.py`: adicionar somente `controlled-execution-smoke` e seu dispatch.
+- `tests/test_workflows.py`: adicionar somente o contrato estrutural do workflow da Fase 8.
+- `tests/engine/test_phase8_security.py`: na Task 9, adicionar `controlled_execution_smoke.py` ao scan de superfícies externas; o arquivo é criado originalmente na Task 8.
 
 ### Must remain untouched
 
@@ -142,7 +148,7 @@ Antes da decomposição foram inspecionados os padrões homologados existentes e
 
 ## Execution Preflight
 
-- [ ] **Preflight 1: registrar o execution start real**
+- [ ] **Preflight 1: registrar execution start real**
 
 Run:
 
@@ -155,1051 +161,758 @@ git merge-base --is-ancestor 24d411987d991b1d7f8fce04131dd19afa2c7af5 "$EXECUTIO
 git diff --name-only 24d411987d991b1d7f8fce04131dd19afa2c7af5 "$EXECUTION_START_HEAD"
 ```
 
-Expected:
+Expected: branch `phase-8-controlled-approval-execution`; working tree clean; spec head é ancestral; diff spec-head -> execution-start contém somente o implementation plan aprovado.
 
-```text
-branch = phase-8-controlled-approval-execution
-git status --short = empty
-git merge-base --is-ancestor exit = 0
-diff from spec head to execution start contains only docs/superpowers/plans/2026-09-09-phase-8-controlled-approval-execution.md
-```
-
-- [ ] **Preflight 2: protected equality before implementation**
+- [ ] **Preflight 2: confirmar arquivos protegidos antes de código**
 
 Run:
 
 ```bash
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d "$EXECUTION_START_HEAD" -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
+git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d "$EXECUTION_START_HEAD" -- \
+  src/ai_service_desk/engine/access_request.py \
+  src/ai_service_desk/engine/policy.py \
+  src/ai_service_desk/engine/confidence.py
 ```
 
-Expected: exit `0` with empty diff.
+Expected: exit `0`.
 
-- [ ] **Preflight 3: collect immutable historical baseline in a separate worktree**
+- [ ] **Preflight 3: confirmar baseline de 426 node IDs sem mover o worktree de implementação**
 
 Run:
 
 ```bash
-REPO_ROOT="$(pwd)"
-BASELINE_WORKTREE="$(dirname "$REPO_ROOT")/ai-service-desk-phase8-baseline"
-BASELINE_IDS="$(mktemp)"
+BASELINE_WORKTREE="../ai-service-desk-phase8-baseline"
 git worktree add --detach "$BASELINE_WORKTREE" 2f583b5b4921cd7b40ddde2978a2852ecca2251d
-(
-  cd "$BASELINE_WORKTREE"
-  python -m pytest --collect-only -q | grep '::' | sort -u > "$BASELINE_IDS"
-)
-python - "$BASELINE_IDS" <<'PY'
-from pathlib import Path
-import sys
-ids = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
-print(f"baseline_nodeids={len(ids)}")
-assert len(ids) == 426
-PY
-git worktree remove "$BASELINE_WORKTREE"
-rm -f "$BASELINE_IDS"
+cd "$BASELINE_WORKTREE"
+python -m pytest --collect-only -q
 ```
 
-Expected: prints `baseline_nodeids=426`, assertion succeeds, implementation worktree HEAD unchanged.
+Expected: exatamente `426 tests collected`. Depois voltar ao worktree de implementação e remover o worktree temporário com:
+
+```bash
+git worktree remove "$BASELINE_WORKTREE"
+```
+
+Expected: worktree temporário removido; branch de implementação continua no execution start.
 
 ---
 
 ## Contract Matrix Coverage Map
 
-Every numbered requirement from the canonical 87-case matrix is mapped below to an exact future test node or final gate.
+Cada requisito da matriz de 87 casos da spec aponta para uma verificação concreta.
 
-| Case | Planned test/gate |
+| Caso | Verificação concreta |
 | ---: | --- |
-| 1 | `test_create_request_require_approval_enters_pending_approval` |
-| 2 | `test_create_request_deny_enters_auditable_denied_policy` |
-| 3 | `test_denied_policy_rejects_human_decision_with_current_version[approve]` |
-| 4 | `test_denied_policy_rejects_human_decision_with_current_version[reject]` |
-| 5 | `test_technician_without_capability_cannot_decide[approve]` |
-| 6 | `test_technician_without_capability_cannot_decide[reject]` |
-| 7 | `test_unregistered_technician_cannot_decide` |
-| 8 | `test_divergent_registered_identity_cannot_decide` |
-| 9 | `test_requester_cannot_decide_own_request[username]` |
-| 10 | `test_requester_cannot_decide_own_request[email]` |
-| 11 | `test_requester_self_decision_normalization_is_casefolded_and_trimmed` |
-| 12 | `test_authorized_technician_can_decide_pending_request[approve]` |
-| 13 | `test_authorized_technician_can_decide_pending_request[reject]` |
-| 14 | `test_approval_service_has_no_execution_dependency[approve]` |
-| 15 | `test_approval_service_has_no_execution_dependency[reject]` |
-| 16 | `test_execute_rejects_non_approved_states_without_executor[PENDING_APPROVAL]` |
-| 17 | `test_execute_rejects_non_approved_states_without_executor[DENIED_POLICY]` |
-| 18 | `test_execute_rejects_non_approved_states_without_executor[REJECTED]` |
-| 19 | `test_execute_rejects_non_approved_states_without_executor[COMPLETED]` |
-| 20 | `test_execute_rejects_non_approved_states_without_executor[FAILED]` |
-| 21 | `test_execute_revalidates_policy_before_executor` |
-| 22 | `test_revalidation_deny_moves_to_denied_policy_with_zero_executor_calls` |
-| 23 | `test_revalidation_deny_moves_to_denied_policy_with_zero_executor_calls` |
-| 24 | `test_executor_receives_already_persisted_executing_record` |
-| 25 | `test_executor_success_completes_request` |
-| 26 | `test_executor_failure_marks_request_failed` |
-| 27 | `test_executor_exception_is_sanitized_into_failed` |
-| 28 | `test_executor_exception_payload_is_absent_from_record_and_audit` |
-| 29 | `test_invalid_executor_results_fail_closed_without_persisting_payload` |
-| 30 | `test_failed_request_is_terminal_without_retry` |
-| 31 | `test_request_id_sequence_is_deterministic_per_repository_instance[first]` |
-| 32 | `test_request_id_sequence_is_deterministic_per_repository_instance[monotonic]` |
-| 33 | `test_request_id_sequence_is_deterministic_per_repository_instance[new-instance]` |
-| 34 | `test_stale_human_decision_fails_before_state_or_authorization[approve]` |
-| 35 | `test_stale_human_decision_fails_before_state_or_authorization[reject]` |
-| 36 | `test_two_human_decisions_only_one_final_cas_wins` |
-| 37 | `test_two_execute_callers_make_exactly_one_executor_call` |
-| 38 | `test_save_requires_exactly_next_version` |
-| 39 | `test_persisted_timestamps_are_timezone_aware` |
-| 40 | `test_naive_timestamps_are_rejected_before_write` |
-| 41 | `test_audit_for_returns_tuple_snapshot` |
-| 42 | `test_old_audit_snapshot_remains_immutable_prefix_after_append` |
-| 43 | `test_repository_exposes_no_audit_update_or_delete_api` |
-| 44 | `test_pending_creation_audit_is_request_created_then_policy_requires_approval` |
-| 45 | `test_denied_creation_audit_is_request_created_then_policy_denied` |
-| 46 | `test_completed_flow_has_canonical_audit_order` |
-| 47 | `test_failed_flow_audits_execution_started_before_execution_failed` |
-| 48 | `test_revalidation_updates_latest_policy_without_replacing_creation_policy` |
-| 49 | `test_save_preserves_context_across_versions` |
-| 50 | `test_save_preserves_confidence_across_versions` |
-| 51 | `test_phase7_protected_files_keep_homologated_git_blob_hashes[access_request.py]` |
-| 52 | `test_phase7_protected_files_keep_homologated_git_blob_hashes[policy.py]` |
-| 53 | `test_phase7_protected_files_keep_homologated_git_blob_hashes[confidence.py]` |
-| 54 | `test_phase8_runtime_sources_have_no_external_execution_surface[http]` |
-| 55 | `test_phase8_runtime_sources_have_no_external_execution_surface[llm]` |
-| 56 | `test_phase8_runtime_sources_have_no_real_persistence_surface` |
-| 57 | `test_controlled_execution_smoke_passes_all_six_contract_flows` |
-| 58 | Final Gate F3 requires `baseline_nodeids=426` and `missing_historical_nodeids=0` |
-| 59 | `test_invalid_registry_entry_fails_closed_before_indexing` |
-| 60 | `test_invalid_capability_configuration_is_rejected[non-string]` |
-| 61 | `test_invalid_capability_configuration_is_rejected[wildcard-prefix-fuzzy]` |
-| 62 | `test_normalized_identity_collisions_are_conflicts[technician_id]` |
-| 63 | `test_normalized_identity_collisions_are_conflicts[username]` |
-| 64 | `test_normalized_identity_collisions_are_conflicts[email]` |
-| 65 | `test_invalid_registry_entry_precedes_duplicate_detection` |
-| 66 | `test_invalid_executor_results_fail_closed_without_persisting_payload[success-int]` |
-| 67 | `test_invalid_executor_results_fail_closed_without_persisting_payload[success-string]` |
-| 68 | `test_invalid_executor_results_fail_closed_without_persisting_payload[empty-code]` |
-| 69 | `test_invalid_executor_results_fail_closed_without_persisting_payload[spaced-code]` |
-| 70 | `test_invalid_executor_results_fail_closed_without_persisting_payload[unhashable-code]` |
-| 71 | `test_invalid_executor_results_fail_closed_without_persisting_payload[wrong-object]` |
-| 72 | `test_record_chronology_regression_is_rejected_before_write[created-updated]` |
-| 73 | `test_record_chronology_regression_is_rejected_before_write[created-decided]` |
-| 74 | `test_record_chronology_regression_is_rejected_before_write[decided-started]` |
-| 75 | `test_record_chronology_regression_is_rejected_before_write[started-finished]` |
-| 76 | `test_audit_timestamp_cannot_move_backward` |
-| 77 | `test_equal_timestamps_are_allowed_and_order_uses_version_and_append_order` |
-| 78 | `test_expected_version_contract_is_enforced_by_every_entrypoint[True]` |
-| 79 | `test_expected_version_contract_is_enforced_by_every_entrypoint[False]` |
-| 80 | `test_expected_version_contract_is_enforced_by_every_entrypoint[float]` |
-| 81 | `test_expected_version_contract_is_enforced_by_every_entrypoint[string]` |
-| 82 | `test_expected_version_contract_is_enforced_by_every_entrypoint[None]` |
-| 83 | `test_stale_execute_fails_before_policy_and_executor` |
-| 84 | `test_updated_at_cannot_move_backward_between_versions` |
-| 85 | `test_equal_updated_at_between_versions_is_allowed` |
-| 86 | `test_pending_creation_reuses_one_initial_timestamp` |
-| 87 | `test_denied_creation_reuses_one_initial_timestamp` |
+| 1 | `test_request_lifecycle.py::test_create_request_require_approval_enters_pending_approval` |
+| 2 | `test_request_lifecycle.py::test_create_request_deny_enters_denied_policy_with_audit` |
+| 3 | `test_approval.py::test_denied_policy_cannot_be_approved` |
+| 4 | `test_approval.py::test_denied_policy_cannot_be_rejected` |
+| 5 | `test_approval.py::test_technician_without_capability_cannot_approve` |
+| 6 | `test_approval.py::test_technician_without_capability_cannot_reject` |
+| 7 | `test_approval.py::test_unregistered_technician_cannot_decide` |
+| 8 | `test_approval.py::test_registry_identity_mismatch_cannot_decide` |
+| 9 | `test_approval.py::test_requester_username_cannot_approve_own_request` |
+| 10 | `test_approval.py::test_requester_email_cannot_reject_own_request` |
+| 11 | `test_approval.py::test_self_decision_normalizes_case_and_outer_whitespace` |
+| 12 | `test_approval.py::test_authorized_technician_approves_pending_request` |
+| 13 | `test_approval.py::test_authorized_technician_rejects_pending_request` |
+| 14 | `test_approval.py::test_approve_makes_zero_executor_calls` |
+| 15 | `test_approval.py::test_reject_makes_zero_executor_calls` |
+| 16 | `test_execution.py::test_execute_rejects_pending_approval` |
+| 17 | `test_execution.py::test_execute_rejects_denied_policy` |
+| 18 | `test_execution.py::test_execute_rejects_rejected_request` |
+| 19 | `test_execution.py::test_execute_rejects_completed_request` |
+| 20 | `test_execution.py::test_execute_rejects_failed_request_without_retry` |
+| 21 | `test_execution.py::test_execute_revalidates_policy_before_executor` |
+| 22 | `test_execution.py::test_revalidation_deny_transitions_to_denied_policy` |
+| 23 | `test_execution.py::test_revalidation_deny_makes_zero_executor_calls` |
+| 24 | `test_execution.py::test_require_approval_persists_executing_before_executor_call` |
+| 25 | `test_execution.py::test_executor_success_transitions_to_completed` |
+| 26 | `test_execution.py::test_executor_failure_transitions_to_failed` |
+| 27 | `test_execution.py::test_executor_exception_transitions_to_safe_failed` |
+| 28 | `test_execution.py::test_executor_exception_text_is_not_persisted` |
+| 29 | `test_execution.py::test_invalid_executor_result_transitions_to_executor_invalid_result` |
+| 30 | `test_execution.py::test_failed_request_does_not_execute_again` |
+| 31 | `test_request_repository.py::test_first_request_id_is_req_000001` |
+| 32 | `test_request_repository.py::test_request_ids_are_monotonic` |
+| 33 | `test_request_repository.py::test_new_repository_restarts_id_sequence` |
+| 34 | `test_approval.py::test_stale_approval_conflicts_before_state_or_authorization` |
+| 35 | `test_approval.py::test_stale_rejection_conflicts_before_state_or_authorization` |
+| 36 | `test_phase8_concurrency.py::test_double_human_decision_persists_exactly_one_transition` |
+| 37 | `test_phase8_concurrency.py::test_double_execution_calls_executor_exactly_once` |
+| 38 | `test_request_lifecycle.py::test_every_persisted_transition_increments_version_by_one` |
+| 39 | `test_phase8_audit_temporal.py::test_all_persisted_timestamps_are_timezone_aware` |
+| 40 | `test_phase8_audit_temporal.py::test_naive_datetime_is_rejected` |
+| 41 | `test_request_repository.py::test_audit_for_returns_tuple_snapshot` |
+| 42 | `test_request_repository.py::test_existing_audit_remains_immutable_prefix_after_save` |
+| 43 | `test_request_repository.py::test_repository_exposes_no_audit_update_or_delete_api` |
+| 44 | `test_request_lifecycle.py::test_pending_creation_audit_is_request_created_then_policy_requires_approval` |
+| 45 | `test_request_lifecycle.py::test_denied_creation_audit_is_request_created_then_policy_denied` |
+| 46 | `test_execution.py::test_completed_flow_has_canonical_audit_order` |
+| 47 | `test_execution.py::test_failed_flow_has_execution_started_before_execution_failed` |
+| 48 | `test_execution.py::test_revalidation_updates_latest_policy_only` |
+| 49 | `test_request_lifecycle.py::test_context_is_identical_across_versions` |
+| 50 | `test_execution.py::test_confidence_does_not_change_policy_or_execution_gate` |
+| 51 | `test_phase8_security.py::test_phase7_protected_git_blob_is_exact[access_request]` |
+| 52 | `test_phase8_security.py::test_phase7_protected_git_blob_is_exact[policy]` |
+| 53 | `test_phase8_security.py::test_phase7_protected_git_blob_is_exact[confidence]` |
+| 54 | `test_phase8_security.py::test_phase8_runtime_has_no_http_or_cdm_adapter` |
+| 55 | `test_phase8_security.py::test_phase8_runtime_has_no_llm_ollama_or_embedding` |
+| 56 | `test_phase8_security.py::test_phase8_stateful_core_has_no_real_persistence` |
+| 57 | `test_controlled_execution_smoke.py::test_controlled_execution_smoke_passes_all_six_flows` |
+| 58 | Final Gate `historical baseline node IDs = 426` and `missing historical node IDs = 0` |
+| 59 | `test_technician_authorization.py::test_registry_invalid_entry_fails_closed_before_indexing` |
+| 60 | `test_technician_authorization.py::test_registry_invalid_capability_fails_closed` |
+| 61 | `test_technician_authorization.py::test_registry_rejects_wildcard_prefix_and_fuzzy_capabilities` |
+| 62 | `test_technician_authorization.py::test_registry_rejects_normalized_technician_id_conflict` |
+| 63 | `test_technician_authorization.py::test_registry_rejects_normalized_username_conflict` |
+| 64 | `test_technician_authorization.py::test_registry_rejects_normalized_email_conflict` |
+| 65 | `test_technician_authorization.py::test_registry_invalid_entry_precedes_potential_conflict` |
+| 66 | `test_execution.py::test_invalid_result_rejects_integer_success` |
+| 67 | `test_execution.py::test_invalid_result_rejects_string_success` |
+| 68 | `test_execution.py::test_invalid_result_rejects_empty_result_code` |
+| 69 | `test_execution.py::test_invalid_result_rejects_result_code_with_space` |
+| 70 | `test_execution.py::test_invalid_result_rejects_non_string_unhashable_result_code` |
+| 71 | `test_execution.py::test_invalid_result_rejects_wrong_result_object_type` |
+| 72 | `test_phase8_audit_temporal.py::test_created_at_after_updated_at_is_record_invariant_invalid` |
+| 73 | `test_phase8_audit_temporal.py::test_created_at_after_decided_at_is_record_invariant_invalid` |
+| 74 | `test_phase8_audit_temporal.py::test_decided_at_after_execution_started_at_is_record_invariant_invalid` |
+| 75 | `test_phase8_audit_temporal.py::test_execution_started_at_after_finished_at_is_record_invariant_invalid` |
+| 76 | `test_phase8_audit_temporal.py::test_audit_timestamp_regression_is_audit_event_invalid` |
+| 77 | `test_phase8_audit_temporal.py::test_equal_timestamps_are_allowed_and_ordered_by_version_and_append` |
+| 78 | `test_request_repository.py::test_expected_version_true_is_invalid` |
+| 79 | `test_request_repository.py::test_expected_version_false_is_invalid` |
+| 80 | `test_request_repository.py::test_expected_version_float_is_invalid` |
+| 81 | `test_request_repository.py::test_expected_version_string_is_invalid` |
+| 82 | `test_request_repository.py::test_expected_version_none_is_invalid` |
+| 83 | `test_execution.py::test_stale_execute_conflicts_before_policy_clock_and_executor` |
+| 84 | `test_phase8_audit_temporal.py::test_save_rejects_updated_at_regression_without_write_or_audit` |
+| 85 | `test_phase8_audit_temporal.py::test_save_accepts_equal_updated_at_when_other_invariants_hold` |
+| 86 | `test_request_lifecycle.py::test_pending_creation_uses_one_timestamp_for_version_one_and_two` |
+| 87 | `test_request_lifecycle.py::test_denied_creation_uses_one_timestamp_for_version_one_and_two` |
+
+Mandatory additional execution timestamp node: `test_execution.py::test_execute_uses_single_operation_timestamp`.
 
 ---
 
-### Task 1: Lifecycle domain contracts and closed state machine
+### Task 1: Lifecycle contracts and shared test factories
 
 **Files:**
 - Create: `src/ai_service_desk/engine/request_lifecycle.py`
 - Create: `tests/engine/phase8_helpers.py`
 - Create: `tests/engine/test_request_lifecycle.py`
 
-**Interfaces:**
-- Consumes existing `AccessRequestContext`, `PolicyDecision`, `ConfidenceAssessment` by import only.
-- Produces `RequestState`, `REQUEST_STATES`, `ALLOWED_TRANSITIONS`, `Phase8DomainError`, `InvalidStateTransitionError`, `RecordInvariantError`, `AuditEventValidationError`, `AccessRequestRecord`, `AuditEvent`, `utc_now()`, `validate_access_request_record(record)`, `validate_audit_event(event)`.
-- `RequestLifecycleService` is defined only in Task 4, after `RequestRepository` exists.
+**Interfaces produced:**
+- `RequestState`
+- `REQUEST_STATES`
+- `ALLOWED_TRANSITIONS`
+- `AccessRequestRecord`
+- `AuditEvent`
+- `Phase8DomainError(reason_code: str, message: str)`
+- `RequestNotFoundError`, `InvalidStateTransitionError`, `ExpectedVersionValidationError`, `ConcurrencyConflictError`, `RecordInvariantError`, `AuditEventValidationError`
+- `validate_expected_version(value: object) -> int`
+- `validate_access_request_record(record: AccessRequestRecord) -> None`
+- `validate_audit_event(event: AuditEvent) -> None`
+- helpers sintéticos `make_context()`, `make_policy_decision()`, `make_record()`, `FixedClock`.
 
-- [ ] **Step 1: write the failing domain-contract tests**
+- [ ] **Step 1: RED de contratos inexistentes**
 
-In `tests/engine/test_request_lifecycle.py`, add exact-state and exact-transition assertions:
+Add tests that import the symbols above and assert exactly eight states and the closed eight-transition matrix.
 
-```python
-EXPECTED_STATES = {
-    "TRIAGED",
-    "PENDING_APPROVAL",
-    "APPROVED",
-    "REJECTED",
-    "DENIED_POLICY",
-    "EXECUTING",
-    "COMPLETED",
-    "FAILED",
-}
-EXPECTED_TRANSITIONS = {
-    ("TRIAGED", "PENDING_APPROVAL"),
-    ("TRIAGED", "DENIED_POLICY"),
-    ("PENDING_APPROVAL", "APPROVED"),
-    ("PENDING_APPROVAL", "REJECTED"),
-    ("APPROVED", "EXECUTING"),
-    ("APPROVED", "DENIED_POLICY"),
-    ("EXECUTING", "COMPLETED"),
-    ("EXECUTING", "FAILED"),
-}
-```
-
-Add `test_record_validation_rejects_state_field_incoherence` with these rows: pending plus decision fields, approved without decision fields, executing without start timestamp, completed without finish timestamp, completed without result code, failed without error code, creation-denied record with human decision fields.
-
-Add `test_audit_event_validation_rejects_invalid_actor_and_version` covering invalid actor type, bool record version, nonpositive record version, malformed event type, malformed reason code and naive `occurred_at`.
-
-- [ ] **Step 2: run RED**
+Run:
 
 ```bash
 python -m pytest tests/engine/test_request_lifecycle.py -q
 ```
 
-Expected: import/collection failure because `ai_service_desk.engine.request_lifecycle` does not exist.
+Expected: collection FAIL because `ai_service_desk.engine.request_lifecycle` does not exist.
 
-- [ ] **Step 3: implement the minimal immutable domain contracts**
+- [ ] **Step 2: GREEN mínimo dos contracts**
 
-`request_lifecycle.py` must define the exact eight-value `RequestState` Literal, exact `REQUEST_STATES`, exact `ALLOWED_TRANSITIONS`, frozen `AccessRequestRecord`, frozen `AuditEvent`, timezone-aware validator and lifecycle error base carrying `.reason_code`.
-
-`AccessRequestRecord` exact fields:
-
-```text
-request_id
-version
-state
-context
-creation_policy
-latest_policy
-confidence
-created_at
-updated_at
-decided_by
-decided_at
-execution_started_at
-execution_finished_at
-execution_result_code
-execution_error_code
-```
-
-`AuditEvent` exact fields:
-
-```text
-request_id
-event_type
-actor_type
-actor_id
-from_state
-to_state
-record_version
-reason_code
-policy_id
-occurred_at
-```
-
-Use local symbolic-code regex `^[A-Z][A-Z0-9_]{2,119}$`. Reject bool as integer for `version` and `record_version`. Enforce the state/optional-field rows from Step 1. Task 3 adds chronological relations; Task 1 already rejects naive datetimes.
-
-`tests/engine/phase8_helpers.py` defines synthetic `valid_access_context()`, `fixed_aware_datetime()`, `require_approval_policy_decision()`, `deny_policy_decision()` and `high_confidence()`, using only `example.invalid` identities.
-
-- [ ] **Step 4: run GREEN**
-
-```bash
-python -m pytest tests/engine/test_request_lifecycle.py -q
-```
-
-Expected: PASS with zero failures.
-
-- [ ] **Step 5: run regression and quality checks**
-
-```bash
-python -m pytest -q
-python -m ruff check .
-python -m ruff format --check .
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-git diff --check
-```
-
-Expected: all commands exit `0`; protected diff is empty.
-
-- [ ] **Step 6: commit Task 1**
-
-```bash
-git add src/ai_service_desk/engine/request_lifecycle.py tests/engine/phase8_helpers.py tests/engine/test_request_lifecycle.py
-git diff --cached --name-only
-git commit -m "feat: add phase 8 lifecycle contracts"
-```
-
-Expected staged files: exactly the three Task 1 files.
-
----
-
-### Task 2: In-memory repository, deterministic IDs and sequential version contract
-
-**Files:**
-- Create: `src/ai_service_desk/engine/request_repository.py`
-- Create: `tests/engine/test_request_repository.py`
-
-**Interfaces:**
-- Consumes Task 1 record/audit types and validators.
-- Produces `RequestRepository`, `InMemoryRequestRepository`, `RequestNotFoundError`, `ExpectedVersionValidationError`, `ConcurrencyConflictError`, `validate_expected_version(value: object) -> int`.
-
-`RequestRepository` public methods:
-
-```text
-allocate_request_id() -> str
-create(record: AccessRequestRecord, audit_events: tuple[AuditEvent, ...]) -> AccessRequestRecord
-get(request_id: str) -> AccessRequestRecord
-save(record: AccessRequestRecord, expected_version: int, audit_events: tuple[AuditEvent, ...]) -> AccessRequestRecord
-audit_for(request_id: str) -> tuple[AuditEvent, ...]
-```
-
-`audit_events` and `expected_version` are keyword-only in `create`/`save`.
-
-- [ ] **Step 1: write RED repository tests**
-
-Add:
-
-```text
-test_request_id_sequence_is_deterministic_per_repository_instance
-test_create_requires_triaged_version_one_and_request_created_event
-test_get_missing_request_raises_request_not_found
-test_save_requires_exactly_next_version
-test_stale_save_raises_version_conflict_without_mutation
-test_save_preserves_request_id_context_creation_policy_confidence_created_at
-test_save_preserves_context_across_versions
-test_save_preserves_confidence_across_versions
-test_audit_for_returns_tuple_snapshot
-test_old_audit_snapshot_remains_immutable_prefix_after_append
-test_repository_exposes_no_audit_update_or_delete_api
-test_expected_version_validator_rejects_invalid_runtime_values
-```
-
-The ID test asserts `REQ-000001`, `REQ-000002`, `REQ-000003`, then a fresh repository starts again at `REQ-000001`.
-
-The expected-version parameter rows are `True`, `False`, `3.0`, `"3"`, `None`, `0`, `-1`, all with `EXPECTED_VERSION_INVALID`.
-
-- [ ] **Step 2: run RED**
-
-```bash
-python -m pytest tests/engine/test_request_repository.py -q
-```
-
-Expected: import failure because `request_repository.py` does not exist.
-
-- [ ] **Step 3: implement sequential repository semantics**
-
-`validate_expected_version` must use exact-type validation:
+Implement frozen dataclasses and reason-code errors. `validate_expected_version` must use:
 
 ```python
 if type(value) is not int or value <= 0:
     raise ExpectedVersionValidationError(
         "EXPECTED_VERSION_INVALID",
-        "expected_version deve ser int positivo sem coercao.",
+        "expected_version deve ser inteiro positivo exato.",
     )
 return value
 ```
 
-Repository state:
+Implement structural state-field validation and timezone-awareness, but defer cross-version/audit chronology details listed in Task 7 so that Task 7 has a real RED.
 
-```text
-_records: dict[str, AccessRequestRecord]
-_audit: dict[str, list[AuditEvent]]
-_next_id: int
-_lock: threading.RLock
+Run:
+
+```bash
+python -m pytest tests/engine/test_request_lifecycle.py -q
 ```
 
-Task 2 proves sequential semantics. `save` validates the expected version and current version before the final mutation section. This intentionally does not claim forced-interleaving atomicity yet; Task 8 introduces the deterministic concurrency RED and moves read/compare/validate/mutate into one lock scope.
+Expected: PASS.
 
-`create` validates record and every event before mutation. `save` validates exact next version, immutable fields and event alignment. Task 3 adds chronology against current record and existing audit tail.
+- [ ] **Step 3: regressão**
 
-- [ ] **Step 4: run GREEN**
+Run:
+
+```bash
+python -m pytest -q
+python -m ruff check src/ai_service_desk/engine/request_lifecycle.py tests/engine/phase8_helpers.py tests/engine/test_request_lifecycle.py
+python -m ruff format --check src/ai_service_desk/engine/request_lifecycle.py tests/engine/phase8_helpers.py tests/engine/test_request_lifecycle.py
+```
+
+Expected: all commands exit `0`.
+
+- [ ] **Step 4: commit**
+
+```bash
+git add src/ai_service_desk/engine/request_lifecycle.py tests/engine/phase8_helpers.py tests/engine/test_request_lifecycle.py
+git commit -m "feat: add phase 8 lifecycle contracts"
+```
+
+Expected: one commit containing exactly the three Task 1 files.
+
+---
+
+### Task 2: In-memory repository, deterministic IDs and single-thread CAS semantics
+
+**Files:**
+- Create: `src/ai_service_desk/engine/request_repository.py`
+- Create: `tests/engine/test_request_repository.py`
+
+**Consumes:** Task 1 record/audit validators and errors.
+
+**Produces:**
+- `RequestRepository` Protocol with `allocate_request_id`, `create`, `get`, `save`, `audit_for`.
+- `InMemoryRequestRepository`.
+- Internal no-op seam `_before_final_cas(self) -> None`; it exists only to force deterministic interleaving in Task 8 and is never exposed by the Protocol.
+
+- [ ] **Step 1: RED de repository inexistente**
+
+Tests must cover deterministic IDs, immutable tuple audit, create/get/save, exact `expected_version`, wrong-version `VERSION_CONFLICT`, and cases 78-82.
+
+Run:
 
 ```bash
 python -m pytest tests/engine/test_request_repository.py -q
 ```
 
-Expected: PASS.
+Expected: collection FAIL because `request_repository` does not exist.
 
-- [ ] **Step 5: run regression and quality checks**
+- [ ] **Step 2: GREEN de semantics single-thread**
+
+Implement in-memory dictionaries/lists, deterministic `REQ-%06d`, create validation and `save` validation. `save` must call `validate_expected_version(expected_version)` before equality. It must call `_before_final_cas()` after preliminary validation and before mutation. At this task, only single-thread correctness is required; Task 8 adds the final lock/re-read barrier proven by a deterministic RED.
+
+Run:
 
 ```bash
+python -m pytest tests/engine/test_request_repository.py -q
+```
+
+Expected: PASS, including `True`, `False`, `3.0`, `"3"`, `None` -> `EXPECTED_VERSION_INVALID`.
+
+- [ ] **Step 3: regressão**
+
+```bash
+python -m pytest tests/engine/test_request_lifecycle.py tests/engine/test_request_repository.py -q
 python -m pytest -q
-python -m ruff check .
-python -m ruff format --check .
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-git diff --check
+python -m ruff check src/ai_service_desk/engine/request_repository.py tests/engine/test_request_repository.py
+python -m ruff format --check src/ai_service_desk/engine/request_repository.py tests/engine/test_request_repository.py
 ```
 
 Expected: all exit `0`.
 
-- [ ] **Step 6: commit Task 2**
+- [ ] **Step 4: commit**
 
 ```bash
 git add src/ai_service_desk/engine/request_repository.py tests/engine/test_request_repository.py
-git diff --cached --name-only
-git commit -m "feat: add in-memory request repository"
+git commit -m "feat: add in-memory access request repository"
 ```
 
-Expected staged files: exactly the two Task 2 files.
+Expected: exactly two Task 2 files committed.
 
 ---
 
-### Task 3: Audit chronology and temporal invariants
+### Task 3: RequestLifecycleService creation and closed transitions
+
+**Files:**
+- Modify: `src/ai_service_desk/engine/request_lifecycle.py`
+- Modify: `tests/engine/test_request_lifecycle.py`
+
+**Consumes:** `RequestRepository`, Phase 7 `PolicyEngine`, `assess_confidence`.
+
+**Produces exact public/internal service API:**
+
+```python
+class RequestLifecycleService:
+    def create_request(self, context: AccessRequestContext) -> AccessRequestRecord: ...
+    def transition_to_pending_approval(self, record: AccessRequestRecord, *, expected_version: int, occurred_at: datetime) -> AccessRequestRecord: ...
+    def transition_to_denied_policy(self, record: AccessRequestRecord, policy: PolicyDecision, *, expected_version: int, occurred_at: datetime) -> AccessRequestRecord: ...
+    def transition_to_approved(self, record: AccessRequestRecord, technician_id: str, *, expected_version: int, occurred_at: datetime) -> AccessRequestRecord: ...
+    def transition_to_rejected(self, record: AccessRequestRecord, technician_id: str, *, expected_version: int, occurred_at: datetime) -> AccessRequestRecord: ...
+    def transition_to_executing(self, record: AccessRequestRecord, policy: PolicyDecision, *, expected_version: int, occurred_at: datetime) -> AccessRequestRecord: ...
+    def transition_to_completed(self, record: AccessRequestRecord, result_code: str, *, expected_version: int, occurred_at: datetime) -> AccessRequestRecord: ...
+    def transition_to_failed(self, record: AccessRequestRecord, error_code: str, *, expected_version: int, occurred_at: datetime, result_code: str | None = None) -> AccessRequestRecord: ...
+```
+
+`occurred_at` is mandatory, never optional, for every transition method.
+
+- [ ] **Step 1: RED de lifecycle service**
+
+Add concrete tests for cases 1, 2, 38, 44, 45, 49, 86 and 87. Use a clock double whose second call raises to prove creation uses one timestamp for v1 and v2.
+
+Run:
+
+```bash
+python -m pytest tests/engine/test_request_lifecycle.py -q
+```
+
+Expected: FAIL because `RequestLifecycleService` and transition methods are absent.
+
+- [ ] **Step 2: GREEN de creation and transitions**
+
+`create_request` sequence must be exactly: validate context -> policy evaluate -> confidence -> `initial_timestamp = clock()` once -> allocate ID -> create `TRIAGED version=1` + `REQUEST_CREATED` -> immediate allowed transition to `PENDING_APPROVAL` or `DENIED_POLICY` with the same timestamp.
+
+All transition methods must reject edges not in `ALLOWED_TRANSITIONS`, construct immutable `version + 1` snapshots, create the canonical `AuditEvent`, and delegate atomic persistence to `repository.save(... expected_version=...)`.
+
+Run:
+
+```bash
+python -m pytest tests/engine/test_request_lifecycle.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 3: regressão**
+
+```bash
+python -m pytest tests/engine/test_request_repository.py tests/engine/test_request_lifecycle.py -q
+python -m pytest -q
+python -m ruff check src/ai_service_desk/engine/request_lifecycle.py tests/engine/test_request_lifecycle.py
+python -m ruff format --check src/ai_service_desk/engine/request_lifecycle.py tests/engine/test_request_lifecycle.py
+```
+
+Expected: exit `0` throughout.
+
+- [ ] **Step 4: commit**
+
+```bash
+git add src/ai_service_desk/engine/request_lifecycle.py tests/engine/test_request_lifecycle.py
+git commit -m "feat: add phase 8 request lifecycle service"
+```
+
+---
+
+### Task 4: TechnicianAuthorizationRegistry fail-closed
+
+**Files:**
+- Create: `src/ai_service_desk/engine/technician_authorization.py`
+- Create: `tests/engine/test_technician_authorization.py`
+
+**Produces:**
+- frozen `TechnicianIdentity(technician_id, username, name, email)`.
+- frozen `TechnicianRegistryEntry(identity, capabilities)`.
+- `TechnicianRegistryConfigurationError` with `TECHNICIAN_REGISTRY_INVALID` / `TECHNICIAN_REGISTRY_CONFLICT`.
+- `TechnicianAuthorizationError` with `TECHNICIAN_CAPABILITY_REQUIRED`.
+- `TechnicianAuthorizationRegistry(entries)`.
+- `require_capability(technician, capability) -> None`.
+
+- [ ] **Step 1: RED do registry**
+
+Add cases 59-65 plus authorization identity mismatch/exact capability. Invalid input and potential duplicate in the same config must assert `TECHNICIAN_REGISTRY_INVALID`.
+
+Run:
+
+```bash
+python -m pytest tests/engine/test_technician_authorization.py -q
+```
+
+Expected: collection FAIL because module does not exist.
+
+- [ ] **Step 2: GREEN em duas passagens**
+
+First pass validates every entry and every capability with `^[A-Z][A-Z0-9_]{2,119}$` without building indices. Second pass builds normalized `technician_id`, username and email indices and fails on any collision. No wildcard/prefix/fuzzy and no last-write-wins.
+
+Run:
+
+```bash
+python -m pytest tests/engine/test_technician_authorization.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 3: regressão**
+
+```bash
+python -m pytest tests/engine/test_technician_authorization.py tests/engine/test_request_lifecycle.py tests/engine/test_request_repository.py -q
+python -m pytest -q
+python -m ruff check src/ai_service_desk/engine/technician_authorization.py tests/engine/test_technician_authorization.py
+python -m ruff format --check src/ai_service_desk/engine/technician_authorization.py tests/engine/test_technician_authorization.py
+```
+
+Expected: all exit `0`.
+
+- [ ] **Step 4: commit**
+
+```bash
+git add src/ai_service_desk/engine/technician_authorization.py tests/engine/test_technician_authorization.py
+git commit -m "feat: add technician authorization registry"
+```
+
+---
+
+### Task 5: ApprovalService, stale ordering and self-decision
+
+**Files:**
+- Create: `src/ai_service_desk/engine/approval.py`
+- Create: `tests/engine/test_approval.py`
+
+**Produces:**
+
+```python
+class ApprovalService:
+    def approve(self, request_id: str, technician: TechnicianIdentity, *, expected_version: int) -> AccessRequestRecord: ...
+    def reject(self, request_id: str, technician: TechnicianIdentity, *, expected_version: int) -> AccessRequestRecord: ...
+```
+
+Constructor dependencies: repository, lifecycle service, technician registry, timezone-aware clock. No executor dependency.
+
+- [ ] **Step 1: RED de approval**
+
+Add exact tests for cases 3-15, 34 and 35. Stale tests must supply a technician that would otherwise fail authorization/state and prove `VERSION_CONFLICT` wins first after get + structural expected_version validation.
+
+Run:
+
+```bash
+python -m pytest tests/engine/test_approval.py -q
+```
+
+Expected: collection FAIL because `approval` module does not exist.
+
+- [ ] **Step 2: GREEN com gate order fechado**
+
+Implement exact order: get -> `validate_expected_version` -> compare current version -> require `PENDING_APPROVAL` -> registry capability -> self-decision username/email normalized -> call clock once -> lifecycle transition -> repository final CAS through lifecycle. `approve/reject` never imports or receives execution classes.
+
+Run:
+
+```bash
+python -m pytest tests/engine/test_approval.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 3: regressão**
+
+```bash
+python -m pytest tests/engine/test_approval.py tests/engine/test_technician_authorization.py -q
+python -m pytest -q
+python -m ruff check src/ai_service_desk/engine/approval.py tests/engine/test_approval.py
+python -m ruff format --check src/ai_service_desk/engine/approval.py tests/engine/test_approval.py
+```
+
+Expected: all exit `0`.
+
+- [ ] **Step 4: commit**
+
+```bash
+git add src/ai_service_desk/engine/approval.py tests/engine/test_approval.py
+git commit -m "feat: add controlled human approval service"
+```
+
+---
+
+### Task 6: ExecutionEngine, executor result contract and single operation timestamp
+
+**Files:**
+- Create: `src/ai_service_desk/engine/execution.py`
+- Create: `tests/engine/test_execution.py`
+
+**Produces:**
+- frozen `ActionExecutionResult(success: bool, result_code: str)`.
+- `ActionExecutor` Protocol.
+- `FakeActionExecutor` with deterministic success/failure/exception/invalid-result modes and call list.
+- `ExecutionEngine.execute(request_id: str, *, expected_version: int) -> AccessRequestRecord`.
+
+- [ ] **Step 1: RED de execution e timestamp único**
+
+Add cases 16-30, 46-50, 66-71, 83 and this mandatory test:
+
+```python
+def test_execute_uses_single_operation_timestamp():
+    operation_time = datetime(2026, 9, 9, 3, 0, tzinfo=UTC)
+    clock = OneShotClock(operation_time)
+    approved = make_approved_request_with_separate_setup_clock()
+    engine = make_execution_engine(approved, clock=clock, executor_mode="success")
+
+    result = engine.execute(approved.request_id, expected_version=approved.version)
+
+    assert result.state == "COMPLETED"
+    assert clock.calls == 1
+    assert result.execution_started_at == operation_time
+    assert result.execution_finished_at == operation_time
+    events = engine.repository.audit_for(approved.request_id)
+    execution_times = [
+        event.occurred_at
+        for event in events
+        if event.event_type in {"EXECUTION_STARTED", "EXECUTION_COMPLETED"}
+    ]
+    assert execution_times == [operation_time, operation_time]
+    assert execution_times == sorted(execution_times)
+```
+
+`OneShotClock.__call__` must raise `AssertionError("execution clock called more than once")` on its second call.
+
+Also make stale and invalid-state tests assert `clock.calls == 0`.
+
+Run:
+
+```bash
+python -m pytest tests/engine/test_execution.py -q
+```
+
+Expected: collection FAIL because `execution` module does not exist.
+
+- [ ] **Step 2: GREEN do executor contract**
+
+Validate returned object before persisting any returned field. Validity is exactly: `type(result) is ActionExecutionResult`, `type(result.success) is bool`, result_code is str and matches `^[A-Z][A-Z0-9_]{2,119}$`.
+
+Invalid return -> `transition_to_failed(... error_code="EXECUTOR_INVALID_RESULT", result_code=None, occurred_at=operation_timestamp)`.
+
+Exception -> `transition_to_failed(... error_code="EXECUTOR_EXCEPTION", result_code=None, occurred_at=operation_timestamp)` with no exception text.
+
+- [ ] **Step 3: GREEN do timestamp operacional fechado**
+
+Implement the operational core in this exact order:
+
+```python
+record = repository.get(request_id)
+validate_expected_version(expected_version)
+if expected_version != record.version:
+    raise ConcurrencyConflictError("VERSION_CONFLICT", "Versao stale.")
+if record.state != "APPROVED":
+    raise InvalidStateTransitionError("INVALID_STATE_TRANSITION", "Request nao esta APPROVED.")
+policy = policy_engine.evaluate(record.context)
+operation_timestamp = clock()
+```
+
+After that line there are no additional `clock()` calls in `execute(...)`.
+
+For `DENY`:
+
+```python
+return lifecycle.transition_to_denied_policy(
+    record,
+    policy,
+    expected_version=expected_version,
+    occurred_at=operation_timestamp,
+)
+```
+
+For `REQUIRE_APPROVAL`:
+
+```python
+executing = lifecycle.transition_to_executing(
+    record,
+    policy,
+    expected_version=expected_version,
+    occurred_at=operation_timestamp,
+)
+```
+
+Every completion/failure call uses `expected_version=executing.version` and the same explicit `occurred_at=operation_timestamp`.
+
+Run:
+
+```bash
+python -m pytest tests/engine/test_execution.py -q
+```
+
+Expected: PASS, including clock calls `1`, equal start/finish timestamps, non-regressing audit and final `COMPLETED` in the single-timestamp success test.
+
+- [ ] **Step 4: regressão**
+
+```bash
+python -m pytest tests/engine/test_execution.py tests/engine/test_approval.py tests/engine/test_request_lifecycle.py -q
+python -m pytest -q
+python -m ruff check src/ai_service_desk/engine/execution.py tests/engine/test_execution.py
+python -m ruff format --check src/ai_service_desk/engine/execution.py tests/engine/test_execution.py
+```
+
+Expected: all exit `0`.
+
+- [ ] **Step 5: commit**
+
+```bash
+git add src/ai_service_desk/engine/execution.py tests/engine/test_execution.py
+git commit -m "feat: add controlled execution engine"
+```
+
+---
+
+### Task 7: Audit and temporal invariants
 
 **Files:**
 - Modify: `src/ai_service_desk/engine/request_lifecycle.py`
 - Modify: `src/ai_service_desk/engine/request_repository.py`
 - Create: `tests/engine/test_phase8_audit_temporal.py`
 
-**Interfaces:**
-- Completes pre-write temporal validation. No new persistence API.
+- [ ] **Step 1: RED de cronologia**
 
-- [ ] **Step 1: write RED temporal tests**
+Add exact tests for cases 39, 40, 72-77, 84 and 85. Every failure test snapshots current record/audit before the invalid save and asserts zero mutation afterwards.
 
-Add:
-
-```text
-test_persisted_timestamps_are_timezone_aware
-test_naive_timestamps_are_rejected_before_write
-test_record_chronology_regression_is_rejected_before_write[created-updated]
-test_record_chronology_regression_is_rejected_before_write[created-decided]
-test_record_chronology_regression_is_rejected_before_write[decided-started]
-test_record_chronology_regression_is_rejected_before_write[started-finished]
-test_audit_timestamp_cannot_move_backward
-test_equal_timestamps_are_allowed_and_order_uses_version_and_append_order
-test_updated_at_cannot_move_backward_between_versions
-test_equal_updated_at_between_versions_is_allowed
-```
-
-Every invalid record row asserts `RECORD_INVARIANT_INVALID`, stored record unchanged and audit tuple unchanged. Audit regression asserts `AUDIT_EVENT_INVALID` and zero append.
-
-- [ ] **Step 2: run RED**
+Run:
 
 ```bash
 python -m pytest tests/engine/test_phase8_audit_temporal.py -q
 ```
 
-Expected: failures on missing cross-field chronology, audit-tail chronology or inter-version `updated_at` checks.
+Expected: FAIL because cross-field chronology, audit non-regression and cross-version `updated_at` are not fully enforced yet.
 
-- [ ] **Step 3: implement chronology before mutation**
+- [ ] **Step 2: GREEN before-write validation**
 
-`validate_access_request_record` adds:
+Before mutation, enforce timezone-awareness plus:
 
 ```text
 created_at <= updated_at
-created_at <= decided_at when decided_at exists
-decided_at <= execution_started_at when both exist
-execution_started_at <= execution_finished_at when both exist
-```
-
-`InMemoryRequestRepository.save` adds before mutation:
-
-```text
+created_at <= decided_at when present
+decided_at <= execution_started_at when both present
+execution_started_at <= execution_finished_at when both present
 new_record.updated_at >= current_record.updated_at
+new_audit_event.occurred_at >= previous_event.occurred_at
 ```
 
-Audit batch validation compares the existing tail to the first new event and each pair inside the batch. Any backward timestamp raises `AUDIT_EVENT_INVALID`. Equality remains valid.
+Equality is accepted. Record failure -> `RECORD_INVARIANT_INVALID`; audit failure -> `AUDIT_EVENT_INVALID`; no partial write/append.
 
-- [ ] **Step 4: run GREEN**
+Run:
 
 ```bash
-python -m pytest tests/engine/test_phase8_audit_temporal.py tests/engine/test_request_repository.py tests/engine/test_request_lifecycle.py -q
+python -m pytest tests/engine/test_phase8_audit_temporal.py -q
 ```
 
 Expected: PASS.
 
-- [ ] **Step 5: run regression and quality checks**
+- [ ] **Step 3: regressão**
 
 ```bash
+python -m pytest tests/engine/test_phase8_audit_temporal.py tests/engine/test_request_repository.py tests/engine/test_execution.py -q
 python -m pytest -q
-python -m ruff check .
-python -m ruff format --check .
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-git diff --check
+python -m ruff check src/ai_service_desk/engine/request_lifecycle.py src/ai_service_desk/engine/request_repository.py tests/engine/test_phase8_audit_temporal.py
+python -m ruff format --check src/ai_service_desk/engine/request_lifecycle.py src/ai_service_desk/engine/request_repository.py tests/engine/test_phase8_audit_temporal.py
 ```
 
 Expected: all exit `0`.
 
-- [ ] **Step 6: commit Task 3**
+- [ ] **Step 4: commit**
 
 ```bash
 git add src/ai_service_desk/engine/request_lifecycle.py src/ai_service_desk/engine/request_repository.py tests/engine/test_phase8_audit_temporal.py
-git diff --cached --name-only
 git commit -m "feat: enforce phase 8 temporal invariants"
 ```
 
-Expected staged files: exactly the three Task 3 files.
-
 ---
 
-### Task 4: RequestLifecycleService creation and named transitions
-
-**Files:**
-- Modify: `src/ai_service_desk/engine/request_lifecycle.py`
-- Modify: `tests/engine/phase8_helpers.py`
-- Modify: `tests/engine/test_request_lifecycle.py`
-
-**Interfaces:**
-- Consumes `RequestRepository`, `PolicyEngine.evaluate(context)`, `assess_confidence(context)`.
-- Produces `RequestLifecycleService`.
-- Avoid circular import by importing `RequestRepository` only under `TYPE_CHECKING` and using a quoted annotation in `request_lifecycle.py`.
-
-Exact public methods:
-
-```text
-create_request(context: AccessRequestContext) -> AccessRequestRecord
-transition_to_approved(record, technician_id, expected_version, occurred_at) -> AccessRequestRecord
-transition_to_rejected(record, technician_id, expected_version, occurred_at) -> AccessRequestRecord
-transition_to_executing(record, policy, expected_version, occurred_at) -> AccessRequestRecord
-transition_to_denied_policy(record, policy, expected_version, occurred_at) -> AccessRequestRecord
-transition_to_completed(record, result_code, expected_version, occurred_at) -> AccessRequestRecord
-transition_to_failed(record, error_code, result_code, expected_version, occurred_at) -> AccessRequestRecord
-```
-
-All arguments after `record` are keyword-only. No public generic `transition(to_state)` API is allowed.
-
-- [ ] **Step 1: write RED lifecycle-service tests**
-
-Add:
-
-```text
-test_create_request_require_approval_enters_pending_approval
-test_create_request_deny_enters_auditable_denied_policy
-test_create_request_calls_policy_engine_and_confidence_independently
-test_pending_creation_reuses_one_initial_timestamp
-test_denied_creation_reuses_one_initial_timestamp
-test_pending_creation_audit_is_request_created_then_policy_requires_approval
-test_denied_creation_audit_is_request_created_then_policy_denied
-test_invalid_transition_is_rejected_without_write
-```
-
-For the one-timestamp tests, inject a clock that returns a later invalid/backward value on a second call. Assert the clock is called exactly once and both initial versions/events use the first timestamp.
-
-- [ ] **Step 2: run RED**
-
-```bash
-python -m pytest tests/engine/test_request_lifecycle.py -q
-```
-
-Expected: failures because `RequestLifecycleService` and named transition methods are absent.
-
-- [ ] **Step 3: implement lifecycle service**
-
-Creation order is exact:
-
-```text
-validate_access_request_context(context)
-creation_policy = policy_engine.evaluate(context)
-confidence = assess_confidence(context)
-initial_timestamp = clock() exactly once
-request_id = repository.allocate_request_id()
-repository.create(TRIAGED version=1 + REQUEST_CREATED at initial_timestamp)
-if creation_policy is DENY: TRIAGED -> DENIED_POLICY version=2 using initial_timestamp
-if creation_policy is REQUIRE_APPROVAL: TRIAGED -> PENDING_APPROVAL version=2 using initial_timestamp
-return persisted version=2
-```
-
-Named transition methods verify their exact source/destination pair, build a new frozen record with `version + 1`, preserve immutable fields, create one canonical audit event, then call `repository.save` with the supplied `expected_version`.
-
-Canonical events:
-
-```text
-REQUEST_CREATED
-POLICY_REQUIRES_APPROVAL
-POLICY_DENIED_AT_CREATION
-REQUEST_APPROVED
-REQUEST_REJECTED
-POLICY_DENIED_BEFORE_EXECUTION
-EXECUTION_STARTED
-EXECUTION_COMPLETED
-EXECUTION_FAILED
-```
-
-- [ ] **Step 4: run GREEN**
-
-```bash
-python -m pytest tests/engine/test_request_lifecycle.py tests/engine/test_request_repository.py tests/engine/test_phase8_audit_temporal.py -q
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: run regression and quality checks**
-
-```bash
-python -m pytest -q
-python -m ruff check .
-python -m ruff format --check .
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-git diff --check
-```
-
-Expected: all exit `0`.
-
-- [ ] **Step 6: commit Task 4**
-
-```bash
-git add src/ai_service_desk/engine/request_lifecycle.py tests/engine/phase8_helpers.py tests/engine/test_request_lifecycle.py
-git diff --cached --name-only
-git commit -m "feat: add controlled request lifecycle service"
-```
-
-Expected staged files: exactly the three Task 4 files.
-
----
-
-### Task 5: TechnicianAuthorizationRegistry fail-closed configuration
-
-**Files:**
-- Create: `src/ai_service_desk/engine/technician_authorization.py`
-- Create: `tests/engine/test_technician_authorization.py`
-
-**Interfaces:**
-- Produces `TechnicianIdentity`, `TechnicianAuthorizationEntry`, `TechnicianRegistryConfigurationError`, `TechnicianAuthorizationError`, `TechnicianAuthorizationRegistry`.
-
-Exact shapes:
-
-```text
-TechnicianIdentity(technician_id: str, username: str, name: str, email: str)
-TechnicianAuthorizationEntry(identity: TechnicianIdentity, capabilities: tuple[str, ...])
-TechnicianAuthorizationRegistry(entries: Sequence[TechnicianAuthorizationEntry])
-require_capability(technician: TechnicianIdentity, capability: str) -> None
-```
-
-Identity bounds: `technician_id <= 120`, `username <= 120`, `name <= 180`, `email <= 320`.
-
-- [ ] **Step 1: write RED registry tests**
-
-Invalid configuration rows:
-
-```text
-non-TechnicianAuthorizationEntry
-non-TechnicianIdentity identity
-empty technician_id
-empty username
-empty name
-empty email
-oversized identity fields
-capability runtime value []
-empty capability
-lowercase cdm_access_request
-wildcard CDM_*
-prefix expression CDM_ACCESS_*
-fuzzy/spaced CDM ACCESS REQUEST
-```
-
-All produce `TECHNICIAN_REGISTRY_INVALID`.
-
-Collision rows use valid entries whose normalized `technician_id`, `username` or `email` collide and must produce `TECHNICIAN_REGISTRY_CONFLICT`.
-
-Add `test_invalid_registry_entry_precedes_duplicate_detection`: one invalid entry plus a valid duplicate pair must return `TECHNICIAN_REGISTRY_INVALID`, proving no index is built before full validation.
-
-Authorization tests prove exact registered identity + exact capability passes; unregistered technician, divergent identity, missing capability and invalid runtime capability fail closed.
-
-- [ ] **Step 2: run RED**
-
-```bash
-python -m pytest tests/engine/test_technician_authorization.py -q
-```
-
-Expected: import failure because `technician_authorization.py` does not exist.
-
-- [ ] **Step 3: implement two-pass validation/indexing**
-
-Algorithm:
-
-```text
-source = tuple(entries)
-validated = validate every source entry without building indexes
-if any invalid entry: raise TECHNICIAN_REGISTRY_INVALID
-build normalized technician_id, username, email indexes
-if any normalized key already exists: raise TECHNICIAN_REGISTRY_CONFLICT
-```
-
-Capability validation checks `isinstance(value, str)` before regex or membership. Capability text is not normalized into validity. `require_capability` uses normalized technician ID for lookup, verifies the presented identity against the stored canonical identity, and checks exact capability membership.
-
-- [ ] **Step 4: run GREEN**
-
-```bash
-python -m pytest tests/engine/test_technician_authorization.py -q
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: run regression and quality checks**
-
-```bash
-python -m pytest -q
-python -m ruff check .
-python -m ruff format --check .
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-git diff --check
-```
-
-Expected: all exit `0`.
-
-- [ ] **Step 6: commit Task 5**
-
-```bash
-git add src/ai_service_desk/engine/technician_authorization.py tests/engine/test_technician_authorization.py
-git diff --cached --name-only
-git commit -m "feat: add technician authorization registry"
-```
-
-Expected staged files: exactly the two Task 5 files.
-
----
-
-### Task 6: ApprovalService, self-decision and deterministic stale ordering
-
-**Files:**
-- Create: `src/ai_service_desk/engine/approval.py`
-- Create: `tests/engine/test_approval.py`
-
-**Interfaces:**
-- Consumes repository, lifecycle, registry and `validate_expected_version`.
-- Produces `SelfDecisionError`, `ApprovalService.approve`, `ApprovalService.reject`.
-
-Exact constructor/API:
-
-```text
-ApprovalService(repository: RequestRepository, lifecycle: RequestLifecycleService,
-                registry: TechnicianAuthorizationRegistry,
-                clock: Callable[[], datetime] = utc_now)
-approve(request_id: str, technician: TechnicianIdentity, expected_version: int) -> AccessRequestRecord
-reject(request_id: str, technician: TechnicianIdentity, expected_version: int) -> AccessRequestRecord
-```
-
-`clock` and `expected_version` are keyword-only.
-
-- [ ] **Step 1: write RED approval tests**
-
-Add:
-
-```text
-test_denied_policy_rejects_human_decision_with_current_version[approve]
-test_denied_policy_rejects_human_decision_with_current_version[reject]
-test_technician_without_capability_cannot_decide[approve]
-test_technician_without_capability_cannot_decide[reject]
-test_unregistered_technician_cannot_decide
-test_divergent_registered_identity_cannot_decide
-test_requester_cannot_decide_own_request[username]
-test_requester_cannot_decide_own_request[email]
-test_requester_self_decision_normalization_is_casefolded_and_trimmed
-test_authorized_technician_can_decide_pending_request[approve]
-test_authorized_technician_can_decide_pending_request[reject]
-test_approval_service_has_no_execution_dependency[approve]
-test_approval_service_has_no_execution_dependency[reject]
-test_stale_human_decision_fails_before_state_or_authorization[approve]
-test_stale_human_decision_fails_before_state_or_authorization[reject]
-test_invalid_expected_version_fails_before_state_and_authorization
-```
-
-The no-execution tests use `inspect.signature(ApprovalService.__init__)` and assert constructor parameters do not include `executor` or `execution_engine`; they also run approve/reject and verify only repository/audit state changed.
-
-The stale tests intentionally combine stale version with a state/technician that would fail later and assert `VERSION_CONFLICT`, proving ordering.
-
-- [ ] **Step 2: run RED**
-
-```bash
-python -m pytest tests/engine/test_approval.py -q
-```
-
-Expected: import failure because `approval.py` does not exist.
-
-- [ ] **Step 3: implement exact approval gate order**
-
-Both methods share this sequence:
-
-```text
-record = repository.get(request_id)
-validate_expected_version(expected_version)
-if expected_version != record.version: VERSION_CONFLICT
-if record.state != PENDING_APPROVAL: INVALID_STATE_TRANSITION
-registry.require_capability(technician, record.context.capability)
-compare technician/requester username and email via strip().casefold()
-if either matches: SELF_DECISION_NOT_ALLOWED
-occurred_at = clock()
-call lifecycle transition_to_approved or transition_to_rejected
-lifecycle calls repository.save with original expected_version for final CAS
-```
-
-No executor, policy, confidence or routing dependency is allowed in `ApprovalService`.
-
-- [ ] **Step 4: run GREEN**
-
-```bash
-python -m pytest tests/engine/test_approval.py tests/engine/test_technician_authorization.py -q
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: run regression and quality checks**
-
-```bash
-python -m pytest -q
-python -m ruff check .
-python -m ruff format --check .
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-git diff --check
-```
-
-Expected: all exit `0`.
-
-- [ ] **Step 6: commit Task 6**
-
-```bash
-git add src/ai_service_desk/engine/approval.py tests/engine/test_approval.py
-git diff --cached --name-only
-git commit -m "feat: add controlled human approval service"
-```
-
-Expected staged files: exactly the two Task 6 files.
-
----
-
-### Task 7: ExecutionEngine, ActionExecutor contract and safe failure handling
-
-**Files:**
-- Create: `src/ai_service_desk/engine/execution.py`
-- Create: `tests/engine/test_execution.py`
-
-**Interfaces:**
-- Consumes repository, lifecycle, `PolicyEngine`, `PolicyRule`, `validate_expected_version`.
-- Produces `ActionExecutionResult`, `ActionExecutor`, `FakeActionExecutor`, `ExecutionEngine`.
-
-Exact public API:
-
-```text
-ActionExecutionResult(success: bool, result_code: str)
-ActionExecutor.execute(request: AccessRequestRecord) -> ActionExecutionResult
-FakeActionExecutor(result: object, exception: Exception | None)
-FakeActionExecutor.call_count -> int
-FakeActionExecutor.calls -> tuple[str, ...]
-ExecutionEngine(repository: RequestRepository, lifecycle: RequestLifecycleService,
-                policy_engine: PolicyEngine, executor: ActionExecutor,
-                clock: Callable[[], datetime] = utc_now)
-ExecutionEngine.execute(request_id: str, expected_version: int) -> AccessRequestRecord
-```
-
-Constructor keyword defaults: fake result defaults to `ActionExecutionResult(True, "FAKE_EXECUTION_SUCCEEDED")`, exception defaults to `None`; service clock and execute expected_version are keyword-only.
-
-- [ ] **Step 1: write RED execution tests**
-
-Add:
-
-```text
-test_execute_rejects_non_approved_states_without_executor[PENDING_APPROVAL]
-test_execute_rejects_non_approved_states_without_executor[DENIED_POLICY]
-test_execute_rejects_non_approved_states_without_executor[REJECTED]
-test_execute_rejects_non_approved_states_without_executor[COMPLETED]
-test_execute_rejects_non_approved_states_without_executor[FAILED]
-test_stale_execute_fails_before_policy_and_executor
-test_execute_revalidates_policy_before_executor
-test_revalidation_deny_moves_to_denied_policy_with_zero_executor_calls
-test_executor_receives_already_persisted_executing_record
-test_executor_success_completes_request
-test_executor_failure_marks_request_failed
-test_executor_exception_is_sanitized_into_failed
-test_executor_exception_payload_is_absent_from_record_and_audit
-test_invalid_executor_results_fail_closed_without_persisting_payload[success-int]
-test_invalid_executor_results_fail_closed_without_persisting_payload[success-string]
-test_invalid_executor_results_fail_closed_without_persisting_payload[empty-code]
-test_invalid_executor_results_fail_closed_without_persisting_payload[spaced-code]
-test_invalid_executor_results_fail_closed_without_persisting_payload[unhashable-code]
-test_invalid_executor_results_fail_closed_without_persisting_payload[wrong-object]
-test_failed_request_is_terminal_without_retry
-test_completed_flow_has_canonical_audit_order
-test_failed_flow_audits_execution_started_before_execution_failed
-test_revalidation_updates_latest_policy_without_replacing_creation_policy
-```
-
-For revalidation DENY, construct a real custom `PolicyEngine` with one valid `PolicyRule` matching the CDM SOLICITANTE context and `decision="DENY"`.
-
-For exception tests, use a unique marker in the exception message and assert the marker is absent from `repr(record)` and every persisted audit field.
-
-- [ ] **Step 2: run RED**
-
-```bash
-python -m pytest tests/engine/test_execution.py -q
-```
-
-Expected: import failure because `execution.py` does not exist.
-
-- [ ] **Step 3: implement exact execution sequence and result validation**
-
-Result validation order is exact:
-
-```text
-type(result) is ActionExecutionResult
-type(result.success) is bool
-isinstance(result.result_code, str)
-result.result_code fullmatches ^[A-Z][A-Z0-9_]{2,119}$
-```
-
-Execution order:
-
-```text
-record = repository.get(request_id)
-validate_expected_version(expected_version)
-if expected_version != record.version: VERSION_CONFLICT
-if record.state != APPROVED: INVALID_STATE_TRANSITION
-policy = policy_engine.evaluate(record.context)
-if policy.decision == DENY:
-    lifecycle.transition_to_denied_policy using original expected_version
-    return denied record
-occurred_at = clock()
-executing = lifecycle.transition_to_executing using original expected_version
-result = executor.execute(executing) exactly once
-valid success -> transition_to_completed using expected_version=executing.version
-valid failure -> transition_to_failed(result_code=code, error_code=code, expected_version=executing.version)
-invalid result -> transition_to_failed(result_code=None, error_code=EXECUTOR_INVALID_RESULT, expected_version=executing.version)
-Exception -> transition_to_failed(result_code=None, error_code=EXECUTOR_EXCEPTION, expected_version=executing.version)
-```
-
-Catch `Exception`, never `BaseException`. Never persist exception message/class/traceback or invalid-result data.
-
-- [ ] **Step 4: run GREEN**
-
-```bash
-python -m pytest tests/engine/test_execution.py -q
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: run regression and quality checks**
-
-```bash
-python -m pytest -q
-python -m ruff check .
-python -m ruff format --check .
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-git diff --check
-```
-
-Expected: all exit `0`.
-
-- [ ] **Step 6: commit Task 7**
-
-```bash
-git add src/ai_service_desk/engine/execution.py tests/engine/test_execution.py
-git diff --cached --name-only
-git commit -m "feat: add fail-closed controlled execution engine"
-```
-
-Expected staged files: exactly the two Task 7 files.
-
----
-
-### Task 8: Atomic CAS concurrency and expected_version on every entrypoint
+### Task 8: Atomic final CAS, concurrency and initial Phase 8 security boundary
 
 **Files:**
 - Modify: `src/ai_service_desk/engine/request_repository.py`
-- Modify: `src/ai_service_desk/engine/execution.py`
 - Create: `tests/engine/test_phase8_concurrency.py`
-
-**Interfaces:**
-- No new business API. Completes atomicity and makes fake call accounting thread-safe.
-
-- [ ] **Step 1: write deterministic RED concurrency tests**
-
-Add `test_repository_final_cas_is_atomic_under_forced_interleaving` with a test-only `BarrierLock`: `__enter__` waits on a two-party `threading.Barrier` before acquiring an underlying `RLock`; `__exit__` releases the underlying lock. Replace `repo._lock` only inside this test and run two direct concurrent `repo.save` calls against the same current version. RED expectation is one success and one `VERSION_CONFLICT`; the Task 2 implementation permits both to compare before the final lock, so the test fails deterministically.
-
-Add:
-
-```text
-test_two_human_decisions_only_one_final_cas_wins
-test_two_execute_callers_make_exactly_one_executor_call
-test_expected_version_contract_is_enforced_by_every_entrypoint[True]
-test_expected_version_contract_is_enforced_by_every_entrypoint[False]
-test_expected_version_contract_is_enforced_by_every_entrypoint[float]
-test_expected_version_contract_is_enforced_by_every_entrypoint[string]
-test_expected_version_contract_is_enforced_by_every_entrypoint[None]
-```
-
-The expected-version test invokes all four surfaces for each value: `repository.save`, `approval.approve`, `approval.reject`, `execution.execute`. Every invocation raises `EXPECTED_VERSION_INVALID`; execute also proves zero policy and zero executor calls.
-
-Double decision uses a barrier registry wrapper so both callers pass preliminary gates before final CAS. Double execution uses a barrier policy engine so both callers pass preliminary gates before final CAS. Exactly one executor call is permitted.
-
-- [ ] **Step 2: run RED**
-
-```bash
-python -m pytest tests/engine/test_phase8_concurrency.py -q
-```
-
-Expected: deterministic failure in `test_repository_final_cas_is_atomic_under_forced_interleaving` until current-read, compare, validation and mutation share one lock scope.
-
-- [ ] **Step 3: make final CAS fully atomic**
-
-`InMemoryRequestRepository.save` enters its instance `RLock` before reading current record and retains that lock through:
-
-```text
-read current
-validate expected_version
-compare current.version
-validate candidate version and immutable fields
-validate updated_at chronology
-validate incoming audit against current audit tail
-replace record
-append events
-return stored record
-```
-
-No retry loop is allowed. CAS loser receives `VERSION_CONFLICT`.
-
-`FakeActionExecutor` adds a private lock only around call-history append/read; it does not serialize policy or repository operations.
-
-- [ ] **Step 4: run GREEN**
-
-```bash
-python -m pytest tests/engine/test_phase8_concurrency.py -q
-```
-
-Expected: PASS; double-execution test asserts exactly one executor call.
-
-- [ ] **Step 5: run regression and quality checks**
-
-```bash
-python -m pytest -q
-python -m ruff check .
-python -m ruff format --check .
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-git diff --check
-```
-
-Expected: all exit `0`.
-
-- [ ] **Step 6: commit Task 8**
-
-```bash
-git add src/ai_service_desk/engine/request_repository.py src/ai_service_desk/engine/execution.py tests/engine/test_phase8_concurrency.py
-git diff --cached --name-only
-git commit -m "test: lock phase 8 concurrency guarantees"
-```
-
-Expected staged files: exactly the three Task 8 files.
-
----
-
-### Task 9: Security boundaries, protected files and zero external execution
-
-**Files:**
 - Create: `tests/engine/test_phase8_security.py`
 
-**Interfaces:**
-- Consumes all five Phase 8 runtime modules already defined.
-- Produces no runtime code.
+This task has one real RED source only: `test_repository_final_cas_is_atomic_under_forced_interleaving`. Security tests are added in the same task but are not artificially made to fail.
 
-- [ ] **Step 1: write RED security tests**
+- [ ] **Step 1: RED determinístico do final CAS**
 
-Implement a pure-Python Git blob hash helper:
+Use the Task 2 private `_before_final_cas` seam. Force two threads to complete preliminary expected-version checks before either can reach final mutation:
 
 ```python
-def git_blob_sha(path: Path) -> str:
-    data = path.read_bytes()
-    header = f"blob {len(data)}\0".encode()
-    return hashlib.sha1(header + data).hexdigest()
+def test_repository_final_cas_is_atomic_under_forced_interleaving(monkeypatch):
+    barrier = threading.Barrier(2)
+    repository, current, next_record, events = make_repository_cas_fixture()
+    monkeypatch.setattr(
+        repository,
+        "_before_final_cas",
+        lambda: barrier.wait(timeout=5),
+    )
+    outcomes: list[str] = []
+
+    def worker() -> None:
+        try:
+            repository.save(
+                next_record,
+                expected_version=current.version,
+                audit_events=events,
+            )
+        except ConcurrencyConflictError as exc:
+            assert exc.reason_code == "VERSION_CONFLICT"
+            outcomes.append("conflict")
+        else:
+            outcomes.append("saved")
+
+    threads = [threading.Thread(target=worker), threading.Thread(target=worker)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert sorted(outcomes) == ["conflict", "saved"]
 ```
 
-`test_phase7_protected_files_keep_homologated_git_blob_hashes` is parametrized with these exact pairs:
+Run:
 
-```text
-src/ai_service_desk/engine/access_request.py -> f34fc3f0e22d82b8bf8f13439ed78a7d31d5869d
-src/ai_service_desk/engine/policy.py -> 60a4f3ae785353009c30b37f71e1ce91865b899e
-src/ai_service_desk/engine/confidence.py -> ffc0c212b455978f79a3591578f323ca0e9612dc
+```bash
+python -m pytest tests/engine/test_phase8_concurrency.py::test_repository_final_cas_is_atomic_under_forced_interleaving -q
 ```
 
-`test_phase8_runtime_sources_have_no_external_execution_surface` scans:
+Expected: FAIL with both callers observed as saved, proving the Task 2 check/write window is not yet atomic.
+
+- [ ] **Step 2: GREEN do CAS final sob lock**
+
+Use one repository-local `threading.RLock`. Keep the preliminary validation, then call `_before_final_cas()`, enter the lock, re-read `current_record`, compare `current_record.version` with `expected_version` again, and only then atomically replace record + append all already-validated audit events. Allocation uses the same lock.
+
+Run:
+
+```bash
+python -m pytest tests/engine/test_phase8_concurrency.py::test_repository_final_cas_is_atomic_under_forced_interleaving -q
+```
+
+Expected: PASS with exactly one `saved` and one `VERSION_CONFLICT`.
+
+- [ ] **Step 3: concurrency matrix GREEN**
+
+Add cases 36, 37 and races where two services passed preliminary compare. Double execution must end with exactly one executor call.
+
+Run:
+
+```bash
+python -m pytest tests/engine/test_phase8_concurrency.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 4: create initial `test_phase8_security.py` without manufacturing RED**
+
+Protected blob strategy must be Git-object based and Windows-safe:
+
+```python
+PROTECTED_BLOBS = {
+    "src/ai_service_desk/engine/access_request.py": "f34fc3f0e22d82b8bf8f13439ed78a7d31d5869d",
+    "src/ai_service_desk/engine/policy.py": "60a4f3ae785353009c30b37f71e1ce91865b899e",
+    "src/ai_service_desk/engine/confidence.py": "ffc0c212b455978f79a3591578f323ca0e9612dc",
+}
+
+@pytest.mark.parametrize(("path", "expected_sha"), PROTECTED_BLOBS.items(), ids=("access_request", "policy", "confidence"))
+def test_phase7_protected_git_blob_is_exact(path: str, expected_sha: str) -> None:
+    completed = subprocess.run(
+        ["git", "rev-parse", f"HEAD:{path}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == expected_sha
+```
+
+Do not use `shell=True`. Do not use `Path.read_bytes()` to calculate protected blob SHA.
+
+Initial runtime scan set in this task:
 
 ```text
 request_lifecycle.py
@@ -1209,345 +922,194 @@ approval.py
 execution.py
 ```
 
-Forbidden patterns include `import requests`, `from requests`, `import httpx`, `from httpx`, `urllib.request`, `CDMAdapter`, `OllamaClient`, `LocalEmbedder`, `subprocess`, `sqlite3`, `sqlalchemy`, `psycopg`, HTTP URL literals, shell command launchers.
+Static assertions cover cases 54-56. Runtime monkeypatch tests forbid HTTP, shell/subprocess, Ollama and embeddings while exercising create/approve/execute with `FakeActionExecutor`. `subprocess` inside this test module is permitted only for the separate Git-object blob query above.
 
-`test_phase8_runtime_sources_have_no_real_persistence_surface` rejects `open(`, `.write_text(`, `.write_bytes(` and `atomic_json(` in those five core runtime files.
-
-- [ ] **Step 2: run RED**
+Run:
 
 ```bash
 python -m pytest tests/engine/test_phase8_security.py -q
 ```
 
-Expected: initial run fails if any current Phase 8 source violates the static boundary; if the runtime is already clean, add the runtime monkeypatch test in Step 1 before moving on so RED is caused by the missing smoke entrypoint from Task 10 only after Task 10 starts. Task 9 itself must not modify production code to manufacture a failure.
+Expected: PASS. This is a security regression gate, not the RED source for Task 8.
 
-- [ ] **Step 3: resolve only genuine boundary violations**
-
-If RED identifies a forbidden import or persistence surface in a Phase 8 runtime file, remove that usage without touching protected Phase 7 modules. If the only failing condition is the planned future smoke runtime guard, leave that guard for Task 10. Do not add adapters, wrappers or allowlists that weaken the prohibited surface.
-
-- [ ] **Step 4: run GREEN**
+- [ ] **Step 5: regressão**
 
 ```bash
-python -m pytest tests/engine/test_phase8_security.py -q
-```
-
-Expected: PASS for protected hashes and static Phase 8 boundaries.
-
-- [ ] **Step 5: run regression and quality checks**
-
-```bash
+python -m pytest tests/engine/test_phase8_concurrency.py tests/engine/test_phase8_security.py -q
 python -m pytest -q
-python -m ruff check .
-python -m ruff format --check .
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-git diff --check
+python -m ruff check src/ai_service_desk/engine/request_repository.py tests/engine/test_phase8_concurrency.py tests/engine/test_phase8_security.py
+python -m ruff format --check src/ai_service_desk/engine/request_repository.py tests/engine/test_phase8_concurrency.py tests/engine/test_phase8_security.py
 ```
 
 Expected: all exit `0`.
 
-- [ ] **Step 6: commit Task 9**
+- [ ] **Step 6: commit**
 
 ```bash
-git add tests/engine/test_phase8_security.py
-git diff --cached --name-only
-git commit -m "test: lock phase 8 security boundaries"
+git add src/ai_service_desk/engine/request_repository.py tests/engine/test_phase8_concurrency.py tests/engine/test_phase8_security.py
+git commit -m "feat: enforce atomic phase 8 concurrency boundaries"
 ```
-
-Expected staged file: only `tests/engine/test_phase8_security.py`.
 
 ---
 
-### Task 10: Synthetic controlled-execution smoke
+### Task 9: Controlled-execution synthetic smoke
 
 **Files:**
 - Create: `src/ai_service_desk/engine/controlled_execution_smoke.py`
-- Create: `tests/fixtures/phase8_controlled_execution_cases.jsonl`
 - Create: `tests/engine/test_controlled_execution_smoke.py`
+- Create: `tests/fixtures/phase8_controlled_execution_cases.jsonl`
 - Modify: `tests/engine/test_phase8_security.py`
 
-**Interfaces:**
-- Produces `load_controlled_execution_cases(path: str | Path) -> list[dict]` and `run_controlled_execution_smoke(cases_path: str | Path, report_path: str | Path) -> dict`.
+The six fixture flows are exactly: approved+completed, approved+executor-failed, approved+executor-exception, rejected, denied-at-creation, denied-on-revalidation. All identities use `example.invalid` and synthetic text only.
 
-Exact fixture fields:
+- [ ] **Step 1: RED do smoke inexistente**
 
-```text
-case_name
-requested_role
-flow
-executor_mode
-expected_state
-expected_event_types
-expected_executor_calls
-expected_result_code
-expected_error_code
-```
+Add loader/report tests and exactly six fixture rows.
 
-Exact six case names/flows:
-
-```text
-approve_only -> APPROVED, zero executor calls
-reject -> REJECTED, zero executor calls
-deny_at_creation -> DENIED_POLICY, zero executor calls
-execute_success -> COMPLETED, one executor call
-execute_failure -> FAILED, one executor call
-revalidation_deny -> DENIED_POLICY, zero executor calls
-```
-
-- [ ] **Step 1: write RED smoke tests and exact fixture**
-
-Create six JSONL rows using roles `SOLICITANTE` except `deny_at_creation`, which uses `ADMIN`. Expected event sequences:
-
-```text
-approve_only: REQUEST_CREATED, POLICY_REQUIRES_APPROVAL, REQUEST_APPROVED
-reject: REQUEST_CREATED, POLICY_REQUIRES_APPROVAL, REQUEST_REJECTED
-deny_at_creation: REQUEST_CREATED, POLICY_DENIED_AT_CREATION
-execute_success: REQUEST_CREATED, POLICY_REQUIRES_APPROVAL, REQUEST_APPROVED, EXECUTION_STARTED, EXECUTION_COMPLETED
-execute_failure: REQUEST_CREATED, POLICY_REQUIRES_APPROVAL, REQUEST_APPROVED, EXECUTION_STARTED, EXECUTION_FAILED
-revalidation_deny: REQUEST_CREATED, POLICY_REQUIRES_APPROVAL, REQUEST_APPROVED, POLICY_DENIED_BEFORE_EXECUTION
-```
-
-Add:
-
-```text
-test_load_controlled_execution_cases_requires_exactly_six_cases
-test_load_controlled_execution_cases_rejects_invalid_schema
-test_controlled_execution_smoke_passes_all_six_contract_flows
-test_controlled_execution_smoke_report_is_privacy_safe
-test_controlled_execution_smoke_makes_zero_external_calls
-```
-
-Privacy scan forbids synthetic names, `example.invalid`, raw purpose, `CDM_ACCESS_REQUEST`, knowledge/playbook IDs and exception marker in report output.
-
-Runtime zero-external test monkeypatches `requests.Session.request`, `subprocess.run`, `OllamaClient.chat`, `LocalEmbedder.embed` to raise and still requires smoke PASS.
-
-- [ ] **Step 2: run RED**
+Run:
 
 ```bash
 python -m pytest tests/engine/test_controlled_execution_smoke.py -q
 ```
 
-Expected: import failure because `controlled_execution_smoke.py` does not exist.
+Expected: collection FAIL because `controlled_execution_smoke` does not exist.
 
-- [ ] **Step 3: implement deterministic privacy-safe smoke**
+- [ ] **Step 2: GREEN do smoke**
 
-Report envelope fields:
+Implement closed JSONL schema, deterministic in-memory repository/registry/fake executor, safe aggregated report and `run_controlled_execution_smoke(cases_path, report_path) -> dict`. Report may expose only case name, final state, safe reason/result/error codes, executor call count and pass boolean. No requester identity, purpose, capability, provenance IDs or arbitrary exception/result values.
 
-```text
-schema_version = 1
-phase = 8
-domain = CONTROLLED_APPROVAL_EXECUTION
-timestamp_utc
-ok
-cases
-privacy.identity_included = false
-privacy.raw_problem_text_included = false
-privacy.purpose_included = false
-privacy.capability_included = false
-privacy.corporate_data_included = false
-```
-
-Per-case report fields are only `case_name`, `final_state`, `event_types`, `executor_calls`, `result_code`, `error_code`, `passed`.
-
-Use fixed synthetic requester/technician identities in code with `example.invalid`, but never copy them to the report. Construct `AccessRequestContext` directly from protected Phase 7 contracts. Use `atomic_json` only for the caller-specified smoke report, never for request persistence.
-
-For `revalidation_deny`, create with default `PolicyEngine`, approve, then construct a separate valid custom `PolicyEngine` containing a DENY `PolicyRule` matching the same context for `ExecutionEngine`.
-
-Extend `test_phase8_security.py` so `controlled_execution_smoke.py` is included in the external-execution token scan, while file output is allowed only through `atomic_json` in this smoke module.
-
-- [ ] **Step 4: run GREEN**
+Run:
 
 ```bash
-python -m pytest tests/engine/test_controlled_execution_smoke.py tests/engine/test_phase8_security.py -q
+python -m pytest tests/engine/test_controlled_execution_smoke.py -q
 ```
 
-Expected: PASS, six cases, all privacy flags false, external-call monkeypatches untouched.
+Expected: PASS; six cases; privacy assertions PASS; external-call monkeypatch test PASS.
 
-- [ ] **Step 5: run regression and quality checks**
+- [ ] **Step 3: extend security scan to the new runtime smoke module**
+
+Modify only the external-execution scan list in `test_phase8_security.py` to include:
+
+```text
+src/ai_service_desk/engine/controlled_execution_smoke.py
+```
+
+Keep the real-persistence scan scoped to the stateful core modules so generated smoke report JSON is not confused with request persistence.
+
+Run:
+
+```bash
+python -m pytest tests/engine/test_phase8_security.py tests/engine/test_controlled_execution_smoke.py -q
+```
+
+Expected: PASS.
+
+- [ ] **Step 4: regressão**
 
 ```bash
 python -m pytest -q
-python -m ruff check .
-python -m ruff format --check .
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-git diff --check
+python -m ruff check src/ai_service_desk/engine/controlled_execution_smoke.py tests/engine/test_controlled_execution_smoke.py tests/engine/test_phase8_security.py
+python -m ruff format --check src/ai_service_desk/engine/controlled_execution_smoke.py tests/engine/test_controlled_execution_smoke.py tests/engine/test_phase8_security.py
 ```
 
 Expected: all exit `0`.
 
-- [ ] **Step 6: commit Task 10**
+- [ ] **Step 5: commit**
 
 ```bash
-git add src/ai_service_desk/engine/controlled_execution_smoke.py tests/fixtures/phase8_controlled_execution_cases.jsonl tests/engine/test_controlled_execution_smoke.py tests/engine/test_phase8_security.py
-git diff --cached --name-only
+git add src/ai_service_desk/engine/controlled_execution_smoke.py tests/engine/test_controlled_execution_smoke.py tests/engine/test_phase8_security.py tests/fixtures/phase8_controlled_execution_cases.jsonl
 git commit -m "test: add phase 8 controlled execution smoke"
 ```
 
-Expected staged files: exactly the four Task 10 files.
-
 ---
 
-### Task 11: CLI integration for controlled-execution-smoke
+### Task 10: CLI command for Phase 8 smoke
 
 **Files:**
 - Modify: `src/ai_service_desk/cli.py`
 - Create: `tests/test_controlled_execution_cli.py`
 
-**Interfaces:**
-- Consumes `run_controlled_execution_smoke`.
-- Produces CLI command `controlled-execution-smoke --cases PATH --report PATH`.
+- [ ] **Step 1: RED do parser**
 
-- [ ] **Step 1: write RED CLI tests**
-
-Parser test invokes:
+Add parser test for:
 
 ```text
 controlled-execution-smoke --cases cases.jsonl --report report.json
 ```
 
-It asserts command name, both `Path` values, and absence of `url`, `knowledge_index`, `playbooks`, `work_directory` attributes.
+and tests proving safe stdout, exit 0/1 and zero construction of `OllamaClient`.
 
-Add `test_controlled_execution_smoke_cli_output_is_safe_and_does_not_construct_ollama`: monkeypatch smoke runner to a six-case passed report and `OllamaClient` constructor to raise. Expected stdout contains `CONTROLLED EXECUTION SMOKE OK` and `Casos sinteticos: 6`, while excluding identity, purpose and capability strings.
-
-Add `test_controlled_execution_smoke_cli_returns_nonzero_when_report_is_not_ok` expecting return code `1`.
-
-- [ ] **Step 2: run RED**
+Run:
 
 ```bash
 python -m pytest tests/test_controlled_execution_cli.py -q
 ```
 
-Expected: argparse invalid-choice failure because the command is absent.
+Expected: FAIL because argparse does not recognize `controlled-execution-smoke`.
 
-- [ ] **Step 3: implement additive parser and early dispatch**
+- [ ] **Step 2: GREEN aditivo no CLI**
 
-Parser:
+Import `run_controlled_execution_smoke`, add parser args `--cases` and `--report`, and handle the command before any code path constructs `OllamaClient`. Stdout on success must include only:
 
-```python
-controlled_execution_smoke = sub.add_parser("controlled-execution-smoke")
-controlled_execution_smoke.add_argument("--cases", type=Path, required=True)
-controlled_execution_smoke.add_argument("--report", type=Path, required=True)
+```text
+CONTROLLED EXECUTION SMOKE OK
+Casos sinteticos: 6
+Relatorio agregado local: <report path supplied by caller>
 ```
 
-Dispatch before any Ollama construction:
+No identity, purpose, capability or executor raw value.
 
-```python
-if args.command == "controlled-execution-smoke":
-    report = run_controlled_execution_smoke(args.cases, args.report)
-    print(
-        "CONTROLLED EXECUTION SMOKE OK"
-        if report["ok"]
-        else "CONTROLLED EXECUTION SMOKE REQUER REVISAO"
-    )
-    print(f"Casos sinteticos: {len(report.get('cases', []))}")
-    print("Relatorio agregado local: " + str(args.report))
-    return 0 if report["ok"] else 1
-```
-
-Do not refactor existing CLI commands.
-
-- [ ] **Step 4: run GREEN**
+Run:
 
 ```bash
-python -m pytest tests/test_controlled_execution_cli.py tests/test_policy_cli.py -q
+python -m pytest tests/test_controlled_execution_cli.py -q
 ```
 
-Expected: PASS for new CLI and Phase 7 policy CLI regression.
+Expected: PASS.
 
-- [ ] **Step 5: run regression and quality checks**
+- [ ] **Step 3: regressão**
 
 ```bash
+python -m pytest tests/test_controlled_execution_cli.py tests/engine/test_controlled_execution_smoke.py -q
 python -m pytest -q
-python -m ruff check .
-python -m ruff format --check .
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-git diff --check
+python -m ruff check src/ai_service_desk/cli.py tests/test_controlled_execution_cli.py
+python -m ruff format --check src/ai_service_desk/cli.py tests/test_controlled_execution_cli.py
 ```
 
 Expected: all exit `0`.
 
-- [ ] **Step 6: commit Task 11**
+- [ ] **Step 4: commit**
 
 ```bash
 git add src/ai_service_desk/cli.py tests/test_controlled_execution_cli.py
-git diff --cached --name-only
 git commit -m "feat: add phase 8 controlled execution smoke cli"
 ```
 
-Expected staged files: exactly the two Task 11 files.
-
 ---
 
-### Task 12: Exact-head Dell workflow with Phase 2 byte restoration
+### Task 11: Exact-head Dell workflow with Phase 2 byte restoration
 
 **Files:**
 - Create: `.github/workflows/phase8-controlled-execution-smoke.yml`
 - Modify: `tests/test_workflows.py`
 
-**Interfaces:**
-- Consumes Task 11 CLI and Task 10 fixture.
-- Produces manual exact-head Dell workflow. No artifact upload, no Ollama call, no repository data persistence.
+- [ ] **Step 1: RED estrutural do workflow**
 
-- [ ] **Step 1: write RED workflow contract test**
+Add a new `PHASE8_WORKFLOW` constant and test requiring `workflow_dispatch`, mandatory `target_ref`, exact SHA regex, self-hosted Windows X64 ai-service-desk runner, Python 3.14, Ruff lint, Ruff format, full pytest, controlled-execution smoke, Phase 2 blob restoration and post-restoration HEAD equality. Forbid `upload-artifact`, Ollama calls, HTTP/CDM integration and writes to the manifest.
 
-Add:
-
-```python
-PHASE8_WORKFLOW = ROOT / ".github" / "workflows" / "phase8-controlled-execution-smoke.yml"
-```
-
-`test_phase8_controlled_execution_workflow_is_exact_head_local_and_non_exporting` requires these strings:
-
-```text
-workflow_dispatch:
-target_ref:
-Exact candidate commit SHA to validate
-self-hosted
-Windows
-X64
-ai-service-desk
-TARGET_REF: ${{ inputs.target_ref }}
-git rev-parse HEAD
-^[0-9a-f]{40}$
-tests/fixtures/phase2_corpus.csv
-HEAD:tests/fixtures/phase2_corpus.csv
-phase2_corpus_manifest.json
-raw_sha256
-candidate_sha_after_fixture_restore
-python -m ruff check .
-python -m ruff format --check .
-python -m pytest -q
-python -m ai_service_desk controlled-execution-smoke
-tests/fixtures/phase8_controlled_execution_cases.jsonl
-```
-
-It forbids:
-
-```text
-upload-artifact
-Get-Content
-python -m ai_service_desk doctor
-knowledge-index
-playbook-build
-http://127.0.0.1:11434
-CDMAdapter
-PHASE8_CANDIDATE_SHA
-```
-
-- [ ] **Step 2: run RED**
+Run:
 
 ```bash
-python -m pytest tests/test_workflows.py::test_phase8_controlled_execution_workflow_is_exact_head_local_and_non_exporting -q
+python -m pytest tests/test_workflows.py::test_phase8_controlled_execution_workflow_is_exact_head_and_non_exporting -q
 ```
 
-Expected: failure because workflow file does not exist.
+Expected: FAIL because `.github/workflows/phase8-controlled-execution-smoke.yml` does not exist.
 
-- [ ] **Step 3: create exact-head workflow**
+- [ ] **Step 2: GREEN workflow exact-head**
 
-Required top-level YAML:
+Workflow begins with:
 
 ```yaml
-name: Phase 8 controlled execution smoke
-
 on:
   workflow_dispatch:
     inputs:
@@ -1555,29 +1117,11 @@ on:
         description: Exact candidate commit SHA to validate
         required: true
         type: string
-
-permissions:
-  contents: read
-
-jobs:
-  phase8-controlled-execution-smoke:
-    runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
-    timeout-minutes: 20
 ```
 
-Checkout:
+Checkout uses `${{ inputs.target_ref }}` and immediately validates a 40-char SHA equals `git rev-parse HEAD`.
 
-```yaml
-- name: Checkout target ref
-  uses: actions/checkout@v4
-  with:
-    ref: ${{ inputs.target_ref }}
-    fetch-depth: 0
-```
-
-Immediately verify exact SHA in PowerShell: normalize `TARGET_REF`, require regex `^[0-9a-f]{40}$`, compute `(git rev-parse HEAD).Trim().ToLowerInvariant()` and throw on mismatch.
-
-Restore only the Phase 2 CSV with this embedded Python:
+The Phase 2 restoration step must restore only `tests/fixtures/phase2_corpus.csv` from the candidate Git object:
 
 ```python
 import hashlib
@@ -1601,87 +1145,60 @@ if after != expected:
     raise SystemExit("exact Git blob bytes do not match fixture manifest")
 ```
 
-After the Python block, PowerShell recomputes HEAD and throws unless it still equals `TARGET_REF`; on success print `candidate_sha_after_fixture_restore=$actual`.
+Immediately after restoration, PowerShell must re-run `git rev-parse HEAD`, compare it with `TARGET_REF`, and print `candidate_sha_after_fixture_restore=` only if equal. The workflow never writes the manifest and never commits the restored working-tree bytes.
 
-Then run exact commands in the workflow:
+Then run exactly:
 
 ```text
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
 python -m ruff check .
 python -m ruff format --check .
 python -m pytest -q
+python -m ai_service_desk controlled-execution-smoke --cases tests/fixtures/phase8_controlled_execution_cases.jsonl --report "$report"
 ```
 
-Smoke step must construct its report path explicitly:
-
-```powershell
-$report = Join-Path $env:RUNNER_TEMP "phase8-controlled-$env:GITHUB_RUN_ID.json"
-Remove-Item -Force $report -ErrorAction SilentlyContinue
-python -m ai_service_desk controlled-execution-smoke `
-  --cases tests/fixtures/phase8_controlled_execution_cases.jsonl `
-  --report "$report"
-```
-
-The workflow never modifies the manifest and never restores another fixture.
-
-- [ ] **Step 4: run GREEN**
+Run:
 
 ```bash
-python -m pytest tests/test_workflows.py::test_phase8_controlled_execution_workflow_is_exact_head_local_and_non_exporting -q
+python -m pytest tests/test_workflows.py::test_phase8_controlled_execution_workflow_is_exact_head_and_non_exporting -q
 ```
 
 Expected: PASS.
 
-- [ ] **Step 5: run regression and quality checks**
+- [ ] **Step 3: regressão**
 
 ```bash
+python -m pytest tests/test_workflows.py -q
 python -m pytest -q
 python -m ruff check .
 python -m ruff format --check .
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-git diff --check
-git diff --name-only -- tests/fixtures/phase2_corpus.csv tests/fixtures/phase2_corpus_manifest.json
 ```
 
-Expected: pytest/Ruff/diff-check commands exit `0`; protected diff empty; final command prints nothing.
+Expected: all exit `0`.
 
-- [ ] **Step 6: commit Task 12**
+- [ ] **Step 4: commit**
 
 ```bash
 git add .github/workflows/phase8-controlled-execution-smoke.yml tests/test_workflows.py
-git diff --cached --name-only
-git commit -m "ci: add phase 8 exact-head Dell smoke"
-```
-
-Expected staged list exactly:
-
-```text
-.github/workflows/phase8-controlled-execution-smoke.yml
-tests/test_workflows.py
+git commit -m "ci: add phase 8 exact-head smoke workflow"
 ```
 
 ---
 
-## Final Gate: candidate freeze and evidence
+## Final Gate Plan
 
-Any correction after candidate freeze creates a new candidate SHA and requires rerunning F1 through F8 from the beginning.
+The implementation is not a candidate until every gate below is executed on one frozen `CANDIDATE_HEAD`.
 
-### Gate F1: Freeze candidate and clean tree
-
-Run:
+### Gate F1: freeze exact candidate
 
 ```bash
+CANDIDATE_HEAD="$(git rev-parse HEAD)"
+printf 'candidate_head=%s\n' "$CANDIDATE_HEAD"
 git status --short
-PHASE8_CANDIDATE_SHA="$(git rev-parse HEAD)"
-printf 'candidate_head=%s\n' "$PHASE8_CANDIDATE_SHA"
 ```
 
-Expected: `git status --short` prints nothing; candidate SHA prints as 40 hex characters.
+Expected: 40-char SHA and clean working tree. No source/test/docs/workflow changes after this point unless a new candidate SHA is generated and every gate is rerun.
 
-### Gate F2: Ruff and full test suite
-
-Run:
+### Gate F2: Ruff and full suite
 
 ```bash
 python -m ruff check .
@@ -1689,187 +1206,177 @@ python -m ruff format --check .
 python -m pytest -q
 ```
 
-Expected: Ruff check PASS, Ruff format PASS, full pytest PASS. Do not hardcode the final test count.
+Expected: all PASS, zero failures.
 
-### Gate F3: Historical node IDs and real new-node count
+### Gate F3: historical node-ID preservation and real new-node count
 
-Run:
+Create a baseline worktree and collect both sets:
 
 ```bash
-REPO_ROOT="$(pwd)"
-BASELINE_WORKTREE="$(dirname "$REPO_ROOT")/ai-service-desk-phase8-baseline"
-BASELINE_IDS="$(mktemp)"
-CANDIDATE_IDS="$(mktemp)"
+BASELINE_WORKTREE="../ai-service-desk-phase8-final-baseline"
 git worktree add --detach "$BASELINE_WORKTREE" 2f583b5b4921cd7b40ddde2978a2852ecca2251d
-(
-  cd "$BASELINE_WORKTREE"
-  python -m pytest --collect-only -q | grep '::' | sort -u > "$BASELINE_IDS"
-)
-python -m pytest --collect-only -q | grep '::' | sort -u > "$CANDIDATE_IDS"
-python - "$BASELINE_IDS" "$CANDIDATE_IDS" <<'PY'
+(cd "$BASELINE_WORKTREE" && python -m pytest --collect-only -q > /tmp/phase8-baseline-nodeids.txt)
+python -m pytest --collect-only -q > /tmp/phase8-candidate-nodeids.txt
+python - <<'PY'
 from pathlib import Path
-import sys
-baseline = set(Path(sys.argv[1]).read_text(encoding="utf-8").splitlines())
-candidate = set(Path(sys.argv[2]).read_text(encoding="utf-8").splitlines())
-missing = sorted(baseline - candidate)
-new = sorted(candidate - baseline)
+
+def node_ids(path: str) -> set[str]:
+    return {
+        line.strip()
+        for line in Path(path).read_text(encoding="utf-8").splitlines()
+        if "::" in line and not line.startswith("=")
+    }
+
+baseline = node_ids("/tmp/phase8-baseline-nodeids.txt")
+candidate = node_ids("/tmp/phase8-candidate-nodeids.txt")
+missing = baseline - candidate
+new = candidate - baseline
 print(f"baseline_nodeids={len(baseline)}")
-print(f"final_nodeids={len(candidate)}")
+print(f"candidate_nodeids={len(candidate)}")
 print(f"missing_historical_nodeids={len(missing)}")
 print(f"new_nodeids={len(new)}")
 assert len(baseline) == 426
 assert not missing
 PY
 git worktree remove "$BASELINE_WORKTREE"
-rm -f "$BASELINE_IDS" "$CANDIDATE_IDS"
 ```
 
-Expected: command prints `baseline_nodeids=426`, `missing_historical_nodeids=0`, and the actual `final_nodeids` and `new_nodeids` integers collected from the candidate.
+Expected:
 
-### Gate F4: Protected Phase 7 byte equality
-
-Run:
-
-```bash
-git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d "$PHASE8_CANDIDATE_SHA" -- src/ai_service_desk/engine/access_request.py src/ai_service_desk/engine/policy.py src/ai_service_desk/engine/confidence.py
-python -m pytest tests/engine/test_phase8_security.py::test_phase7_protected_files_keep_homologated_git_blob_hashes -q
+```text
+baseline_nodeids=426
+missing_historical_nodeids=0
+new_nodeids=<integer printed from the real set difference>
 ```
 
-Expected: git diff exit `0`, hash test PASS.
+No numeric new-node floor is hardcoded beyond the real collected difference.
 
-### Gate F5: Zero external execution and Phase 9/10 boundary
+### Gate F4: protected Phase 7 equality, both Git-object and diff evidence
 
-Run:
+Run the security tests:
 
 ```bash
 python -m pytest tests/engine/test_phase8_security.py -q
-git diff --name-only 2f583b5b4921cd7b40ddde2978a2852ecca2251d "$PHASE8_CANDIDATE_SHA"
 ```
 
-Expected: security test PASS; changed files belong only to approved Phase 8 spec/plan/file map. No adapter, DB, routing or frontend file appears.
+Expected: three `git rev-parse HEAD:<path>` blob checks match the homologated SHAs, plus static/runtime security checks PASS.
 
-### Gate F6: Official Phase 8 smoke
-
-Run:
+Then run the mandatory baseline/candidate diff:
 
 ```bash
-PHASE8_REPORT="phase8-controlled-execution-report.json"
-python -m ai_service_desk controlled-execution-smoke --cases tests/fixtures/phase8_controlled_execution_cases.jsonl --report "$PHASE8_REPORT"
-python - "$PHASE8_REPORT" <<'PY'
-import json
-from pathlib import Path
-import sys
-report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-assert report["ok"] is True
-assert len(report["cases"]) == 6
-assert all(row["passed"] for row in report["cases"])
-assert all(value is False for value in report["privacy"].values())
-print("phase8_smoke_cases=6")
-print("phase8_smoke_privacy=OK")
-PY
-rm -f "$PHASE8_REPORT"
+git diff --exit-code 2f583b5b4921cd7b40ddde2978a2852ecca2251d "$CANDIDATE_HEAD" -- \
+  src/ai_service_desk/engine/access_request.py \
+  src/ai_service_desk/engine/policy.py \
+  src/ai_service_desk/engine/confidence.py
 ```
 
-Expected stdout includes:
+Expected: exit `0` and no output.
+
+### Gate F5: zero external execution
+
+```bash
+python -m pytest tests/engine/test_phase8_security.py tests/engine/test_controlled_execution_smoke.py -q
+```
+
+Expected: PASS; no HTTP, CDMAdapter, subprocess/shell from runtime Phase 8 modules, Ollama/LLM/embedding or real request persistence.
+
+### Gate F6: official Phase 8 smoke
+
+```bash
+rm -f /tmp/phase8-controlled-execution-report.json
+python -m ai_service_desk controlled-execution-smoke \
+  --cases tests/fixtures/phase8_controlled_execution_cases.jsonl \
+  --report /tmp/phase8-controlled-execution-report.json
+```
+
+Expected:
 
 ```text
 CONTROLLED EXECUTION SMOKE OK
 Casos sinteticos: 6
-phase8_smoke_cases=6
-phase8_smoke_privacy=OK
 ```
 
-### Gate F7: Hosted CI
+The report privacy test must already have passed in F5.
 
-Only after candidate freeze, implementation completion may create a draft PR. This plan-creation task does not create a PR.
+### Gate F7: hosted CI
 
-Future one-shot creation command:
+Only after F1-F6 pass, create a draft PR for the implementation branch; do not merge. One exact CLI path is:
 
 ```bash
-gh pr create --draft --base main --head phase-8-controlled-approval-execution --title "feat: phase 8 controlled approval and execution" --body "Phase 8 controlled approval/execution candidate. No merge until explicit acceptance."
+PR_URL="$(gh pr create --draft --base main --head phase-8-controlled-approval-execution --title 'feat: phase 8 controlled approval and execution' --body 'Phase 8 candidate for hosted CI and exact-head Dell validation.')"
+printf 'pr_url=%s\n' "$PR_URL"
 ```
 
-Expected: GitHub prints the draft PR URL.
-
-Do not poll GitHub Actions. After the operator reports hosted CI completion, inspect once:
+Do not poll GitHub Actions. After the operator reports completion, inspect once:
 
 ```bash
-PR_NUMBER="$(gh pr view phase-8-controlled-approval-execution --repo borgescodes/ai-service-desk --json number --jq .number)"
-gh pr checks "$PR_NUMBER" --repo borgescodes/ai-service-desk
+PR_NUMBER="${PR_URL##*/}"
+gh pr checks "$PR_NUMBER"
 ```
 
-Expected: hosted `Python quality` check PASS, including Python 3.14, Ruff and full pytest.
+Expected: hosted `Python quality` CI PASS for the frozen candidate source head.
 
-### Gate F8: Dell exact-head
+### Gate F8: Dell exact-head workflow
 
-Dispatch official workflow once with frozen SHA:
+Dispatch the official workflow with the frozen SHA:
 
 ```bash
-gh workflow run phase8-controlled-execution-smoke.yml --repo borgescodes/ai-service-desk --ref phase-8-controlled-approval-execution -f target_ref="$PHASE8_CANDIDATE_SHA"
+gh workflow run phase8-controlled-execution-smoke.yml \
+  --ref phase-8-controlled-approval-execution \
+  -f target_ref="$CANDIDATE_HEAD"
 ```
 
-Do not poll. After the operator reports completion, inspect the latest matching run once:
-
-```bash
-RUN_ID="$(gh run list --repo borgescodes/ai-service-desk --workflow phase8-controlled-execution-smoke.yml --branch phase-8-controlled-approval-execution --limit 1 --json databaseId --jq '.[0].databaseId')"
-gh run view "$RUN_ID" --repo borgescodes/ai-service-desk --json conclusion,headSha,jobs
-```
-
-Required Dell evidence:
+Do not poll. After the operator reports run completion, inspect the completed run once. Required Dell evidence:
 
 ```text
-workflow conclusion = success
-checkout exact target SHA = frozen candidate SHA
-Python = 3.14.x
+checked out HEAD = CANDIDATE_HEAD
+Python 3.14.x
 fixture_raw_sha_after = manifest raw_sha256
-candidate_sha_after_fixture_restore = frozen candidate SHA
+candidate_sha_after_fixture_restore = CANDIDATE_HEAD
 Ruff check = PASS
 Ruff format = PASS
 full pytest = PASS
-controlled execution smoke = PASS 6/6
+Phase 8 smoke = PASS 6/6
 ```
 
-The fixture restoration is working-tree-only. Fixture and manifest remain unchanged in Git.
+The workflow restoration is working-tree-only and does not alter `tests/fixtures/phase2_corpus.csv`, its manifest, or the Git candidate.
 
-### Final evidence fields for implementation completion
+### Gate F9: final candidate evidence
 
-The executor reports the values emitted by F1-F8 under these exact labels:
+Required report fields:
 
 ```text
-candidate head
-historical baseline node IDs
-final node IDs
-missing historical node IDs
-new node IDs
-Ruff check
-Ruff format
-protected Phase 7 files
-zero external execution
-Phase 8 smoke
-hosted CI
-Dell exact-head
-merge
+historical baseline node IDs = 426
+missing historical node IDs = 0
+new node IDs = real collected set difference
+Ruff check = PASS
+Ruff format = PASS
+protected Phase 7 files = equality OK
+protected Git blobs = exact homologated SHAs from HEAD
+zero external execution = PASS
+Phase 8 smoke = PASS 6/6
+hosted CI = PASS
+Dell exact-head = PASS
 ```
 
-`merge` remains `NOT PERFORMED` until a separate explicit merge authorization is received.
+No merge occurs without a later explicit merge acceptance.
 
 ---
 
 ## Plan Self-Review
 
-- Coverage integral da spec: PASS. Every one of the 87 numbered contractual cases maps to a concrete test or Final Gate F3.
-- Placeholders: PASS. Commands use concrete paths, literal test names, shell variables assigned by prior commands and runtime-collected values; no unresolved content marker remains.
-- Signatures consistentes: PASS. Every Phase 8 public type/method is defined before a later task consumes it.
-- No undefined function/type references: PASS. Task 6 does not reference `FakeActionExecutor`; it is defined only in Task 7. `RequestRepository`/`RequestLifecycleService` circular typing is resolved explicitly with `TYPE_CHECKING`.
-- Historical baseline: PASS as plan contract. Exactly 426 historical node IDs are collected from the immutable baseline and compared as a set in F3.
-- Protected files intact: PASS as plan contract. Per-task diffs, blob-hash tests and F4 all guard byte equality.
-- Fase 9 não antecipada: PASS. No HTTP, CDM adapter/API/credential/idempotency external or real executor is planned.
-- Fase 10 não antecipada: PASS. No routing, queue, automatic technician selection or workload distribution is planned.
-- Repository boundary: PASS. Request/audit state stays in memory. The only file output introduced is the caller-specified synthetic smoke report, matching the existing smoke pattern.
-- Concurrency: PASS. Task 8 has a deterministic RED for non-atomic CAS, final CAS remains mandatory, and separate double-decision/double-execution tests prove race behavior.
-- Temporal/audit: PASS. Timezone-awareness, intra-record chronology, inter-version `updated_at`, audit append chronology and equal-timestamp tie-breaks have dedicated tests.
-- Executor invalid result: PASS. All six required invalid shapes map to `EXECUTOR_INVALID_RESULT` without arbitrary persistence.
-- Exact-head workflow: PASS. Task 12 reuses the Phase 7 Dell discipline and restores only `tests/fixtures/phase2_corpus.csv` from the current `HEAD` blob before verification.
-- Final Gate: PASS. It plans real node-ID collection, Ruff, full pytest, protected equality, zero external execution, six-case smoke, hosted CI and Dell exact-head.
+Self-review must be rerun immediately before execution handoff and must report PASS only if all statements below are true:
 
-Implementation must stop after the Final Gate and wait for explicit merge authorization.
+1. **Spec coverage:** all components, eight states, eight transitions, 87 contractual cases, reason codes, lifecycle rules and scope boundaries map to concrete tasks/tests/gates.
+2. **Placeholder scan:** no unresolved marker, generic edge-case instruction, missing test body reference or undefined future work remains.
+3. **Signature consistency:** transition signatures use mandatory `occurred_at`; ApprovalService/ExecutionEngine expected_version signatures match repository/lifecycle usage; every referenced type/function is defined by an earlier task or the same task.
+4. **Deterministic RED per task:** Tasks 1-7 and 9-11 fail because their component/behavior is absent; Task 8 fails specifically and deterministically at `test_repository_final_cas_is_atomic_under_forced_interleaving`. `test_phase8_security.py` is created in Task 8 but is not deliberately broken to manufacture RED.
+5. **Windows-safe protected blob checks:** tests call `subprocess.run(["git", "rev-parse", f"HEAD:{path}"], ...)` with argument list and no shell; they never hash working-tree bytes with `Path.read_bytes()`.
+6. **Execution timestamp contract:** after valid expected_version/state and policy revalidation, `ExecutionEngine` calls `operation_timestamp = clock()` exactly once and passes it explicitly to every lifecycle transition it invokes. Stale/invalid-state paths call that clock zero times. Success test proves clock calls=1, `execution_started_at == execution_finished_at`, non-regressing audit and `COMPLETED`.
+7. **426 baseline:** baseline is collected from immutable `2f583b5...`; final gate requires exactly 426 historical node IDs and zero missing IDs; new count is a real set difference, not a fixed estimate.
+8. **Protected files:** three Phase 7 files are never modified by implementation; both HEAD-object SHA checks and `git diff --exit-code BASELINE CANDIDATE -- protected-files` are mandatory.
+9. **Security placement:** there is no isolated security Task 9. Initial `test_phase8_security.py` belongs to Task 8; Task 9 smoke modifies its external-runtime scan to include `controlled_execution_smoke.py`.
+10. **Phase boundaries:** no HTTP/CDMAdapter/API fake CDM/real persistence/routing/frontend/LLM/retry is implemented; Fase 9 and Fase 10 remain future boundaries.
+11. **Task count:** exactly 11 implementation tasks.
+
+Execution must not start until this corrected plan receives explicit approval.
