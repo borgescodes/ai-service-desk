@@ -1,3 +1,4 @@
+from threading import RLock
 from typing import Protocol
 
 from ai_service_desk.engine.request_lifecycle import (
@@ -105,30 +106,38 @@ def _validate_events(record, events, current=None):
 
 class InMemoryRequestRepository:
     def __init__(self):
+        self._lock = RLock()
         self._records: dict[str, AccessRequestRecord] = {}
         self._audit: dict[str, list[AuditEvent]] = {}
         self._next_id = 1
 
     def allocate_request_id(self) -> str:
-        request_id = f"REQ-{self._next_id:06d}"
-        self._next_id += 1
-        return request_id
+        with self._lock:
+            request_id = f"REQ-{self._next_id:06d}"
+            self._next_id += 1
+            return request_id
 
     def create(
         self, record: AccessRequestRecord, *, audit_events: tuple[AuditEvent, ...]
     ) -> AccessRequestRecord:
-        validate_access_request_record(record)
-        if record.request_id in self._records or record.version != 1 or record.state != "TRIAGED":
-            _record_invalid()
-        _validate_events(record, audit_events)
-        self._records[record.request_id] = record
-        self._audit[record.request_id] = list(audit_events)
-        return record
+        with self._lock:
+            validate_access_request_record(record)
+            if (
+                record.request_id in self._records
+                or record.version != 1
+                or record.state != "TRIAGED"
+            ):
+                _record_invalid()
+            _validate_events(record, audit_events)
+            self._records[record.request_id] = record
+            self._audit[record.request_id] = list(audit_events)
+            return record
 
     def get(self, request_id: str) -> AccessRequestRecord:
-        if request_id not in self._records:
-            raise RequestNotFoundError("REQUEST_NOT_FOUND", "Request inexistente.")
-        return self._records[request_id]
+        with self._lock:
+            if request_id not in self._records:
+                raise RequestNotFoundError("REQUEST_NOT_FOUND", "Request inexistente.")
+            return self._records[request_id]
 
     def save(
         self,
@@ -144,19 +153,24 @@ class InMemoryRequestRepository:
         validate_access_request_record(record)
         _validate_delta(current, record)
         _validate_events(record, audit_events, current)
-        previous = self._audit[record.request_id][-1].occurred_at
-        for event in audit_events:
-            if event.occurred_at < previous:
-                _audit_invalid()
-            previous = event.occurred_at
         self._before_final_cas()
-        self._records[record.request_id] = record
-        self._audit[record.request_id].extend(audit_events)
-        return record
+        with self._lock:
+            current = self.get(record.request_id)
+            if current.version != expected_version:
+                raise ConcurrencyConflictError("VERSION_CONFLICT", "Versao stale no CAS final.")
+            previous = self._audit[record.request_id][-1].occurred_at
+            for event in audit_events:
+                if event.occurred_at < previous:
+                    _audit_invalid()
+                previous = event.occurred_at
+            self._records[record.request_id] = record
+            self._audit[record.request_id].extend(audit_events)
+            return record
 
     def _before_final_cas(self) -> None:
         pass
 
     def audit_for(self, request_id: str) -> tuple[AuditEvent, ...]:
-        self.get(request_id)
-        return tuple(self._audit[request_id])
+        with self._lock:
+            self.get(request_id)
+            return tuple(self._audit[request_id])
