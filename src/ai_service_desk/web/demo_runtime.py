@@ -40,6 +40,7 @@ from ai_service_desk.engine.technician_authorization import (
 from ai_service_desk.engine.triage import TriageEngine
 from ai_service_desk.integrations.cdm import CDMAdapter
 from ai_service_desk.integrations.cdm_fake_api import CDMFakeStore, build_cdm_server
+from ai_service_desk.web.conversation import greeting_message, is_social_greeting
 from ai_service_desk.web.demo_ai import DemoClassifierClient, DemoEmbedder
 from ai_service_desk.web.demo_data import (
     demo_outcomes,
@@ -276,6 +277,14 @@ class DemoRuntime:
         requester = self._requester(identity_id)
         if not isinstance(message, str) or not message.strip():
             raise ValueError("Mensagem vazia.")
+
+        if is_social_greeting(message):
+            chat = self._ollama_client.chat if self.mode == "LOCAL_AI" else None
+            return {
+                "status": "SOCIAL",
+                "request_id": None,
+                "assistant_message": greeting_message(message, requester.name, chat),
+            }
 
         current = self._triage.get(identity_id)
         if current is None or current[1].status != "ACTIVE":
