@@ -37,8 +37,6 @@ jobs:
           node --version
       - name: Ruff lint
         run: python -m ruff check .
-      - name: Smoke formatter diagnostic
-        run: python -m ruff format --diff src/ai_service_desk/web/smoke.py
       - name: Ruff format
         run: python -m ruff format --check .
       - name: Historical node ID preservation
