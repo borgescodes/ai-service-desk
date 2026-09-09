@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from ai_service_desk.engine.request_lifecycle import AccessRequestRecord, AuditEvent
+from ai_service_desk.engine.request_lifecycle import (
+    AccessRequestRecord,
+    AuditEvent,
+)
 from ai_service_desk.engine.routing import RoutingAssignment
 
 
