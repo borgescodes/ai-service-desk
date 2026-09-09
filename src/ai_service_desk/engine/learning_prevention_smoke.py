@@ -81,9 +81,7 @@ def _categories_for_system(
     opportunities: tuple[PreventionOpportunity, ...],
     system: str,
 ) -> tuple[str, ...]:
-    return tuple(
-        sorted(item.category for item in opportunities if item.key.system == system)
-    )
+    return tuple(sorted(item.category for item in opportunities if item.key.system == system))
 
 
 def _case(case_id: str, expected: str, actual: str) -> dict[str, object]:
