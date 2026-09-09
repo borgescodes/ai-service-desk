@@ -53,7 +53,12 @@ def create_app(runtime: DemoRuntime | None = None, *, demo_mode: bool = True) ->
 
     @app.exception_handler(WebDemoError)
     async def web_demo_error_handler(_request: Request, exc: WebDemoError):
-        status = 409 if exc.code == "ROUTING_INCONSISTENT" else 403
+        if exc.code == "IDENTITY_REQUIRED":
+            status = 401
+        elif exc.code == "ROUTING_INCONSISTENT":
+            status = 409
+        else:
+            status = 403
         return _error(status, exc.code, str(exc))
 
     @app.exception_handler(RequestNotFoundError)
