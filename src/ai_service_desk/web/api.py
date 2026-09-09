@@ -18,7 +18,10 @@ from ai_service_desk.web.demo_runtime import DemoRuntime
 from ai_service_desk.web.errors import WebDemoError
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
-_CSP = "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"
+_CSP = (
+    "default-src 'self'; connect-src 'self'; img-src 'self' data:; "
+    "style-src 'self'; script-src 'self'"
+)
 
 
 class MessageBody(BaseModel):
