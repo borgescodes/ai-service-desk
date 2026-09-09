@@ -8,4 +8,4 @@ where node >nul 2>nul || (
 
 python --version || exit /b 1
 node web\scripts\build.mjs || exit /b 1
-python -m ai_service_desk web-demo --host 127.0.0.1 --port 8000
+python -m ai_service_desk web-demo --mode LOCAL_AI --host 127.0.0.1 --port 8000
