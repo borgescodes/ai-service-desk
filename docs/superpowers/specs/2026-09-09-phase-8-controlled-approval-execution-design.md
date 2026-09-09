@@ -259,7 +259,7 @@ Regras obrigatórias:
 - `latest_policy` começa igual a `creation_policy` e só pode ser substituída pela policy revalidada antes da execução;
 - `version` começa em `1` no `TRIAGED` inicial;
 - toda transição persistida incrementa `version` exatamente em `+1`;
-- `updated_at` muda em toda transição persistida;
+- `updated_at` é definido em toda transição persistida e nunca retrocede entre versões; igualdade é permitida;
 - `decided_by` e `decided_at` permanecem `None` até aprovação ou rejeição humana;
 - `decided_by` guarda o `technician_id` confiável que decidiu;
 - em `APPROVED -> DENIED_POLICY` os campos de decisão humana permanecem preservados, pois a aprovação existiu historicamente;
@@ -290,13 +290,19 @@ execution_started_at <= execution_finished_at, quando ambos existirem
 
 Igualdade entre timestamps é válida. Quando dois timestamps forem iguais, `version` define a ordem entre versões do record.
 
+Para qualquer `save(...)`, há ainda uma invariante entre versões:
+
+```text
+new_record.updated_at >= current_record.updated_at
+```
+
 Qualquer violação temporal do record falha antes da escrita com erro explícito de domínio:
 
 ```text
 reason_code = RECORD_INVARIANT_INVALID
 ```
 
-Nenhum record temporalmente inválido pode substituir a versão armazenada.
+Nenhum record temporalmente inválido pode substituir a versão armazenada e nenhum audit event associado à tentativa é anexado.
 
 ## 8. request_id determinístico
 
@@ -446,20 +452,70 @@ Na criação:
 Em `save(...)`:
 
 - o record existente deve existir;
+- `expected_version` deve satisfazer integralmente o contrato runtime da seção 12 antes de qualquer comparação;
 - `expected_version` deve ser exatamente igual à versão atualmente armazenada;
 - o novo record deve ter `version == expected_version + 1`;
 - `request_id`, `context`, `creation_policy`, `confidence` e `created_at` devem ser iguais aos valores originais;
+- `record.updated_at >= current_record.updated_at` deve ser verdadeiro; igualdade é permitida;
 - o novo record é validado integralmente, inclusive cronologia, antes da mutação;
 - todos os `AuditEvent` recebidos são validados antes da mutação, inclusive sua ordem temporal em relação ao audit já persistido;
 - cada evento deve apontar para o mesmo `request_id` e para a nova `record_version` quando representa a transição;
 - a atualização do record e o append dos eventos ocorrem atomicamente sob o lock;
-- em qualquer erro de validação, cronologia ou concorrência, não há escrita parcial.
+- em qualquer erro de validação, cronologia ou concorrência, não há escrita parcial nem append parcial de audit.
+
+Se `record.updated_at < current_record.updated_at`:
+
+```text
+RecordInvariantError
+reason_code = RECORD_INVARIANT_INVALID
+```
+
+O record atual e o audit permanecem byte/logicamente inalterados.
 
 ## 12. Optimistic concurrency e version
 
 Toda mutação depois da criação usa optimistic concurrency.
 
-Contrato:
+### 12.1 Contrato runtime de expected_version
+
+Qualquer entrypoint da Fase 8 que recebe `expected_version` deve validar, antes de usar igualdade ou comparação:
+
+```text
+type(expected_version) is int
+expected_version > 0
+```
+
+Isso vale obrigatoriamente para:
+
+```text
+ApprovalService.approve(...)
+ApprovalService.reject(...)
+ExecutionEngine.execute(...)
+RequestRepository.save(...)
+```
+
+Valores como estes são inválidos:
+
+```text
+True
+False
+3.0
+"3"
+None
+```
+
+A validação por tipo exato é deliberada. `True == 1` e `3.0 == 3` no Python não podem aproveitar coerção ou igualdade para atravessar o gate.
+
+Qualquer tipo ou valor runtime inválido falha com erro explícito antes da comparação com a versão corrente:
+
+```text
+ExpectedVersionValidationError
+reason_code = EXPECTED_VERSION_INVALID
+```
+
+A operação não altera state, version, record ou audit e não chama policy nem executor.
+
+Depois que `expected_version` é estruturalmente válido, a comparação é exata:
 
 ```text
 caller leu version = N
@@ -479,10 +535,13 @@ Consequências obrigatórias:
 
 - stale approval não sobrescreve decisão mais nova;
 - stale rejection não sobrescreve aprovação;
+- stale execute falha antes de policy e executor;
 - duas execuções concorrentes não podem chamar o executor duas vezes;
 - somente o caller que conseguir persistir `APPROVED -> EXECUTING` pode chamar `ActionExecutor`;
 - o loser do compare-and-swap recebe `VERSION_CONFLICT` e faz zero chamadas ao executor;
 - conflito não gera retry automático.
+
+O compare preliminar de service não substitui o CAS final do repository. O CAS continua obrigatório para detectar uma race ocorrida entre leitura, validações e persistência.
 
 A Fase 8 não implementa locking distribuído. O CAS é local ao `InMemoryRequestRepository`.
 
@@ -511,12 +570,15 @@ Fluxo normativo:
 1. validar `AccessRequestContext` pelo contrato já existente;
 2. chamar `PolicyEngine.evaluate(context)` novamente;
 3. chamar `assess_confidence(context)` separadamente;
-4. somente após avaliações válidas, alocar `request_id`;
-5. criar `AccessRequestRecord` em `TRIAGED`, `version=1`;
-6. persistir `REQUEST_CREATED`;
-7. se policy = `DENY`, aplicar `TRIAGED -> DENIED_POLICY`;
-8. se policy = `REQUIRE_APPROVAL`, aplicar `TRIAGED -> PENDING_APPROVAL`;
-9. retornar o record já em `DENIED_POLICY` ou `PENDING_APPROVAL`, normalmente em `version=2`.
+4. capturar exatamente um `initial_timestamp` timezone-aware;
+5. somente após avaliações válidas, alocar `request_id`;
+6. criar `AccessRequestRecord` em `TRIAGED`, `version=1`, com `created_at=initial_timestamp` e `updated_at=initial_timestamp`;
+7. persistir `REQUEST_CREATED` com `occurred_at=initial_timestamp`;
+8. se policy = `DENY`, aplicar `TRIAGED -> DENIED_POLICY` usando o mesmo `initial_timestamp` como `updated_at` e no evento `POLICY_DENIED_AT_CREATION`;
+9. se policy = `REQUIRE_APPROVAL`, aplicar `TRIAGED -> PENDING_APPROVAL` usando o mesmo `initial_timestamp` como `updated_at` e no evento `POLICY_REQUIRES_APPROVAL`;
+10. retornar o record já em `DENIED_POLICY` ou `PENDING_APPROVAL`, normalmente em `version=2`.
+
+A reutilização do mesmo timestamp nos snapshots/eventos iniciais é obrigatória. Igualdade temporal é válida e `version`/append order são os desempates. `create_request(...)` não consulta o clock novamente entre `TRIAGED version=1` e a transição imediata para `version=2`, evitando que uma regressão do clock torne o lifecycle inicial temporalmente incoerente.
 
 A criação não aceita um `PolicyDecision` fornecido pelo caller como autoridade. Mesmo que um fluxo anterior tenha policy homologada, a Fase 8 reavalia com o `PolicyEngine` corrente.
 
@@ -724,14 +786,20 @@ reject(
 Sequência normativa de decisão:
 
 1. carregar request;
-2. exigir `state == PENDING_APPROVAL`;
-3. exigir `technician` válido no registry;
-4. exigir `record.context.capability` no conjunto autorizado do técnico;
-5. bloquear self-decision;
-6. aplicar transição com CAS;
-7. preencher `decided_by=technician.technician_id`;
-8. preencher `decided_at` timezone-aware;
-9. append audit atômico com a transição.
+2. validar `expected_version` estruturalmente segundo a seção 12;
+3. comparar `expected_version` com `record.version`;
+4. se diferente, falhar `VERSION_CONFLICT` antes de validar state, técnico ou self-decision;
+5. exigir `state == PENDING_APPROVAL`;
+6. exigir `technician` válido no registry;
+7. exigir `record.context.capability` no conjunto autorizado do técnico;
+8. bloquear self-decision;
+9. preencher `decided_by=technician.technician_id`;
+10. preencher `decided_at` timezone-aware;
+11. aplicar transição pelo lifecycle;
+12. executar o CAS final no repository com o mesmo `expected_version`;
+13. append audit atômico somente se o CAS final for bem-sucedido.
+
+O compare inicial torna stale approval/rejection determinísticos. O CAS final continua obrigatório para fechar a race entre a leitura/validações e a persistência. Se a versão mudar depois do compare inicial e antes do save, o CAS final retorna `VERSION_CONFLICT` e não há escrita parcial.
 
 `approve(...)`:
 
@@ -751,9 +819,11 @@ Nenhum dos dois métodos chama executor.
 
 ### 17.1 DENIED_POLICY nunca é aprovável
 
-Uma chamada de `approve(...)` ou `reject(...)` sobre `DENIED_POLICY` falha por estado inválido antes de qualquer tentativa de transição.
+Uma chamada de `approve(...)` ou `reject(...)` sobre `DENIED_POLICY` com `expected_version` vigente falha por estado inválido antes de qualquer tentativa de transição.
 
-Resultado obrigatório:
+Uma chamada stale falha antes disso com `VERSION_CONFLICT`, conforme a ordem normativa da seção 17.
+
+Resultado obrigatório para a operação de estado inválido com versão vigente:
 
 ```text
 state permanece DENIED_POLICY
@@ -862,9 +932,19 @@ execute(
 ) -> AccessRequestRecord
 ```
 
-### 20.1 Gate de estado
+### 20.1 Gate de versão e estado
 
-A execução só aceita:
+A execução segue obrigatoriamente esta precedência antes de policy:
+
+1. carregar o request;
+2. validar `expected_version` estruturalmente segundo a seção 12;
+3. comparar `expected_version` com `record.version`;
+4. se diferente, falhar `VERSION_CONFLICT`;
+5. somente depois exigir `state == APPROVED`.
+
+Assim, stale caller falha antes de qualquer `PolicyEngine.evaluate(...)` e antes do executor.
+
+Com versão vigente, a execução só aceita:
 
 ```text
 state == APPROVED
@@ -886,7 +966,7 @@ FAILED -> não possui retry
 
 ### 20.2 Revalidação obrigatória
 
-Depois de carregar o record `APPROVED` e antes de chamar o executor:
+Depois de passar pelos gates de versão e estado e antes de chamar o executor:
 
 ```python
 policy = PolicyEngine.evaluate(record.context)
@@ -913,10 +993,13 @@ policy_id = PolicyDecision.policy_id
 Se a policy revalidada for `REQUIRE_APPROVAL`:
 
 1. atualizar `latest_policy`;
-2. aplicar CAS `APPROVED -> EXECUTING`;
+2. construir a transição `APPROVED -> EXECUTING`;
 3. preencher `execution_started_at`;
-4. persistir `EXECUTION_STARTED`;
-5. somente após sucesso do CAS chamar `ActionExecutor.execute(...)` exatamente uma vez.
+4. executar CAS final com o mesmo `expected_version`;
+5. persistir `EXECUTION_STARTED` atomicamente com a transição;
+6. somente após sucesso do CAS chamar `ActionExecutor.execute(...)` exatamente uma vez.
+
+O CAS final é a barreira contra race entre o compare preliminar e a persistência. Se outro caller vencer essa race, o loser recebe `VERSION_CONFLICT` e faz zero chamadas ao executor.
 
 O evento `EXECUTION_STARTED` reutiliza o `policy_id` e `reason_code` da revalidação, provando que policy foi verificada antes da chamada ao executor.
 
@@ -1000,11 +1083,13 @@ A contagem do `FakeActionExecutor` deve permanecer zero quando:
 
 ```text
 request creation -> DENY
+expected_version inválido
+stale expected_version
 request state != APPROVED
 DENIED_POLICY recebe approve/reject
 technician sem capability
 self-decision
-VERSION_CONFLICT antes de EXECUTING
+VERSION_CONFLICT no CAS final antes de EXECUTING
 policy revalidation -> DENY
 ```
 
@@ -1013,7 +1098,7 @@ A única fronteira que autoriza a chamada é:
 ```text
 APPROVED
 +
-expected_version vigente
+expected_version estruturalmente válido e vigente
 +
 PolicyEngine.evaluate(...) = REQUIRE_APPROVAL
 +
@@ -1055,12 +1140,15 @@ created_at <= updated_at
 created_at <= decided_at, quando decided_at existir
 decided_at <= execution_started_at, quando ambos existirem
 execution_started_at <= execution_finished_at, quando ambos existirem
+new_record.updated_at >= current_record.updated_at, em todo save
 AuditEvent.occurred_at >= occurred_at do evento anterior do mesmo request
 ```
 
 Igualdade é permitida em todas as comparações. `version` do record e ordem de append do audit são os desempates canônicos quando timestamps forem iguais.
 
-A validação cronológica ocorre antes de qualquer escrita. Violação em record retorna `RECORD_INVARIANT_INVALID`. Violação em audit retorna `AUDIT_EVENT_INVALID`. Nenhuma falha temporal pode produzir mutação parcial.
+A validação cronológica ocorre antes de qualquer escrita. Violação em record, inclusive retrocesso de `updated_at` entre versões, retorna `RECORD_INVARIANT_INVALID`. Violação em audit retorna `AUDIT_EVENT_INVALID`. Nenhuma falha temporal pode produzir mutação parcial ou append parcial.
+
+Na criação imediata, `TRIAGED version=1` e `PENDING_APPROVAL` ou `DENIED_POLICY version=2`, junto dos dois eventos iniciais correspondentes, reutilizam o único `initial_timestamp` capturado por `create_request(...)`.
 
 ## 23. Erros de domínio e reason codes
 
@@ -1069,6 +1157,7 @@ A Fase 8 deve usar erros explícitos e códigos estáveis. Conjunto mínimo:
 ```text
 REQUEST_NOT_FOUND
 INVALID_STATE_TRANSITION
+EXPECTED_VERSION_INVALID
 VERSION_CONFLICT
 TECHNICIAN_REGISTRY_INVALID
 TECHNICIAN_REGISTRY_CONFLICT
@@ -1084,13 +1173,14 @@ Semântica:
 
 - `REQUEST_NOT_FOUND`: ID inexistente;
 - `INVALID_STATE_TRANSITION`: origem/destino fora da matriz ou operação incompatível com state;
-- `VERSION_CONFLICT`: optimistic concurrency falhou;
+- `EXPECTED_VERSION_INVALID`: `expected_version` não possui tipo runtime exatamente `int` positivo;
+- `VERSION_CONFLICT`: `expected_version` estruturalmente válido diverge da versão corrente ou o CAS final perde uma race;
 - `TECHNICIAN_REGISTRY_INVALID`: configuração do registry possui entrada runtime inválida e não pode operar;
 - `TECHNICIAN_REGISTRY_CONFLICT`: configuração válida possui duplicidade normalizada de `technician_id`, `username` ou `email` e não pode operar;
 - `TECHNICIAN_CAPABILITY_REQUIRED`: técnico ausente, identidade divergente ou sem capability exata;
 - `SELF_DECISION_NOT_ALLOWED`: requester tentou decidir o próprio request;
 - `AUDIT_EVENT_INVALID`: evento não corresponde ao record/transição, contém timestamp inválido ou retrocede a cronologia do request;
-- `RECORD_INVARIANT_INVALID`: record incoerente com seu state/campos ou com a cronologia temporal;
+- `RECORD_INVARIANT_INVALID`: record incoerente com seu state/campos, com a cronologia temporal ou com monotonicidade de `updated_at` entre versões;
 - `EXECUTOR_INVALID_RESULT`: retorno do executor fora do contrato runtime fechado;
 - `EXECUTOR_EXCEPTION`: exceção capturada com código seguro.
 
@@ -1100,36 +1190,42 @@ Erros de policy da Fase 7 permanecem pertencentes à Fase 7 e não são renomead
 
 ### 24.1 Aprovação/rejeição
 
-A ordem conceitual é:
+A ordem conceitual é exatamente:
 
 ```text
 get request
--> state PENDING_APPROVAL
+-> validar expected_version estruturalmente
+-> comparar expected_version com current.version
+-> se diferente: VERSION_CONFLICT
+-> exigir state == PENDING_APPROVAL
 -> technician identity/capability
 -> self-decision check
 -> lifecycle transition
--> repository CAS
+-> repository CAS novamente
 ```
 
-Nenhum gate anterior ao CAS produz executor call.
+O CAS final continua obrigatório para fechar a race entre o compare preliminar e a persistência. Um stale caller detectado no compare preliminar recebe `VERSION_CONFLICT` antes de state/autorização; um caller que perde uma race depois desse compare recebe `VERSION_CONFLICT` no CAS final. Nenhuma dessas falhas produz escrita parcial.
 
 ### 24.2 Execução
 
-A ordem conceitual é:
+A ordem conceitual é exatamente:
 
 ```text
 get request
--> state APPROVED
--> expected_version recebido
+-> validar expected_version estruturalmente
+-> comparar expected_version com current.version
+-> se diferente: VERSION_CONFLICT e zero policy/executor calls
+-> exigir state == APPROVED
 -> PolicyEngine.evaluate(context)
 -> DENY ? DENIED_POLICY : continuar
--> lifecycle transition APPROVED -> EXECUTING com CAS
+-> lifecycle transition APPROVED -> EXECUTING
+-> repository CAS novamente
 -> somente depois ActionExecutor.execute(...)
 -> validar ActionExecutionResult em runtime
 -> COMPLETED ou FAILED
 ```
 
-A policy nunca é avaliada pelo executor.
+O CAS final `APPROVED -> EXECUTING` é a barreira que garante no máximo uma chamada ao executor. A policy nunca é avaliada pelo executor.
 
 ## 25. Confidence permanece separado
 
@@ -1172,12 +1268,14 @@ APPROVED
 version = 3
 ```
 
-Técnico B tenta rejeitar com `expected_version=2`:
+Técnico B tenta rejeitar com `expected_version=2` depois da persistência de A:
 
 ```text
 VERSION_CONFLICT
 record permanece APPROVED version=3
 ```
+
+O conflito é detectado antes do gate de state/autorização do técnico B. Se ambos passarem pelo compare preliminar antes da persistência de A, somente um CAS final vence e o outro recebe `VERSION_CONFLICT`.
 
 ### 26.2 Dupla execução
 
@@ -1188,16 +1286,16 @@ state = APPROVED
 version = N
 ```
 
-Ambos revalidam policy como `REQUIRE_APPROVAL`. Somente um consegue persistir:
+Se um caller já persistiu `EXECUTING version=N+1`, qualquer caller ainda usando `expected_version=N` recebe `VERSION_CONFLICT` antes de policy e executor.
+
+Se ambos passam pelo compare preliminar enquanto a versão ainda é `N`, ambos podem revalidar policy como `REQUIRE_APPROVAL`, mas somente um consegue persistir:
 
 ```text
 APPROVED version=N
 -> EXECUTING version=N+1
 ```
 
-Somente esse caller chama o executor.
-
-O segundo recebe `VERSION_CONFLICT` ou observa estado já não aprovável e faz zero executor calls.
+Somente esse caller chama o executor. O loser do CAS final recebe `VERSION_CONFLICT` e faz zero executor calls.
 
 Resultado obrigatório do cenário:
 
@@ -1391,8 +1489,8 @@ A implementação futura deve cobrir pelo menos:
 31. ID em memória começa em `REQ-000001`;
 32. IDs subsequentes são determinísticos e monotônicos;
 33. nova instância do repository reinicia sequência local em `REQ-000001`;
-34. stale approval -> `VERSION_CONFLICT`;
-35. stale rejection -> `VERSION_CONFLICT`;
+34. stale approval com `expected_version` estruturalmente válido -> `VERSION_CONFLICT` antes de state/capability/self-decision;
+35. stale rejection com `expected_version` estruturalmente válido -> `VERSION_CONFLICT` antes de state/capability/self-decision;
 36. dupla decisão concorrente preserva somente uma transição;
 37. dupla execução concorrente produz exatamente uma chamada ao executor;
 38. toda transição incrementa version em exatamente `+1`;
@@ -1434,7 +1532,17 @@ A implementação futura deve cobrir pelo menos:
 74. `decided_at > execution_started_at` -> `RECORD_INVARIANT_INVALID` e zero escrita;
 75. `execution_started_at > execution_finished_at` -> `RECORD_INVARIANT_INVALID` e zero escrita;
 76. `AuditEvent.occurred_at` menor que o evento anterior do request -> `AUDIT_EVENT_INVALID` e zero append;
-77. timestamps iguais são aceitos e `version`/append order preservam a ordem determinística.
+77. timestamps iguais são aceitos e `version`/append order preservam a ordem determinística;
+78. `expected_version=True` -> `EXPECTED_VERSION_INVALID` e zero mutação;
+79. `expected_version=False` -> `EXPECTED_VERSION_INVALID` e zero mutação;
+80. `expected_version=3.0` -> `EXPECTED_VERSION_INVALID` e zero mutação;
+81. `expected_version="3"` -> `EXPECTED_VERSION_INVALID` e zero mutação;
+82. `expected_version=None` -> `EXPECTED_VERSION_INVALID` e zero mutação;
+83. stale `execute(...)` -> `VERSION_CONFLICT` antes de policy e executor, com zero executor calls;
+84. `save(...)` com `new_record.updated_at < current_record.updated_at` -> `RECORD_INVARIANT_INVALID`, zero escrita e zero audit append;
+85. `save(...)` com `new_record.updated_at == current_record.updated_at` é permitido quando as demais invariantes são válidas;
+86. criação imediata `TRIAGED version=1 -> PENDING_APPROVAL version=2` reutiliza um único timestamp nos dois snapshots e eventos iniciais;
+87. criação imediata `TRIAGED version=1 -> DENIED_POLICY version=2` reutiliza um único timestamp nos dois snapshots e eventos iniciais.
 
 Essa matriz é piso contratual, não orçamento final de quantidade de testes.
 
@@ -1469,6 +1577,12 @@ A Fase 8 só poderá ser considerada concluída quando houver evidência de que:
 - requester não decide o próprio request;
 - approve e reject são separados de execution;
 - approve faz zero executor calls;
+- todo entrypoint com `expected_version` exige `type(expected_version) is int` e valor positivo;
+- `True`, `False`, float, string e `None` não atravessam o gate de versão;
+- `EXPECTED_VERSION_INVALID` distingue tipo/valor inválido de `VERSION_CONFLICT`;
+- stale approve/reject falham `VERSION_CONFLICT` antes de state/autorização;
+- stale execute falha `VERSION_CONFLICT` antes de policy/executor;
+- o CAS final continua obrigatório após os compares preliminares para fechar races;
 - execução exige `APPROVED`;
 - policy é revalidada antes de qualquer executor call;
 - revalidation `DENY` leva a `DENIED_POLICY`;
@@ -1482,6 +1596,9 @@ A Fase 8 só poderá ser considerada concluída quando houver evidência de que:
 - audit é append-only;
 - timestamps são timezone-aware;
 - cronologia do record e do audit é não decrescente, com igualdade permitida;
+- `RequestRepository.save(...)` exige `new_record.updated_at >= current_record.updated_at`;
+- retrocesso de `updated_at` entre versões falha `RECORD_INVARIANT_INVALID` com zero escrita e zero audit append;
+- `create_request(...)` usa um único timestamp nos snapshots/eventos `TRIAGED version=1` e `PENDING_APPROVAL` ou `DENIED_POLICY version=2`;
 - violações temporais falham antes da escrita com `RECORD_INVARIANT_INVALID` ou `AUDIT_EVENT_INVALID`;
 - `InMemoryRequestRepository` é a única persistência da fase;
 - `request_id` é determinístico no repository em memória;
@@ -1508,6 +1625,11 @@ unicidade normalizada de technician_id, username e email
 wildcard/prefix/fuzzy proibidos
 self-decision bloqueada em approve e reject
 approve separado de execution
+expected_version exige tipo runtime exatamente int positivo
+EXPECTED_VERSION_INVALID definido
+stale approve/reject -> VERSION_CONFLICT antes de state/autorização
+stale execute -> VERSION_CONFLICT antes de policy/executor
+CAS final preservado depois do compare preliminar
 revalidação de policy anterior ao executor
 revalidation DENY com zero executor calls
 ActionExecutionResult validado em runtime
@@ -1519,6 +1641,9 @@ request_id determinístico
 AuditEvent append-only
 timestamps timezone-aware
 cronologia temporal não decrescente
+updated_at não retrocede entre versões
+igualdade de updated_at permitida
+create_request usa um único timestamp no lifecycle inicial version 1 -> version 2
 igualdade temporal permitida com version/append order como desempate
 record temporal inválido -> RECORD_INVARIANT_INVALID
 audit temporal inválido -> AUDIT_EVENT_INVALID
