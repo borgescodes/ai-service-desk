@@ -20,12 +20,8 @@ from tests.engine.phase8_helpers import FixedClock, make_context
 def _services():
     repository = InMemoryRequestRepository()
     policy = PolicyEngine()
-    lifecycle = RequestLifecycleService(
-        repository, policy_engine=policy, clock=FixedClock()
-    )
-    technician = TechnicianIdentity(
-        "TECH-CDM", "tech.cdm", "Tech CDM", "tech.cdm@example.invalid"
-    )
+    lifecycle = RequestLifecycleService(repository, policy_engine=policy, clock=FixedClock())
+    technician = TechnicianIdentity("TECH-CDM", "tech.cdm", "Tech CDM", "tech.cdm@example.invalid")
     authorization = TechnicianAuthorizationRegistry(
         [TechnicianRegistryEntry(technician, frozenset({"CDM_ACCESS_REQUEST"}))]
     )
