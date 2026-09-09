@@ -23,6 +23,15 @@ _EVENT_LABELS = {
 
 _CONFIDENCE_LABELS = {"HIGH": "Alta", "LOW": "Baixa"}
 
+_PREVENTION_CATEGORY_LABELS = {
+    "KNOWLEDGE_GAP": "Lacuna de conhecimento",
+    "PLAYBOOK_GAP": "Lacuna de playbook",
+    "HUMAN_DEPENDENCY": "Dependência humana",
+    "AUTOMATION_CANDIDATE": "Candidato à automação",
+    "PREVENTION_CANDIDATE": "Candidato à prevenção",
+    "EXECUTION_RELIABILITY_ISSUE": "Confiabilidade de execução",
+}
+
 
 def _iso(value):
     return value.isoformat() if value is not None else None
@@ -117,4 +126,29 @@ def present_request(
         "execution_finished_at": _iso(record.execution_finished_at),
         "execution_result_code": record.execution_result_code,
         "execution_error_code": record.execution_error_code,
+    }
+
+
+def present_prevention(opportunity) -> dict:
+    key = opportunity.key
+    category_label = _PREVENTION_CATEGORY_LABELS[opportunity.category]
+    explanation = (
+        f"O engine F11 identificou {opportunity.occurrence_count} ocorrências recorrentes "
+        f"de {key.intent} em {key.system}"
+    )
+    if key.area:
+        explanation += f" na área {key.area}"
+    explanation += f" e classificou o padrão como {category_label.casefold()}."
+    return {
+        "opportunity_id": opportunity.opportunity_id,
+        "category": opportunity.category,
+        "category_label": category_label,
+        "occurrence_count": opportunity.occurrence_count,
+        "system": key.system,
+        "intent": key.intent,
+        "capability": key.capability,
+        "area": key.area,
+        "reason_codes": list(opportunity.reason_codes),
+        "explanation": explanation,
+        "explanation_code": f"F11_{opportunity.category}",
     }
