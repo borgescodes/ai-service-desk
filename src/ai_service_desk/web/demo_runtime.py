@@ -49,7 +49,6 @@ from ai_service_desk.web.demo_identity import DemoIdentityProvider, IdentityNotF
 from ai_service_desk.web.errors import WebDemoError
 from ai_service_desk.web.presentation import present_prevention, present_request
 
-
 DEMO_MODES = frozenset({"DETERMINISTIC", "LOCAL_AI"})
 DEFAULT_DEMO_MODE = "DETERMINISTIC"
 
