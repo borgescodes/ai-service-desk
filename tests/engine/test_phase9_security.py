@@ -13,9 +13,7 @@ PROTECTED_BLOBS = {
     "src/ai_service_desk/engine/access_request.py": "f34fc3f0e22d82b8bf8f13439ed78a7d31d5869d",
     "src/ai_service_desk/engine/policy.py": "60a4f3ae785353009c30b37f71e1ce91865b899e",
     "src/ai_service_desk/engine/confidence.py": "ffc0c212b455978f79a3591578f323ca0e9612dc",
-    "src/ai_service_desk/engine/request_lifecycle.py": (
-        "dfd194ff8a364a0eb0d803409dad252ced216279"
-    ),
+    "src/ai_service_desk/engine/request_lifecycle.py": ("dfd194ff8a364a0eb0d803409dad252ced216279"),
     "src/ai_service_desk/engine/request_repository.py": (
         "5ccda3d30484729faa1a568cf64e20bfe55e595f"
     ),
