@@ -24,7 +24,9 @@ from tests.engine.phase8_helpers import FixedClock, make_context
 def _build(rules=True):
     repository = InMemoryRequestRepository()
     policy = PolicyEngine()
-    lifecycle = RequestLifecycleService(repository, policy_engine=policy, clock=FixedClock())
+    lifecycle = RequestLifecycleService(
+        repository, policy_engine=policy, clock=FixedClock()
+    )
     technician = TechnicianIdentity(
         "TECH-CDM", "tech.cdm", "Tech CDM", "tech.cdm@example.invalid"
     )
@@ -47,7 +49,9 @@ def test_allowed_cdm_request_is_automatically_routed_and_queued():
     record = routed.create_request(make_context())
     assert record.state == "PENDING_APPROVAL"
     assert assignments.get(record.request_id).technician == technician
-    assert tuple(item.request.request_id for item in queue.pending()) == (record.request_id,)
+    assert tuple(item.request.request_id for item in queue.pending()) == (
+        record.request_id,
+    )
 
 
 def test_policy_denied_request_has_no_assignment_and_no_queue_item():
