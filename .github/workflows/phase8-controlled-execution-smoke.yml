@@ -1,0 +1,146 @@
+name: Phase 8 controlled execution smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: Exact candidate commit SHA to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  phase8-controlled-execution-smoke:
+    name: Windows Phase 8 controlled execution smoke
+    runs-on: [self-hosted, Windows, X64, ai-service-desk]
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: src
+
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref }}
+
+      - name: Verify exact target SHA
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expected = $env:TARGET_REF.Trim().ToLowerInvariant()
+          if ($expected -notmatch '^[0-9a-f]{40}$') {
+            throw "target_ref must be an exact 40-character commit SHA"
+          }
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0) {
+            throw "Phase 8 validation command failed"
+          }
+          if ($actual -ne $expected) {
+            throw "Checked out SHA $actual differs from target_ref $expected"
+          }
+          Write-Host "Exact head verified: $actual"
+
+      - name: Verify Python 3.14
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Phase 8 validation command failed"
+          }
+          Write-Host "Python: $version"
+          if (-not $version.StartsWith("3.14.")) {
+            throw "Phase 8 controlled execution smoke requires Python 3.14.x. Found $version"
+          }
+
+      - name: Restore line-ending-sensitive Phase 2 fixture from exact Git blob bytes
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          @'
+          import hashlib
+          import json
+          import subprocess
+          from pathlib import Path
+
+          path = Path("tests/fixtures/phase2_corpus.csv")
+          blob = subprocess.check_output(
+              ["git", "show", "HEAD:tests/fixtures/phase2_corpus.csv"]
+          )
+          path.write_bytes(blob)
+          after = hashlib.sha256(path.read_bytes()).hexdigest()
+          manifest = json.loads(
+              Path("tests/fixtures/phase2_corpus_manifest.json").read_text(encoding="utf-8")
+          )
+          expected = manifest["expected"]["raw_sha256"]
+          print(f"fixture_raw_sha_after={after}")
+          print(f"fixture_manifest_sha={expected}")
+          if after != expected:
+              raise SystemExit("exact Git blob bytes do not match fixture manifest")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to restore the exact Phase 2 fixture bytes"
+          }
+          $expected = $env:TARGET_REF.Trim().ToLowerInvariant()
+          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0) {
+            throw "Phase 8 validation command failed"
+          }
+          if ($actual -ne $expected) {
+            throw "Candidate SHA changed while restoring fixture bytes"
+          }
+          Write-Host "candidate_sha_after_fixture_restore=$actual"
+
+      - name: Install project
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install -e ".[dev]" "ruff==0.12.12"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Phase 8 validation command failed"
+          }
+
+      - name: Run Ruff lint
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ruff check .
+          if ($LASTEXITCODE -ne 0) {
+            throw "Phase 8 validation command failed"
+          }
+
+      - name: Run Ruff format check
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m ruff format --check .
+          if ($LASTEXITCODE -ne 0) {
+            throw "Phase 8 validation command failed"
+          }
+
+      - name: Run complete test suite
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pytest -q
+          if ($LASTEXITCODE -ne 0) {
+            throw "Phase 8 validation command failed"
+          }
+
+      - name: Run Phase 8 controlled execution smoke
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $report = Join-Path $env:RUNNER_TEMP "phase8-controlled-execution-$env:GITHUB_RUN_ID.json"
+          python -m ai_service_desk controlled-execution-smoke `
+            --cases tests/fixtures/phase8_controlled_execution_cases.jsonl `
+            --report "$report"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Phase 8 validation command failed"
+          }
