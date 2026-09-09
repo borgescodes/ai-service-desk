@@ -1,4 +1,5 @@
 import re
+from collections import Counter, defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from threading import RLock
@@ -60,6 +61,25 @@ class OutcomeRecord:
     step_id: str
     outcome: str
     reason_code: str
+
+
+@dataclass(frozen=True, order=True)
+class PatternKey:
+    system: str
+    intent: str
+    capability: str
+    area: str
+
+
+@dataclass(frozen=True)
+class PatternAggregate:
+    key: PatternKey
+    occurrence_count: int
+    evidence_ids: tuple[str, ...]
+    outcome_counts: tuple[tuple[str, int], ...]
+    knowledge_ids: tuple[str, ...]
+    playbook_ids: tuple[str, ...]
+    reason_codes: tuple[str, ...]
 
 
 def _invalid(message: str) -> None:
@@ -273,3 +293,30 @@ class OutcomeCollector:
         )
         validate_outcome_record(outcome_record)
         return outcome_record
+
+
+class PatternAggregator:
+    @staticmethod
+    def aggregate(records: tuple[OutcomeRecord, ...]) -> tuple[PatternAggregate, ...]:
+        grouped: dict[PatternKey, list[OutcomeRecord]] = defaultdict(list)
+        for record in records:
+            validate_outcome_record(record)
+            key = PatternKey(record.system, record.intent, record.capability, record.area)
+            grouped[key].append(record)
+
+        patterns: list[PatternAggregate] = []
+        for key in sorted(grouped):
+            rows = grouped[key]
+            outcomes = Counter(row.outcome for row in rows)
+            patterns.append(
+                PatternAggregate(
+                    key=key,
+                    occurrence_count=len(rows),
+                    evidence_ids=tuple(sorted(row.interaction_id for row in rows)),
+                    outcome_counts=tuple(sorted(outcomes.items())),
+                    knowledge_ids=tuple(sorted({row.knowledge_id for row in rows if row.knowledge_id})),
+                    playbook_ids=tuple(sorted({row.playbook_id for row in rows if row.playbook_id})),
+                    reason_codes=tuple(sorted({row.reason_code for row in rows if row.reason_code})),
+                )
+            )
+        return tuple(patterns)
