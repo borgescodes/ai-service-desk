@@ -1,6 +1,3 @@
-from collections.abc import Mapping
-
-
 _STATE_LABELS = {
     "TRIAGED": "Triada",
     "PENDING_APPROVAL": "Aguardando aprovação",
@@ -31,7 +28,7 @@ def _iso(value):
     return value.isoformat() if value is not None else None
 
 
-def _confidence(record, metadata: Mapping[str, object]) -> dict:
+def _confidence(record, metadata: dict[str, object]) -> dict:
     raw = metadata.get("classification_confidence")
     percent = None
     if type(raw) in {int, float} and not isinstance(raw, bool) and 0 <= raw <= 1:
@@ -63,7 +60,7 @@ def present_timeline(events) -> list[dict]:
 def present_request(
     record,
     audit,
-    metadata: Mapping[str, object],
+    metadata: dict[str, object],
     *,
     assignment=None,
     include_internal: bool = False,
