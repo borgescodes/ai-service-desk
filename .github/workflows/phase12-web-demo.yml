@@ -1,0 +1,139 @@
+name: Phase 12 web demo
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  phase12-web-demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: src
+      PHASE12_BASELINE_SHA: a4c4dc25afd07f449036dd837dbcfa4a219806c2
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" "ruff==0.12.12"
+      - name: Runtime versions
+        run: |
+          python --version
+          python -m ruff --version
+          node --version
+      - name: Ruff lint
+        run: python -m ruff check .
+      - name: Ruff format
+        run: python -m ruff format --check .
+      - name: Historical node ID preservation
+        run: |
+          python -m pytest --collect-only -q > "$RUNNER_TEMP/phase12-candidate-nodeids.txt"
+          git worktree add --detach "$RUNNER_TEMP/phase12-baseline" "$PHASE12_BASELINE_SHA"
+          (
+            cd "$RUNNER_TEMP/phase12-baseline"
+            PYTHONPATH=src python -m pytest --collect-only -q \
+              > "$RUNNER_TEMP/phase12-baseline-nodeids.txt"
+          )
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+
+          def node_ids(name):
+              return {
+                  line.strip()
+                  for line in (root / name).read_text(encoding="utf-8").splitlines()
+                  if "::" in line
+              }
+
+          historical = node_ids("phase12-baseline-nodeids.txt")
+          candidate = node_ids("phase12-candidate-nodeids.txt")
+          missing = historical - candidate
+          new = candidate - historical
+          print(f"historical_node_ids={len(historical)}")
+          print(f"candidate_node_ids={len(candidate)}")
+          print(f"missing_historical_node_ids={len(missing)}")
+          print(f"new_node_ids={len(new)}")
+          if len(historical) != 925 or missing:
+              raise SystemExit("Phase 12 historical node ID preservation failed")
+          PY
+          git worktree remove "$RUNNER_TEMP/phase12-baseline" --force
+      - name: Protected F1-F11 blobs
+        run: |
+          paths=(
+            src/ai_service_desk/engine/classification.py
+            src/ai_service_desk/engine/knowledge.py
+            src/ai_service_desk/engine/knowledge_retrieval.py
+            src/ai_service_desk/engine/triage.py
+            src/ai_service_desk/engine/playbook.py
+            src/ai_service_desk/engine/playbook_resolution.py
+            src/ai_service_desk/engine/access_request.py
+            src/ai_service_desk/engine/policy.py
+            src/ai_service_desk/engine/confidence.py
+            src/ai_service_desk/engine/request_lifecycle.py
+            src/ai_service_desk/engine/request_repository.py
+            src/ai_service_desk/engine/technician_authorization.py
+            src/ai_service_desk/engine/approval.py
+            src/ai_service_desk/engine/execution.py
+            src/ai_service_desk/engine/cdm_execution.py
+            src/ai_service_desk/engine/routing.py
+            src/ai_service_desk/engine/learning_prevention.py
+            src/ai_service_desk/integrations/cdm.py
+            src/ai_service_desk/integrations/cdm_fake_api.py
+          )
+          for path in "${paths[@]}"; do
+            baseline_blob="$(git rev-parse "$PHASE12_BASELINE_SHA:$path")"
+            candidate_blob="$(git rev-parse "HEAD:$path")"
+            printf 'protected_blob=%s:%s\n' "$path" "$candidate_blob"
+            test "$candidate_blob" = "$baseline_blob" || {
+              echo "Protected blob changed: $path"
+              exit 1
+            }
+          done
+          echo "protected_blobs=PASS"
+      - name: Full pytest
+        run: python -m pytest -q
+      - name: Frontend lint
+        run: node web/scripts/lint.mjs
+      - name: Frontend tests
+        run: node --test web/tests/*.test.mjs
+      - name: Frontend build
+        run: node web/scripts/build.mjs
+      - name: Static serving contract
+        run: python -m pytest tests/web/test_api.py -q -k static
+      - name: Phase 8 security regression
+        run: python -m pytest tests/engine/test_phase8_security.py -q
+      - name: Phase 9 security regression
+        run: python -m pytest tests/engine/test_phase9_security.py -q
+      - name: Phase 10 security regression
+        run: python -m pytest tests/engine/test_phase10_security.py -q
+      - name: Phase 11 security regression
+        run: python -m pytest tests/engine/test_phase11_security.py -q
+      - name: Phase 12 security
+        run: python -m pytest tests/web/test_phase12_security.py -q
+      - name: Phase 10 routing smoke
+        run: python -m ai_service_desk routing-escalation-smoke
+      - name: Phase 11 learning prevention smoke
+        run: python -m ai_service_desk learning-prevention-smoke
+      - name: Phase 12 web demo smoke
+        run: python -m ai_service_desk web-demo-smoke
+      - name: Working tree clean
+        run: |
+          status="$(git status --porcelain)"
+          printf '%s\n' "$status"
+          test -z "$status"
