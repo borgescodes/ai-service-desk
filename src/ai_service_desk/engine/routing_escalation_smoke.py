@@ -93,7 +93,9 @@ def _domain_configuration():
 
 def _request_stack():
     repository = InMemoryRequestRepository()
-    lifecycle = RequestLifecycleService(repository, policy_engine=PolicyEngine(), clock=_clock)
+    lifecycle = RequestLifecycleService(
+        repository, policy_engine=PolicyEngine(), clock=_clock
+    )
     authorization, registry, technicians = _domain_configuration()
     assignments = InMemoryRoutingAssignmentStore()
     routing = RoutingService(registry, assignments)
@@ -134,7 +136,11 @@ def run_routing_escalation_smoke() -> dict[str, object]:
         else "FAILED"
     )
     results.append(
-        _result("CDM_ALLOWED_PENDING_AND_QUEUED", "PENDING_APPROVAL:TECH-CDM:QUEUED", actual)
+        _result(
+            "CDM_ALLOWED_PENDING_AND_QUEUED",
+            "PENDING_APPROVAL:TECH-CDM:QUEUED",
+            actual,
+        )
     )
 
     replay = routing.route(pending)
@@ -153,7 +159,9 @@ def run_routing_escalation_smoke() -> dict[str, object]:
         and all(item.request.request_id != denied.request_id for item in queue.pending())
         else "FAILED"
     )
-    results.append(_result("DENIED_POLICY_OUTSIDE_QUEUE", "DENIED_POLICY:ZERO_QUEUE", actual))
+    results.append(
+        _result("DENIED_POLICY_OUTSIDE_QUEUE", "DENIED_POLICY:ZERO_QUEUE", actual)
+    )
 
     empty_store = InMemoryRoutingAssignmentStore()
     empty_routing = RoutingService(RoutingRegistry([], authorization), empty_store)
@@ -192,7 +200,11 @@ def run_routing_escalation_smoke() -> dict[str, object]:
     results.append(_result("DISTINCT_DOMAIN_OWNERS", "FIVE_DISTINCT_OWNERS", actual))
 
     approval = ApprovalService(repository, lifecycle, authorization, clock=_clock)
-    approval.approve(pending.request_id, technicians["TECH-CDM"], expected_version=pending.version)
+    approval.approve(
+        pending.request_id,
+        technicians["TECH-CDM"],
+        expected_version=pending.version,
+    )
     actual = (
         "LEFT_QUEUE"
         if all(item.request.request_id != pending.request_id for item in queue.pending())
