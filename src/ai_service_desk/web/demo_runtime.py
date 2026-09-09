@@ -285,6 +285,7 @@ class DemoRuntime:
                 "status": knowledge_result["status"],
                 "question": knowledge_result.get("question"),
                 "reason": knowledge_result.get("reason"),
+                "request_id": None,
             }
 
         knowledge = knowledge_result["knowledge"]
