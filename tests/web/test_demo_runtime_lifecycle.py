@@ -94,7 +94,7 @@ def test_demo_reset_endpoint_releases_used_knowledge_generation() -> None:
             "/api/jup/messages",
             headers={"X-Demo-Identity": "pedro-miranda"},
             json={
-                "message": "Não consigo acessar o Microsoft 365 depois que esqueci minha senha."
+                "message": "Não consigo acessar o Microsoft 365 depois que esqueci minha senha.",
             },
         )
         assert response.status_code == 200
