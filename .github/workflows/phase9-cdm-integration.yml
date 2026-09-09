@@ -25,22 +25,13 @@ jobs:
           python -m pip install -e ".[dev]" "ruff==0.12.12"
       - name: Create ephemeral CDM token
         run: |
-          python - <<'PY' >> "$GITHUB_ENV"
-          import secrets
-          print("CDM_API_TOKEN=" + secrets.token_urlsafe(32))
-          PY
+          token="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          echo "::add-mask::$token"
+          echo "CDM_API_TOKEN=$token" >> "$GITHUB_ENV"
       - name: Ruff lint
         run: python -m ruff check .
       - name: Ruff format
         run: python -m ruff format --check .
-      - name: Show Ruff format diff
-        if: failure()
-        run: |
-          python -m ruff format .
-          git diff -- \
-            src/ai_service_desk/engine/cdm_integration_smoke.py \
-            src/ai_service_desk/phase9_cli.py \
-            tests/engine/test_phase9_security.py
       - name: Historical node ID preservation
         env:
           PHASE9_BASELINE_SHA: fd48e294617ea4d4cff91effeec507abbf44e4d5
