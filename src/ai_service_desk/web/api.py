@@ -14,7 +14,7 @@ from ai_service_desk.engine.request_lifecycle import (
     RequestNotFoundError,
 )
 from ai_service_desk.web.demo_identity import IdentityNotFoundError
-from ai_service_desk.web.demo_runtime import DemoRuntime
+from ai_service_desk.web.demo_runtime import DEFAULT_DEMO_MODE, DemoRuntime
 from ai_service_desk.web.errors import WebDemoError
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
@@ -57,11 +57,14 @@ def _resolve_static_dir(static_dir: str | Path | None) -> Path | None:
 def create_app(
     runtime: DemoRuntime | None = None,
     *,
+    runtime_mode: str = DEFAULT_DEMO_MODE,
     demo_mode: bool = True,
     static_dir: str | Path | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Jup Resolve", docs_url=None, redoc_url=None)
-    app.state.runtime = runtime if runtime is not None else DemoRuntime.create()
+    app.state.runtime = (
+        runtime if runtime is not None else DemoRuntime.create(mode=runtime_mode)
+    )
     app.state.owns_runtime = runtime is None
     app.state.demo_mode = demo_mode
     app.state.static_dir = _resolve_static_dir(static_dir)
@@ -237,9 +240,9 @@ def create_app(
     return app
 
 
-def run_web_demo(*, host: str, port: int) -> None:
+def run_web_demo(*, host: str, port: int, mode: str = DEFAULT_DEMO_MODE) -> None:
     uvicorn.run(
-        create_app(static_dir=_default_static_dir()),
+        create_app(runtime_mode=mode, static_dir=_default_static_dir()),
         host=host,
         port=port,
         log_level="info",
