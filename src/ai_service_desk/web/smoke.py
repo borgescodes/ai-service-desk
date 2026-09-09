@@ -26,8 +26,7 @@ def run_web_demo_smoke() -> dict:
             "Não consigo acessar o Microsoft 365 depois que esqueci minha senha.",
         )
         knowledge_ok = (
-            knowledge.get("status") == "KNOWLEDGE_FOUND"
-            and knowledge.get("request_id") is None
+            knowledge.get("status") == "KNOWLEDGE_FOUND" and knowledge.get("request_id") is None
         )
         cases.append(
             _case(
@@ -132,9 +131,7 @@ def run_web_demo_smoke() -> dict:
             _case(
                 "POLICY_DENIED_ABSENT_FROM_QUEUE",
                 denied_absent,
-                "DENIED_POLICY:ZERO_ASSIGNMENT"
-                if denied_absent
-                else "DENIED_POLICY_QUEUE_INVALID",
+                "DENIED_POLICY:ZERO_ASSIGNMENT" if denied_absent else "DENIED_POLICY_QUEUE_INVALID",
             )
         )
 
