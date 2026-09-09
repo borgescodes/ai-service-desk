@@ -2,7 +2,7 @@
 
 ## 1. Objetivo
 
-A Fase 11 adiciona uma camada analítica determinística depois do fluxo operacional homologado. Ela transforma resultados estruturados das interações em padrões explicáveis e oportunidades para revisão humana.
+A Fase 11 adiciona uma camada analítica determinística depois do fluxo operacional homologado. O sistema registra apenas resultados estruturados, agrega recorrência e produz oportunidades explicáveis para revisão humana futura.
 
 ```text
 interações e resultados estruturados
@@ -22,7 +22,7 @@ APRENDER != AUTORIZAR
 DETECTAR OPORTUNIDADE != ALTERAR O SISTEMA AUTOMATICAMENTE
 ```
 
-A fase não treina modelo, não altera autorização e não publica conteúdo oficial.
+A fase não treina modelo, não muda autorização e não publica conteúdo oficial.
 
 ## 2. Baseline
 
@@ -30,16 +30,16 @@ A fase não treina modelo, não altera autorização e não publica conteúdo of
 main = 81a748921ba01393285da2e2d2ebc9371c890e2c
 Phase 10 candidate parent = 57997768fd4461cc32bdc4414ef0e51e2a42e77e
 historical pytest node IDs = 847
-Python homologado = 3.14.x
-Ruff homologado = 0.12.12
+Python = 3.14.x
+Ruff = 0.12.12
 branch = phase-11-learning-prevention
 ```
 
-Todos os 847 node IDs históricos devem permanecer coletáveis.
+Todos os 847 node IDs históricos devem permanecer presentes.
 
 ## 3. Não objetivos
 
-Fora de escopo:
+Ficam fora de escopo:
 
 - frontend, dashboard e Fase 12;
 - fine tuning, online learning, RL, RLHF ou alteração de pesos;
@@ -53,7 +53,7 @@ Fora de escopo:
 
 ## 4. Fontes de evidência e reuso
 
-A camada analítica é somente leitora. Ela pode consumir:
+A camada analítica é somente leitora. Ela pode consumir fatos já homologados de:
 
 ```text
 TriageState
@@ -68,7 +68,7 @@ execution_result_code
 execution_error_code
 ```
 
-`AuditEvent` continua sendo a trilha autoritativa do lifecycle da Fase 8. A Fase 11 não cria um segundo audit log e não transforma cada transição em uma nova ocorrência. A primeira versão usa um resumo analítico por interação para evitar dupla contagem.
+`AuditEvent` continua sendo a trilha autoritativa do lifecycle da Fase 8. A Fase 11 não cria um segundo audit log e não transforma cada transição em nova ocorrência. Existe um resumo analítico por interação para impedir dupla contagem.
 
 ## 5. Arquitetura
 
@@ -81,13 +81,13 @@ src/ai_service_desk/engine/learning_prevention_smoke.py
 
 `learning_prevention.py` contém contratos, validação, store em memória, collectors somente leitura, agregação e geração de oportunidades.
 
-`learning_prevention_smoke.py` usa somente fixture sintética versionada.
+`learning_prevention_smoke.py` lê somente a fixture sintética versionada e usa o domínio analítico local.
 
-Não há HTTP, CDM, ApprovalService, ExecutionEngine ou PolicyEngine no runtime da Fase 11.
+Nenhum módulo da Fase 11 chama HTTP, CDM, PolicyEngine, ApprovalService, ExecutionEngine ou serviços mutadores de routing.
 
 ## 6. OutcomeRecord
 
-`OutcomeRecord` é um snapshot factual pequeno. Existe no máximo um record armazenado por `interaction_id` em um `InMemoryOutcomeStore`.
+`OutcomeRecord` é um snapshot factual pequeno e imutável. Existe no máximo um record armazenado por `interaction_id`.
 
 ```python
 @dataclass(frozen=True)
@@ -108,15 +108,14 @@ class OutcomeRecord:
 Regras:
 
 - `interaction_id` é obrigatório, opaco e tem até 120 caracteres;
-- `system`, `intent` e `outcome` são códigos estruturados não vazios;
+- `system`, `intent` e `outcome` são estruturados e não vazios;
 - `capability`, `knowledge_id`, `playbook_id`, `step_id` e `reason_code` podem ser vazios quando a evidência real não os possui;
 - `playbook_version` é `None` sem playbook e inteiro positivo quando há playbook;
-- `playbook_id`, `playbook_version` e `step_id` são coerentes entre si;
+- `playbook_id`, `playbook_version` e `step_id` precisam ser coerentes;
 - `area` é atributo estruturado, não texto de conversa;
-- nenhum campo aceita transcript, `answer`, `purpose`, nome, username, email, token, segredo, traceback ou mensagem bruta de exceção;
-- o record é imutável.
+- não existem transcript, `answer`, `purpose`, nome, username, email, token, segredo, traceback ou mensagem bruta de exceção no contrato.
 
-A Fase 11 não versiona dados corporativos reais. Runtime fica em memória e a fixture Git é totalmente sintética.
+Runtime permanece em memória. Nenhum dado corporativo real é versionado pela Fase 11.
 
 ## 7. Vocabulário fechado de outcomes
 
@@ -131,55 +130,36 @@ EXECUTION_COMPLETED
 EXECUTION_FAILED
 ```
 
-Proveniência de cada outcome:
+Proveniência:
 
 - `RESOLVED_BY_KNOWLEDGE`: triagem `ANSWERED` com `KNOWLEDGE_FOUND`;
 - `GUIDED_BY_PLAYBOOK`: resultado `PLAYBOOK_FOUND`;
 - `ROUTED_TO_HUMAN`: request `PENDING_APPROVAL` com `RoutingAssignment` compatível;
-- `APPROVED`, `REJECTED`, `DENIED_POLICY`: estado equivalente de `AccessRequestRecord`;
+- `APPROVED`, `REJECTED`, `DENIED_POLICY`: estado equivalente do `AccessRequestRecord`;
 - `EXECUTION_COMPLETED`: state `COMPLETED`;
 - `EXECUTION_FAILED`: state `FAILED`.
 
-`TRIAGED` e `EXECUTING` são snapshots transitórios e não viram outcome nesta fase.
+`TRIAGED` e `EXECUTING` são transitórios e não viram outcomes analíticos.
 
 ## 8. OutcomeCollector
 
-Interfaces:
+Interfaces públicas:
 
 ```python
-OutcomeCollector.from_knowledge(
-    interaction_id: str,
-    triage: TriageState,
-    result: Mapping[str, object],
-    *,
-    area: str = "",
-) -> OutcomeRecord
-
-OutcomeCollector.from_playbook(
-    interaction_id: str,
-    triage: TriageState,
-    result: Mapping[str, object],
-    *,
-    area: str = "",
-) -> OutcomeRecord
-
-OutcomeCollector.from_request(
-    interaction_id: str,
-    record: AccessRequestRecord,
-    assignment: RoutingAssignment | None = None,
-) -> OutcomeRecord
+OutcomeCollector.from_knowledge(...)
+OutcomeCollector.from_playbook(...)
+OutcomeCollector.from_request(...)
 ```
 
 Regras:
 
-- adapters validam tipo e status real antes de projetar;
-- Knowledge só aceita `ANSWERED` + `KNOWLEDGE_FOUND`;
-- Playbook só aceita `PLAYBOOK_FOUND`;
-- request chama `validate_access_request_record(record)`;
+- Knowledge exige `ANSWERED` + `KNOWLEDGE_FOUND`;
+- Playbook exige `PLAYBOOK_FOUND`;
+- request é validado por `validate_access_request_record`;
 - `PENDING_APPROVAL` exige assignment com mesmo `request_id`, `system` e `capability`;
-- estados finais usam apenas códigos seguros do record;
-- nenhuma função chama policy, approval, execution, CDM ou routing service;
-- nenhum objeto de entrada é modificado.
+- estados finais usam apenas códigos seguros já persistidos;
+- collectors não chamam policy, approval, execution, CDM ou routing service;
+- collectors não mutam objetos de entrada.
 
 ## 9. Ingestão, idempotência e concorrência
 
@@ -194,13 +174,13 @@ class InMemoryOutcomeStore:
 
 Semântica:
 
-1. primeiro record válido é armazenado;
-2. replay idêntico retorna o existente;
+1. primeiro payload válido para um ID é armazenado;
+2. replay idêntico retorna o record existente;
 3. replay idêntico não aumenta contagem;
-4. mesmo ID com payload diferente falha `OUTCOME_CONFLICT`;
-5. snapshot é tuple em ordem de `interaction_id`;
-6. não há delete ou update arbitrário;
-7. check e write são atômicos sob o mesmo `RLock`.
+4. mesmo ID com payload diferente falha com `OUTCOME_CONFLICT`;
+5. snapshot é tuple ordenada por `interaction_id`;
+6. não existe delete ou update arbitrário;
+7. check e write ficam sob o mesmo `RLock`.
 
 ## 10. Agregação e chave de padrão
 
@@ -210,7 +190,7 @@ A chave primária é exatamente:
 (system, intent, capability, area)
 ```
 
-`knowledge_id`, `playbook_id`, `outcome` e `reason_code` são dimensões de evidência, não parte da chave principal.
+`knowledge_id`, `playbook_id`, `outcome` e `reason_code` são dimensões de evidência e não dividem a chave principal.
 
 ```python
 @dataclass(frozen=True, order=True)
@@ -226,25 +206,29 @@ class PatternAggregate:
     occurrence_count: int
     evidence_ids: tuple[str, ...]
     outcome_counts: tuple[tuple[str, int], ...]
+    knowledge_count: int
     knowledge_ids: tuple[str, ...]
+    playbook_count: int
     playbook_ids: tuple[str, ...]
     reason_codes: tuple[str, ...]
 ```
 
-`PatternAggregator.aggregate(snapshot)` valida records, agrupa por chave exata, conta uma vez cada interação e ordena tudo canonicamente. A mesma coleção em qualquer ordem gera o mesmo resultado.
+`knowledge_count` é a quantidade de evidências do padrão com `knowledge_id` não vazio. `playbook_count` é a quantidade com `playbook_id` não vazio. Esses contadores existem somente para provar cobertura total ou parcial do padrão. Eles impedem que cobertura parcial gere falso `KNOWLEDGE_GAP`, `PLAYBOOK_GAP` ou `AUTOMATION_CANDIDATE`.
+
+`PatternAggregator.aggregate` valida records, agrupa por chave exata, conta cada interação uma vez e ordena resultados, IDs e contagens canonicamente. A mesma coleção em qualquer ordem gera o mesmo aggregate.
 
 Não existe embedding, similaridade, LLM ou score.
 
 ## 11. Thresholds
 
-Configuração explícita e versionada:
+Configuração fechada:
 
 ```text
 LEARNING_RULES_VERSION = 1
 MIN_RECURRENCE = 3
 ```
 
-O valor `3` é coberto por testes e não muda automaticamente. Ele não tem relação com o threshold de Knowledge `0.65`, que permanece intacto.
+O threshold é explícito, versionado e coberto por testes. Não muda automaticamente e não tem relação com o threshold de Knowledge `0.65`.
 
 ## 12. PreventionOpportunity
 
@@ -261,7 +245,7 @@ class PreventionOpportunity:
 
 `opportunity_id` é determinístico a partir de `category + PatternKey`, usando SHA-256 de representação canônica e prefixo `OPP-`.
 
-A oportunidade é somente recomendação para revisão humana. Não há API para aplicá-la automaticamente.
+A oportunidade é somente recomendação. Não existe API que aplique mudança operacional.
 
 ## 13. Categorias e regras
 
@@ -280,59 +264,53 @@ Todas exigem `occurrence_count >= MIN_RECURRENCE`.
 
 ### KNOWLEDGE_GAP
 
-Todas as evidências do padrão não têm `knowledge_id` e têm outcome `ROUTED_TO_HUMAN`.
+Emitir somente quando todas as evidências são `ROUTED_TO_HUMAN` e `knowledge_count == 0`.
 
 ### PLAYBOOK_GAP
 
-Todas têm `knowledge_id`, nenhuma tem `playbook_id` e todas têm outcome `ROUTED_TO_HUMAN`.
+Emitir somente quando todas são `ROUTED_TO_HUMAN`, `knowledge_count == occurrence_count` e `playbook_count == 0`.
 
 ### HUMAN_DEPENDENCY
 
-Todas têm outcome `ROUTED_TO_HUMAN`.
+Emitir quando todas as evidências são `ROUTED_TO_HUMAN`.
 
 ### AUTOMATION_CANDIDATE
 
-Todas têm outcome `ROUTED_TO_HUMAN`, capability não vazia e exatamente um `playbook_id` não vazio no agregado.
+Emitir quando todas são `ROUTED_TO_HUMAN`, capability é não vazia, `playbook_count == occurrence_count` e existe exatamente um `playbook_id` no aggregate.
 
-É apenas uma candidata futura. Nenhuma automação é executada.
+É candidata futura, nunca execução automática.
 
 ### PREVENTION_CANDIDATE
 
-Qualquer padrão recorrente gera oportunidade de investigar prevenção na origem. Isso não afirma causa raiz.
+Qualquer padrão recorrente gera recomendação de investigação preventiva. Isso não afirma causa raiz.
 
 ### EXECUTION_RELIABILITY_ISSUE
 
-O padrão possui pelo menos `MIN_RECURRENCE` evidências `EXECUTION_FAILED`.
+Emitir quando o aggregate contém pelo menos `MIN_RECURRENCE` outcomes `EXECUTION_FAILED`.
 
 Categorias podem se sobrepor porque explicam dimensões diferentes da mesma recorrência.
 
 ## 14. OpportunityEngine e explicabilidade
 
-```python
-class OpportunityEngine:
-    def generate(
-        self,
-        patterns: tuple[PatternAggregate, ...],
-    ) -> tuple[PreventionOpportunity, ...]: ...
-```
+`OpportunityEngine.generate` recebe aggregates e devolve tuple canônica de oportunidades.
 
 Regras:
 
-- avaliação em ordem fixa de categorias;
-- saída canônica por `(key, category, opportunity_id)`;
-- mesma entrada gera mesma saída;
-- `occurrence_count`, `evidence_ids`, `PatternKey` e `reason_codes` explicam por que a oportunidade existe;
-- nenhum texto gerado por LLM entra na decisão.
+- mesma entrada produz mesma saída;
+- saída é ordenada por `(PatternKey, category, opportunity_id)`;
+- nenhuma regra usa LLM ou score probabilístico;
+- cada oportunidade expõe chave, quantidade, `evidence_ids` e `reason_codes`;
+- frequência histórica nunca vira autorização.
 
 ## 15. Feedback humano
 
-A primeira implementação não cria lifecycle de oportunidade. `OPEN`, `ACKNOWLEDGED`, `DISMISSED` e `ACCEPTED` ficam fora desta fase porque ainda não existe interface de revisão. Isso evita criar um segundo workflow antes da Fase 12.
+A primeira implementação não cria lifecycle de oportunidade. `OPEN`, `ACKNOWLEDGED`, `DISMISSED` e `ACCEPTED` ficam fora desta fase porque ainda não existe interface de revisão. Isso evita introduzir um segundo workflow antes da Fase 12.
 
 ## 16. Relação com Knowledge
 
-`KNOWLEDGE_GAP` nunca escreve em source de Knowledge, nunca altera status para `APPROVED`, nunca publica `answer`, nunca substitui provenance e nunca altera o threshold `0.65`.
+`KNOWLEDGE_GAP` não escreve em source de Knowledge, não altera status para `APPROVED`, não publica `answer`, não substitui provenance e não muda o threshold `0.65`.
 
-Qualquer sugestão futura de conteúdo deverá permanecer `PROPOSED`, `DRAFT` ou `CANDIDATE` até revisão humana.
+Sugestões futuras de conteúdo deverão permanecer `PROPOSED`, `DRAFT` ou `CANDIDATE` até revisão humana.
 
 ## 17. Relação com Playbooks
 
@@ -342,17 +320,17 @@ Qualquer sugestão futura de conteúdo deverá permanecer `PROPOSED`, `DRAFT` ou
 
 Analytics não chama `PolicyEngine`, `ApprovalService`, `TechnicianAuthorizationRegistry`, `RoutingService` ou `RoutedRequestService`.
 
-`RoutingAssignment` pode ser lido apenas para provar encaminhamento humano. Frequência histórica de aprovação nunca vira autorização.
+`RoutingAssignment` é lido apenas como evidência de encaminhamento humano. Routing nunca é reescrito pela camada analítica.
 
 ## 19. Relação com Execution e CDM
 
-Analytics não chama `ExecutionEngine`, `CDMActionExecutor`, `CDMAdapter` ou API fake. Somente os códigos sanitizados já presentes em `AccessRequestRecord` podem ser projetados.
+Analytics não chama `ExecutionEngine`, `CDMActionExecutor`, `CDMAdapter` ou API fake. Somente códigos sanitizados já presentes no `AccessRequestRecord` podem ser projetados.
 
-Falha repetida produz `EXECUTION_RELIABILITY_ISSUE`, sem retry ou correção automática.
+Falha repetida gera `EXECUTION_RELIABILITY_ISSUE`, sem retry ou correção automática.
 
 ## 20. Privacidade
 
-Minimização obrigatória:
+A Fase 11 aplica minimização:
 
 ```text
 sem transcript
@@ -367,21 +345,23 @@ sem traceback
 sem mensagem bruta de exceção
 ```
 
-A fixture é sintética e o store fica em memória. CLI e smoke expõem somente chaves sintéticas, categorias, contagens e IDs seguros.
+A fixture é sintética, o store é em memória e CLI/smoke expõem somente categorias, chaves sintéticas, contagens e IDs seguros.
 
 ## 21. Fixture de demonstração
 
-Criar:
+Fixture canônica:
 
 ```text
 tests/fixtures/phase11_learning_prevention_cases.jsonl
 ```
 
-Ela deve provar Knowledge recorrente, Knowledge gap, Playbook gap, routing humano, candidata a automação, prevenção e falha repetida de execução. Nenhum ticket corporativo real é usado.
+Ela contém 15 outcomes sintéticos organizados em cinco padrões, cobrindo Knowledge resolvido, Knowledge gap, Playbook gap, routing humano, candidata a automação, prevenção e falha repetida de execução.
+
+Nenhum ticket corporativo real é usado.
 
 ## 22. Smoke oficial
 
-Exatamente dez casos:
+O smoke cobre exatamente dez casos:
 
 ```text
 KNOWLEDGE_RECURRING_RESOLVES
@@ -396,7 +376,7 @@ ANALYTICS_DOES_NOT_MUTATE_OPERATIONAL_STATE
 DETERMINISTIC_SNAPSHOT
 ```
 
-Saída CLI:
+Saída oficial:
 
 ```text
 LEARNING PREVENTION SMOKE OK
@@ -405,57 +385,68 @@ Casos sinteticos: 10
 
 Sem Ollama, rede, CDM real, SaaS ou corpus corporativo.
 
-## 23. Segurança
+## 23. Segurança e arquivos protegidos
 
-Testes devem provar:
-
-- 18 blobs protegidos exatos;
-- módulos da Fase 11 sem `requests`, `urllib`, `http.client`, `socket` e imports de CDM;
-- `learning_prevention.py` sem `PolicyEngine`, `ApprovalService`, `ExecutionEngine`, `RoutingService` ou `RoutedRequestService`;
-- oportunidade não altera policy, request, knowledge, playbook ou routing usados como evidência;
-- fixture não contém segredo, email ou transcript;
-- smoke não chama rede.
-
-## 24. Blobs protegidos do baseline
-
-Valores canônicos no baseline `81a748921ba01393285da2e2d2ebc9371c890e2c`:
+Os testes da Fase 11 exigem que os 18 arquivos protegidos do baseline permaneçam com os blobs exatos capturados antes da primeira mudança:
 
 ```text
-src/ai_service_desk/engine/knowledge.py = 233d60bea6e0616d6b3968760f1bce09fc393d08
-src/ai_service_desk/engine/knowledge_retrieval.py = cf559b66c9a9d150628eeb0d8db195f7a51a34e7
-src/ai_service_desk/engine/triage.py = c5ab48f7194fab561f9062c3ab5798c86ec0a8a0
-src/ai_service_desk/engine/playbook.py = 947fa1c888688a28a35826bc5a03286f46d0269a
-src/ai_service_desk/engine/access_request.py = f34fc3f0e22d82b8bf8f13439ed78a7d31d5869d
-src/ai_service_desk/engine/policy.py = 60a4f3ae785353009c30b37f71e1ce91865b899e
-src/ai_service_desk/engine/confidence.py = ffc0c212b455978f79a3591578f323ca0e9612dc
-src/ai_service_desk/engine/request_lifecycle.py = dfd194ff8a364a0eb0d803409dad252ced216279
-src/ai_service_desk/engine/request_repository.py = 5ccda3d30484729faa1a568cf64e20bfe55e595f
-src/ai_service_desk/engine/technician_authorization.py = ca7fad92b5ad7422cbd8d0b844aa0fe6cd47c1f4
-src/ai_service_desk/engine/approval.py = ae64166a6c2595ff65fd65af7fd5b98ed71a5bb8
-src/ai_service_desk/engine/execution.py = 908ceade729daa3e18b7b604549f635b33d4688f
-src/ai_service_desk/engine/cdm_execution.py = 516e258f2349fee42dbd963a7371d2ca3937ca69
-src/ai_service_desk/engine/cdm_integration_smoke.py = 07a9416a1c4727b224176ab0840067c536ffc1b9
-src/ai_service_desk/integrations/cdm.py = 83cc0b23b27b1654912e4f9ba7162c0b0d5f7bfe
-src/ai_service_desk/integrations/cdm_fake_api.py = 275b1833d5b27b09c0ffeae9f4484636d10afe63
-src/ai_service_desk/engine/routing.py = 5c29d443801c26fa54a305a6403949681bae076a
-src/ai_service_desk/engine/routing_escalation_smoke.py = 34cc749ac4abdc48a1d8200a2e32c2635773a42c
+knowledge.py
+knowledge_retrieval.py
+triage.py
+playbook.py
+access_request.py
+policy.py
+confidence.py
+request_lifecycle.py
+request_repository.py
+technician_authorization.py
+approval.py
+execution.py
+cdm_execution.py
+cdm_integration_smoke.py
+integrations/cdm.py
+integrations/cdm_fake_api.py
+routing.py
+routing_escalation_smoke.py
 ```
 
-O teste e o workflow consultam `git rev-parse HEAD:<path>` e exigem igualdade exata.
+Os valores canônicos são fixados em `tests/engine/test_phase11_security.py` e repetidos no workflow dedicado. O gate usa `git rev-parse HEAD:<path>`.
 
-## 25. CLI
+Também é obrigatório provar:
 
-Criar `phase11_cli.py` e adicionar dispatch mínimo em `__main__.py`, antes das CLIs das Fases 10 e 9.
+- sem imports de `requests`, `urllib`, `http.client`, `socket` ou módulos CDM na Fase 11;
+- sem imports de mutadores de Policy, Approval, Execution ou Routing;
+- schema sem PII ou texto livre operacional proibido;
+- fixture sem email, segredo ou token;
+- oportunidade não muta request ou assignment usados como evidência.
+
+## 24. CLI
+
+Interface mínima:
 
 ```text
 python -m ai_service_desk learning-prevention-smoke
 ```
 
-Nenhuma segunda CLI é necessária.
+`phase11_cli.py` é despachado antes dos comandos das Fases 10 e 9. Nenhuma segunda CLI é necessária.
 
-## 26. Workflow
+## 25. CI e homologação
 
-Criar `.github/workflows/phase11-learning-prevention.yml` com `pull_request`, `fetch-depth: 0`, Python `3.14`, Ruff `0.12.12` e `PYTHONPATH=src`.
+Workflow dedicado:
+
+```text
+.github/workflows/phase11-learning-prevention.yml
+```
+
+Configuração:
+
+```text
+pull_request
+fetch-depth: 0
+Python 3.14
+Ruff 0.12.12
+PYTHONPATH=src
+```
 
 Gates:
 
@@ -464,7 +455,7 @@ Gates:
 3. Ruff format `--check`.
 4. Preservação dos 847 node IDs históricos.
 5. Full pytest.
-6. Verificação dos 18 blobs.
+6. Verificação dos 18 blobs protegidos.
 7. Phase 8 security regression.
 8. Phase 9 security regression.
 9. Phase 10 security regression.
@@ -482,9 +473,9 @@ missing_historical_node_ids=0
 new_node_ids=<n>
 ```
 
-## 27. Critérios de saída
+## 26. Critérios de saída
 
-O mesmo candidate SHA precisa provar:
+A Fase 11 só pode ser homologada quando um único candidate SHA comprovar:
 
 ```text
 Python 3.14.x
@@ -492,7 +483,7 @@ Ruff 0.12.12
 Ruff lint PASS
 Ruff format PASS
 full pytest PASS
-historical = 847
+historical node IDs = 847
 missing historical = 0
 new node IDs contabilizados
 18 protected blobs PASS
@@ -501,11 +492,11 @@ Phase 9 security PASS
 Phase 10 security PASS
 Phase 11 security PASS
 Phase 10 routing smoke PASS
-Phase 11 smoke PASS 10/10
+Phase 11 learning/prevention smoke PASS 10/10
 nenhuma integração externa nova
 nenhuma mutação automática de Knowledge/Playbook/Policy
 working tree clean
 Draft PR OPEN / DRAFT / NOT MERGED
 ```
 
-Qualquer correção depois do candidate gera novo SHA e invalida evidência anterior.
+Qualquer correção depois de congelar o candidate cria novo SHA e invalida toda evidência anterior.
