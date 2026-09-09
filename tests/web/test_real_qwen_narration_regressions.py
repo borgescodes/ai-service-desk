@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from ai_service_desk.web.conversation import operational_message
@@ -14,7 +16,11 @@ def _clarification_result() -> dict:
 
 
 def _chat_response(text: str) -> dict:
-    return {"message": {"content": f'{{"assistant_message": {text!r}}}'.replace("'", '"')}}
+    return {
+        "message": {
+            "content": json.dumps({"assistant_message": text}, ensure_ascii=False),
+        }
+    }
 
 
 def test_clarification_prompt_keeps_backend_question_out_of_llm_input() -> None:
@@ -27,7 +33,8 @@ def test_clarification_prompt_keeps_backend_question_out_of_llm_input() -> None:
     def chat(payload: dict) -> dict:
         captured.update(payload)
         return _chat_response(
-            "Entendi que você precisa solicitar materiais para uma revenda e aparentemente falta acesso."
+            "Entendi que você precisa solicitar materiais para uma revenda e aparentemente "
+            "falta acesso."
         )
 
     rendered = operational_message(_clarification_result(), message, chat)
@@ -43,7 +50,8 @@ def test_clarification_prompt_keeps_backend_question_out_of_llm_input() -> None:
 def test_clarification_rejects_meta_instruction_leak_from_llm() -> None:
     def chat(_payload: dict) -> dict:
         return _chat_response(
-            "Como solicitado, não posso responder à pergunta exigida porque o backend ainda não informou."
+            "Como solicitado, não posso responder à pergunta exigida porque o backend ainda "
+            "não informou."
         )
 
     with pytest.raises(WebDemoError) as exc_info:
@@ -60,7 +68,9 @@ def test_office_clarification_uses_contextual_system_question() -> None:
     result = _clarification_result()
 
     def chat(_payload: dict) -> dict:
-        return _chat_response("Entendi que você esqueceu sua senha do Office e não consegue entrar.")
+        return _chat_response(
+            "Entendi que você esqueceu sua senha do Office e não consegue entrar."
+        )
 
     rendered = operational_message(
         result,
