@@ -1,15 +1,5 @@
 import pytest
 
-from ai_service_desk.engine import (
-    approval,
-    policy,
-    request_lifecycle,
-    request_repository,
-    routing,
-    technician_authorization,
-)
-from tests.engine import phase8_helpers
-
 
 DOMAIN_ROUTES = (
     ("CDM", "CDM_ACCESS_REQUEST", "TECH-CDM"),
@@ -20,9 +10,11 @@ DOMAIN_ROUTES = (
 )
 
 
-def _identity(technician_id: str) -> technician_authorization.TechnicianIdentity:
+def _identity(technician_id: str):
+    from ai_service_desk.engine.technician_authorization import TechnicianIdentity
+
     slug = technician_id.lower()
-    return technician_authorization.TechnicianIdentity(
+    return TechnicianIdentity(
         technician_id,
         slug,
         technician_id,
@@ -31,23 +23,21 @@ def _identity(technician_id: str) -> technician_authorization.TechnicianIdentity
 
 
 def test_five_demo_domains_resolve_to_distinct_authorized_owners():
+    from ai_service_desk.engine.routing import RoutingRegistry, RoutingRule
+    from ai_service_desk.engine.technician_authorization import (
+        TechnicianAuthorizationRegistry,
+        TechnicianRegistryEntry,
+    )
+
     entries = []
     rules = []
     expected = {}
     for system, capability, technician_id in DOMAIN_ROUTES:
         technician = _identity(technician_id)
-        entries.append(
-            technician_authorization.TechnicianRegistryEntry(
-                technician,
-                frozenset({capability}),
-            )
-        )
-        rules.append(routing.RoutingRule(system, capability, technician))
+        entries.append(TechnicianRegistryEntry(technician, frozenset({capability})))
+        rules.append(RoutingRule(system, capability, technician))
         expected[(system, capability)] = technician
-    registry = routing.RoutingRegistry(
-        rules,
-        technician_authorization.TechnicianAuthorizationRegistry(entries),
-    )
+    registry = RoutingRegistry(rules, TechnicianAuthorizationRegistry(entries))
     assert {key: registry.resolve(*key).technician_id for key in expected} == {
         key: value.technician_id for key, value in expected.items()
     }
@@ -55,39 +45,45 @@ def test_five_demo_domains_resolve_to_distinct_authorized_owners():
 
 
 def test_routing_does_not_replace_approval_authorization_gate():
-    repository = request_repository.InMemoryRequestRepository()
-    lifecycle = request_lifecycle.RequestLifecycleService(
+    from ai_service_desk.engine.approval import ApprovalService
+    from ai_service_desk.engine.policy import PolicyEngine
+    from ai_service_desk.engine.request_lifecycle import RequestLifecycleService
+    from ai_service_desk.engine.request_repository import InMemoryRequestRepository
+    from ai_service_desk.engine.routing import RoutingRegistry, RoutingRule
+    from ai_service_desk.engine.technician_authorization import (
+        TechnicianAuthorizationError,
+        TechnicianAuthorizationRegistry,
+        TechnicianRegistryEntry,
+    )
+    from tests.engine.phase8_helpers import FixedClock, make_context
+
+    repository = InMemoryRequestRepository()
+    lifecycle = RequestLifecycleService(
         repository,
-        policy_engine=policy.PolicyEngine(),
-        clock=phase8_helpers.FixedClock(),
+        policy_engine=PolicyEngine(),
+        clock=FixedClock(),
     )
     assigned = _identity("TECH-CDM")
     unauthorized = _identity("TECH-HARDWARE")
-    registry = technician_authorization.TechnicianAuthorizationRegistry(
+    registry = TechnicianAuthorizationRegistry(
         [
-            technician_authorization.TechnicianRegistryEntry(
-                assigned,
-                frozenset({"CDM_ACCESS_REQUEST"}),
-            ),
-            technician_authorization.TechnicianRegistryEntry(
-                unauthorized,
-                frozenset({"HARDWARE_SUPPORT_REQUEST"}),
-            ),
+            TechnicianRegistryEntry(assigned, frozenset({"CDM_ACCESS_REQUEST"})),
+            TechnicianRegistryEntry(unauthorized, frozenset({"HARDWARE_SUPPORT_REQUEST"})),
         ]
     )
-    resolver = routing.RoutingRegistry(
-        [routing.RoutingRule("CDM", "CDM_ACCESS_REQUEST", assigned)],
+    resolver = RoutingRegistry(
+        [RoutingRule("CDM", "CDM_ACCESS_REQUEST", assigned)],
         registry,
     )
     assert resolver.resolve("CDM", "CDM_ACCESS_REQUEST") == assigned
-    pending = lifecycle.create_request(phase8_helpers.make_context())
-    approval_service = approval.ApprovalService(
+    pending = lifecycle.create_request(make_context())
+    approval_service = ApprovalService(
         repository,
         lifecycle,
         registry,
-        clock=phase8_helpers.FixedClock(),
+        clock=FixedClock(),
     )
-    with pytest.raises(technician_authorization.TechnicianAuthorizationError) as exc:
+    with pytest.raises(TechnicianAuthorizationError) as exc:
         approval_service.approve(
             pending.request_id,
             unauthorized,
