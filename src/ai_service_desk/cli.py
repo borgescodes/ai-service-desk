@@ -15,6 +15,7 @@ from ai_service_desk.engine.knowledge_smoke import run_knowledge_smoke
 from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
 from ai_service_desk.engine.playbook import build_playbook_catalog, load_playbooks
 from ai_service_desk.engine.playbook_smoke import run_playbook_smoke
+from ai_service_desk.engine.policy_smoke import run_policy_smoke
 from ai_service_desk.engine.real_smoke import run_demo_smoke, run_real_smoke
 from ai_service_desk.engine.retrieval import RetrievalEngine, format_result
 from ai_service_desk.engine.smoke import run_validation
@@ -111,6 +112,10 @@ def build_parser() -> argparse.ArgumentParser:
     playbook_smoke.add_argument("--cases", type=Path, required=True)
     playbook_smoke.add_argument("--work-directory", type=Path, required=True)
     playbook_smoke.add_argument("--report", type=Path, required=True)
+
+    policy_smoke = sub.add_parser("policy-smoke")
+    policy_smoke.add_argument("--cases", type=Path, required=True)
+    policy_smoke.add_argument("--report", type=Path, required=True)
 
     show_index = sub.add_parser("show-index")
     show_index.add_argument("--index", type=Path, required=True)
@@ -318,6 +323,13 @@ def main(argv: list[str] | None = None) -> int:
                 args.report,
             )
             print("PLAYBOOK SMOKE OK" if report["ok"] else "PLAYBOOK SMOKE REQUER REVISAO")
+            print(f"Casos sinteticos: {len(report.get('cases', []))}")
+            print("Relatorio agregado local: " + str(args.report))
+            return 0 if report["ok"] else 1
+
+        if args.command == "policy-smoke":
+            report = run_policy_smoke(args.cases, args.report)
+            print("POLICY SMOKE OK" if report["ok"] else "POLICY SMOKE REQUER REVISAO")
             print(f"Casos sinteticos: {len(report.get('cases', []))}")
             print("Relatorio agregado local: " + str(args.report))
             return 0 if report["ok"] else 1

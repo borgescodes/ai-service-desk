@@ -25,6 +25,7 @@ SYSTEM_ALIASES = {
     "OFFICE 365": ("office 365", "microsoft 365", "office365"),
     "WHATSAPP": ("whatsapp", "whatsap"),
     "WINDOWS": ("windows",),
+    "CDM": ("cdm",),
 }
 GENERIC_SYSTEM_WORDS = {
     "sistema",
