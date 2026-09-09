@@ -1,5 +1,6 @@
+from ai_service_desk.engine.learning_prevention import OpportunityEngine, PatternAggregator
 from ai_service_desk.web.demo_runtime import DemoRuntime
-from ai_service_desk.web.presentation import present_request, present_timeline
+from ai_service_desk.web.presentation import present_prevention, present_request, present_timeline
 
 
 def _pending_request(runtime: DemoRuntime):
@@ -78,5 +79,25 @@ def test_operational_presentation_exposes_routing_and_policy_evidence() -> None:
         assert payload["routing"]["technician_name"] == "Técnico CDM"
         assert payload["policy"]["reason_code"] == record.latest_policy.reason_code
         assert payload["policy"]["policy_id"] == record.latest_policy.policy_id
+    finally:
+        runtime.close()
+
+
+def test_present_prevention_is_allowlisted_and_explains_engine_output() -> None:
+    runtime = DemoRuntime.create()
+    try:
+        opportunity = OpportunityEngine().generate(
+            PatternAggregator.aggregate(runtime.outcome_store.snapshot())
+        )[0]
+        payload = present_prevention(opportunity)
+        assert payload["opportunity_id"] == opportunity.opportunity_id
+        assert payload["category"] == opportunity.category
+        assert payload["occurrence_count"] == opportunity.occurrence_count
+        assert payload["system"] == opportunity.key.system
+        assert payload["intent"] == opportunity.key.intent
+        assert payload["reason_codes"] == list(opportunity.reason_codes)
+        assert str(opportunity.occurrence_count) in payload["explanation"]
+        assert opportunity.category in payload["explanation_code"]
+        assert "evidence_ids" not in payload
     finally:
         runtime.close()
