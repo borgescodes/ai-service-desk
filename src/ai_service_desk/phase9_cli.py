@@ -11,7 +11,9 @@ PHASE9_COMMANDS = frozenset({"cdm-api", "cdm-integration-smoke"})
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="AI Service Desk: integracao local simulada do CDM.")
+    parser = argparse.ArgumentParser(
+        description="AI Service Desk: integracao local simulada do CDM."
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     cdm_api = sub.add_parser("cdm-api")
