@@ -8,8 +8,8 @@ from ai_service_desk.engine.request_repository import InMemoryRequestRepository
 from ai_service_desk.engine.routing import (
     ApprovalQueue,
     InMemoryRoutingAssignmentStore,
-    RouteNotFoundError,
     RoutedRequestService,
+    RouteNotFoundError,
     RoutingRegistry,
     RoutingRule,
     RoutingRuleConfigurationError,
@@ -138,7 +138,11 @@ def run_routing_escalation_smoke() -> dict[str, object]:
     )
 
     replay = routing.route(pending)
-    actual = "ONE_ASSIGNMENT" if replay == assigned and len(assignments.snapshot()) == 1 else "FAILED"
+    actual = (
+        "ONE_ASSIGNMENT"
+        if replay == assigned and len(assignments.snapshot()) == 1
+        else "FAILED"
+    )
     results.append(_result("IDEMPOTENT_ROUTING", "ONE_ASSIGNMENT", actual))
 
     denied = routed.create_request(_context(requested_role="ADMIN"))
@@ -181,7 +185,7 @@ def run_routing_escalation_smoke() -> dict[str, object]:
     )
 
     resolved = tuple(
-        registry.resolve(system, capability).technician_id
+        routing.registry.resolve(system, capability).technician_id
         for system, capability, _ in DOMAIN_ROUTES
     )
     actual = "FIVE_DISTINCT_OWNERS" if len(set(resolved)) == 5 else "FAILED"
