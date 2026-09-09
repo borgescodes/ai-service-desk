@@ -16,6 +16,8 @@ from ai_service_desk.web.demo_identity import IdentityNotFoundError
 from ai_service_desk.web.demo_runtime import DemoRuntime
 from ai_service_desk.web.errors import WebDemoError
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
+
 
 class MessageBody(BaseModel):
     message: str = Field(min_length=1, max_length=3000)
@@ -55,6 +57,8 @@ def create_app(runtime: DemoRuntime | None = None, *, demo_mode: bool = True) ->
     async def web_demo_error_handler(_request: Request, exc: WebDemoError):
         if exc.code == "IDENTITY_REQUIRED":
             status = 401
+        elif exc.code == "PREVENTION_NOT_FOUND":
+            status = 404
         elif exc.code == "ROUTING_INCONSISTENT":
             status = 409
         else:
@@ -92,6 +96,15 @@ def create_app(runtime: DemoRuntime | None = None, *, demo_mode: bool = True) ->
         app.state.runtime.identity_provider.resolve(value)
         return value
 
+    def require_loopback(request: Request) -> None:
+        client = request.client
+        host = client.host if client is not None else ""
+        if host not in _LOOPBACK_HOSTS:
+            raise WebDemoError(
+                "LOOPBACK_REQUIRED",
+                "Reset da demonstração exige acesso local.",
+            )
+
     @app.get("/api/health")
     def health():
         return {"ok": True, "product": "Jup Resolve", "demo": bool(app.state.demo_mode)}
@@ -125,6 +138,19 @@ def create_app(runtime: DemoRuntime | None = None, *, demo_mode: bool = True) ->
         identity_id = identity(x_demo_identity)
         return app.state.runtime.get_operational_request(identity_id, request_id)
 
+    @app.get("/api/operations/prevention")
+    def prevention(x_demo_identity: str | None = Header(default=None)):
+        identity_id = identity(x_demo_identity)
+        return app.state.runtime.list_prevention(identity_id)
+
+    @app.get("/api/operations/prevention/{opportunity_id}")
+    def prevention_detail(
+        opportunity_id: str,
+        x_demo_identity: str | None = Header(default=None),
+    ):
+        identity_id = identity(x_demo_identity)
+        return app.state.runtime.get_prevention(identity_id, opportunity_id)
+
     @app.post("/api/requests/{request_id}/approve")
     def approve(
         request_id: str,
@@ -150,6 +176,14 @@ def create_app(runtime: DemoRuntime | None = None, *, demo_mode: bool = True) ->
             request_id,
             expected_version=body.expected_version,
         )
+
+    if demo_mode:
+
+        @app.post("/api/demo/reset")
+        def reset_demo(request: Request):
+            require_loopback(request)
+            app.state.runtime.reset()
+            return {"ok": True}
 
     @app.on_event("shutdown")
     def shutdown_runtime() -> None:
