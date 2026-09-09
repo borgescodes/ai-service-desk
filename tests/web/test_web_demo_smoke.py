@@ -1,6 +1,5 @@
 from ai_service_desk.web.smoke import run_web_demo_smoke
 
-
 _EXPECTED_CASES = [
     "REQUESTER_IDENTITY",
     "KNOWLEDGE_NO_REQUEST",
