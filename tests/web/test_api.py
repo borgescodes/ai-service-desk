@@ -1,3 +1,6 @@
+from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
 
 from ai_service_desk.web.api import create_app
@@ -7,6 +10,18 @@ from ai_service_desk.web.demo_runtime import DemoRuntime
 def _client(runtime: DemoRuntime, *, demo_mode: bool = True, host: str = "127.0.0.1"):
     app = create_app(runtime=runtime, demo_mode=demo_mode)
     return TestClient(app, client=(host, 50000))
+
+
+def _static_build(root: Path) -> Path:
+    dist = root / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text(
+        "<!doctype html><html><body>STATIC-DEMO</body></html>",
+        encoding="utf-8",
+    )
+    (dist / "styles.css").write_text("body { color: black; }\n", encoding="utf-8")
+    (dist / "app.mjs").write_text("console.log('static-demo');\n", encoding="utf-8")
+    return dist
 
 
 def test_http_flow_browser_to_api_to_domain_and_back_to_requester() -> None:
@@ -241,5 +256,64 @@ def test_demo_reset_rejects_non_loopback_client_and_ignores_forwarded_header() -
         )
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "LOOPBACK_REQUIRED"
+    finally:
+        runtime.close()
+
+
+def test_static_build_serves_root_and_spa_routes(tmp_path) -> None:
+    runtime = DemoRuntime.create()
+    dist = _static_build(tmp_path)
+    client = TestClient(create_app(runtime=runtime, static_dir=dist))
+    try:
+        root = client.get("/")
+        requests = client.get("/requests")
+        assert root.status_code == 200
+        assert requests.status_code == 200
+        assert "STATIC-DEMO" in root.text
+        assert requests.text == root.text
+        assert root.headers["content-type"].startswith("text/html")
+    finally:
+        runtime.close()
+
+
+def test_static_build_serves_assets_with_safe_mime_and_csp(tmp_path) -> None:
+    runtime = DemoRuntime.create()
+    dist = _static_build(tmp_path)
+    client = TestClient(create_app(runtime=runtime, static_dir=dist))
+    try:
+        css = client.get("/styles.css")
+        js = client.get("/app.mjs")
+        root = client.get("/")
+        assert css.status_code == 200
+        assert css.headers["content-type"].startswith("text/css")
+        assert js.status_code == 200
+        assert "javascript" in js.headers["content-type"]
+        csp = root.headers["content-security-policy"]
+        assert "default-src 'self'" in csp
+        assert "connect-src 'self'" in csp
+        assert "http:" not in csp
+        assert "https:" not in csp
+    finally:
+        runtime.close()
+
+
+def test_unknown_api_route_stays_json_404_instead_of_spa_fallback(tmp_path) -> None:
+    runtime = DemoRuntime.create()
+    dist = _static_build(tmp_path)
+    client = TestClient(create_app(runtime=runtime, static_dir=dist))
+    try:
+        response = client.get("/api/not-a-real-route")
+        assert response.status_code == 404
+        assert response.headers["content-type"].startswith("application/json")
+        assert "STATIC-DEMO" not in response.text
+    finally:
+        runtime.close()
+
+
+def test_explicit_missing_static_build_fails_with_build_instruction(tmp_path) -> None:
+    runtime = DemoRuntime.create()
+    try:
+        with pytest.raises(RuntimeError, match="npm run build"):
+            create_app(runtime=runtime, static_dir=tmp_path / "missing-dist")
     finally:
         runtime.close()
