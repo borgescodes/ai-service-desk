@@ -58,6 +58,7 @@ from ai_service_desk.web.presentation import present_prevention, present_request
 
 DEMO_MODES = frozenset({"DETERMINISTIC", "LOCAL_AI"})
 DEFAULT_DEMO_MODE = "DETERMINISTIC"
+DEMO_KNOWLEDGE_THRESHOLD = 0.45
 
 
 class DemoRuntime:
@@ -146,6 +147,7 @@ class DemoRuntime:
             knowledge_index,
             self.demo_classifier_client,
             self.demo_embedder,
+            threshold=DEMO_KNOWLEDGE_THRESHOLD,
         )
         self.playbook_engine = PlaybookEngine(playbook_catalog, knowledge_index)
 
