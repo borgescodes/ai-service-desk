@@ -34,6 +34,10 @@ export function renderErrorState(message, retryLabel = 'Tentar novamente') {
   return `<section class="state-panel state-panel--error" role="alert"><div><strong>Não foi possível concluir</strong><p>${escapeHtml(message)}</p></div><button class="button button--secondary" type="button" data-action="retry">${escapeHtml(retryLabel)}</button></section>`;
 }
 
+export function renderUnauthorizedState(message) {
+  return `<section class="state-panel state-panel--unauthorized" role="alert"><span class="state-mark" aria-hidden="true">!</span><div><strong>Perfil sem acesso</strong><p>${escapeHtml(message)}</p><p>Use o seletor de identidade demo no cabeçalho para continuar com um perfil autorizado.</p></div></section>`;
+}
+
 export function renderEmptyState(title, message) {
   return `<section class="state-panel state-panel--empty"><span class="state-mark" aria-hidden="true">○</span><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(message)}</p></div></section>`;
 }
