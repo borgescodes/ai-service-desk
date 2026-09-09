@@ -9,7 +9,12 @@ from ai_service_desk.engine.classification import classify_ticket
 from ai_service_desk.engine.execution import ExecutionEngine
 from ai_service_desk.engine.knowledge import build_knowledge_index
 from ai_service_desk.engine.knowledge_retrieval import KnowledgeEngine
-from ai_service_desk.engine.learning_prevention import InMemoryOutcomeStore, OutcomeCollector
+from ai_service_desk.engine.learning_prevention import (
+    InMemoryOutcomeStore,
+    OpportunityEngine,
+    OutcomeCollector,
+    PatternAggregator,
+)
 from ai_service_desk.engine.playbook import build_playbook_catalog
 from ai_service_desk.engine.playbook_resolution import PlaybookEngine, action_proposal_descriptor
 from ai_service_desk.engine.policy import PolicyEngine
@@ -35,7 +40,7 @@ from ai_service_desk.web.demo_ai import DemoClassifierClient, DemoEmbedder
 from ai_service_desk.web.demo_data import demo_outcomes, write_demo_knowledge, write_demo_playbooks
 from ai_service_desk.web.demo_identity import DemoIdentityProvider, IdentityNotFoundError
 from ai_service_desk.web.errors import WebDemoError
-from ai_service_desk.web.presentation import present_request
+from ai_service_desk.web.presentation import present_prevention, present_request
 
 
 class DemoRuntime:
@@ -210,6 +215,10 @@ class DemoRuntime:
             include_internal=include_internal,
         )
 
+    def _prevention_opportunities(self):
+        patterns = PatternAggregator.aggregate(self.outcome_store.snapshot())
+        return OpportunityEngine().generate(patterns)
+
     def send_message(self, identity_id: str, message: str) -> dict:
         requester = self._requester(identity_id)
         if not isinstance(message, str) or not message.strip():
@@ -348,6 +357,20 @@ class DemoRuntime:
             expected_version=expected_version,
         )
         return self._present(rejected, assignment=assignment, include_internal=True)
+
+    def list_prevention(self, identity_id: str) -> list[dict]:
+        self._technician(identity_id)
+        return [present_prevention(item) for item in self._prevention_opportunities()]
+
+    def get_prevention(self, identity_id: str, opportunity_id: str) -> dict:
+        self._technician(identity_id)
+        for item in self._prevention_opportunities():
+            if item.opportunity_id == opportunity_id:
+                return present_prevention(item)
+        raise WebDemoError(
+            "PREVENTION_NOT_FOUND",
+            "Oportunidade de prevenção não encontrada.",
+        )
 
     def close(self) -> None:
         self._close_mutable_resources()
