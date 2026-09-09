@@ -52,7 +52,7 @@ class DemoRuntime:
         cls,
         *,
         fail_cdm_request_ids: set[str] | frozenset[str] | None = None,
-    ) -> "DemoRuntime":
+    ) -> DemoRuntime:
         return cls(fail_cdm_request_ids=fail_cdm_request_ids)
 
     def _close_mutable_resources(self) -> None:
@@ -149,7 +149,10 @@ class DemoRuntime:
 
     def _new_triage(self, identity_id: str) -> tuple[TriageEngine, object]:
         session_id = f"demo-{identity_id}-{len(self.conversations.get(identity_id, [])) + 1}"
-        classifier = lambda text: classify_ticket(text, self.demo_classifier_client.chat)
+
+        def classifier(text):
+            return classify_ticket(text, self.demo_classifier_client.chat)
+
         engine = TriageEngine(session_id, self.knowledge_engine, classifier)
         return engine, engine.initial_state()
 
@@ -157,7 +160,10 @@ class DemoRuntime:
         try:
             return self.identity_provider.requester_identity(identity_id)
         except IdentityNotFoundError as exc:
-            raise WebDemoError("NOT_AUTHORIZED", "Perfil sem acesso à visão de solicitações.") from exc
+            raise WebDemoError(
+                "NOT_AUTHORIZED",
+                "Perfil sem acesso à visão de solicitações.",
+            ) from exc
 
     def _technician(self, identity_id: str):
         try:
