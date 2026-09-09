@@ -13,6 +13,7 @@ def test_phase9_workflow_is_pr_hosted_and_secret_free():
         'python-version: "3.14"',
         '"ruff==0.12.12"',
         "secrets.token_urlsafe(32)",
+        'echo "::add-mask::$token"',
         "python -m ruff check .",
         "python -m ruff format --check .",
         "Historical node ID preservation",
