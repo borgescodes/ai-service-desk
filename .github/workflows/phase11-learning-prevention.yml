@@ -1,0 +1,122 @@
+name: Phase 11 learning and prevention
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  phase11-learning-prevention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" "ruff==0.12.12"
+      - name: Runtime versions
+        run: |
+          python --version
+          python -m ruff --version
+      - name: Ruff lint
+        run: python -m ruff check .
+      - name: Ruff format
+        run: python -m ruff format --check .
+      - name: Historical node ID preservation
+        env:
+          PHASE11_BASELINE_SHA: 81a748921ba01393285da2e2d2ebc9371c890e2c
+        run: |
+          python -m pytest --collect-only -q > "$RUNNER_TEMP/phase11-candidate-nodeids.txt"
+          git worktree add --detach "$RUNNER_TEMP/phase11-baseline" "$PHASE11_BASELINE_SHA"
+          (
+            cd "$RUNNER_TEMP/phase11-baseline"
+            PYTHONPATH=src python -m pytest --collect-only -q \
+              > "$RUNNER_TEMP/phase11-baseline-nodeids.txt"
+          )
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+
+          def node_ids(name):
+              return {
+                  line.strip()
+                  for line in (root / name).read_text(encoding="utf-8").splitlines()
+                  if "::" in line
+              }
+
+          historical = node_ids("phase11-baseline-nodeids.txt")
+          candidate = node_ids("phase11-candidate-nodeids.txt")
+          missing = historical - candidate
+          new = candidate - historical
+          print(f"historical_node_ids={len(historical)}")
+          print(f"candidate_node_ids={len(candidate)}")
+          print(f"missing_historical_node_ids={len(missing)}")
+          print(f"new_node_ids={len(new)}")
+          if len(historical) != 847 or missing:
+              raise SystemExit("Phase 11 historical node ID preservation failed")
+          PY
+          git worktree remove "$RUNNER_TEMP/phase11-baseline" --force
+      - name: Full pytest
+        run: python -m pytest -q
+      - name: Protected previous-phase blobs
+        run: |
+          python - <<'PY'
+          import subprocess
+
+          expected = {
+              "src/ai_service_desk/engine/knowledge.py": "233d60bea6e0616d6b3968760f1bce09fc393d08",
+              "src/ai_service_desk/engine/knowledge_retrieval.py": "cf559b66c9a9d150628eeb0d8db195f7a51a34e7",
+              "src/ai_service_desk/engine/triage.py": "c5ab48f7194fab561f9062c3ab5798c86ec0a8a0",
+              "src/ai_service_desk/engine/playbook.py": "947fa1c888688a28a35826bc5a03286f46d0269a",
+              "src/ai_service_desk/engine/access_request.py": "f34fc3f0e22d82b8bf8f13439ed78a7d31d5869d",
+              "src/ai_service_desk/engine/policy.py": "60a4f3ae785353009c30b37f71e1ce91865b899e",
+              "src/ai_service_desk/engine/confidence.py": "ffc0c212b455978f79a3591578f323ca0e9612dc",
+              "src/ai_service_desk/engine/request_lifecycle.py": "dfd194ff8a364a0eb0d803409dad252ced216279",
+              "src/ai_service_desk/engine/request_repository.py": "5ccda3d30484729faa1a568cf64e20bfe55e595f",
+              "src/ai_service_desk/engine/technician_authorization.py": "ca7fad92b5ad7422cbd8d0b844aa0fe6cd47c1f4",
+              "src/ai_service_desk/engine/approval.py": "ae64166a6c2595ff65fd65af7fd5b98ed71a5bb8",
+              "src/ai_service_desk/engine/execution.py": "908ceade729daa3e18b7b604549f635b33d4688f",
+              "src/ai_service_desk/engine/cdm_execution.py": "516e258f2349fee42dbd963a7371d2ca3937ca69",
+              "src/ai_service_desk/engine/cdm_integration_smoke.py": "07a9416a1c4727b224176ab0840067c536ffc1b9",
+              "src/ai_service_desk/integrations/cdm.py": "83cc0b23b27b1654912e4f9ba7162c0b0d5f7bfe",
+              "src/ai_service_desk/integrations/cdm_fake_api.py": "275b1833d5b27b09c0ffeae9f4484636d10afe63",
+              "src/ai_service_desk/engine/routing.py": "5c29d443801c26fa54a305a6403949681bae076a",
+              "src/ai_service_desk/engine/routing_escalation_smoke.py": "34cc749ac4abdc48a1d8200a2e32c2635773a42c",
+          }
+          for path, wanted in expected.items():
+              actual = subprocess.check_output(
+                  ["git", "rev-parse", f"HEAD:{path}"], text=True
+              ).strip()
+              print(f"protected_blob={path}:{actual}")
+              if actual != wanted:
+                  raise SystemExit(f"Protected blob changed: {path}")
+          print("protected_blobs=PASS")
+          PY
+      - name: Phase 8 security regression
+        run: python -m pytest tests/engine/test_phase8_security.py -q
+      - name: Phase 9 security regression
+        run: python -m pytest tests/engine/test_phase9_security.py -q
+      - name: Phase 10 security regression
+        run: python -m pytest tests/engine/test_phase10_security.py -q
+      - name: Phase 11 security
+        run: python -m pytest tests/engine/test_phase11_security.py -q
+      - name: Phase 10 routing smoke
+        run: python -m ai_service_desk routing-escalation-smoke
+      - name: Phase 11 learning prevention smoke
+        run: python -m ai_service_desk learning-prevention-smoke
+      - name: Working tree clean
+        run: |
+          status="$(git status --porcelain)"
+          printf '%s\n' "$status"
+          test -z "$status"
