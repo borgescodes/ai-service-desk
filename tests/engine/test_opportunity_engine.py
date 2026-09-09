@@ -1,8 +1,8 @@
 from dataclasses import replace
 
 from ai_service_desk.engine.learning_prevention import (
-    OPPORTUNITY_CATEGORIES,
     MIN_RECURRENCE,
+    OPPORTUNITY_CATEGORIES,
     OpportunityEngine,
     OutcomeRecord,
     PatternAggregator,
