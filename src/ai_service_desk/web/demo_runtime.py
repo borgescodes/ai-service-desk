@@ -60,6 +60,20 @@ class DemoRuntime:
     ) -> DemoRuntime:
         return cls(fail_cdm_request_ids=fail_cdm_request_ids)
 
+    def _close_knowledge_resources(self) -> None:
+        triage = getattr(self, "_triage", None)
+        if triage is not None:
+            triage.clear()
+
+        knowledge_engine = getattr(self, "knowledge_engine", None)
+        if knowledge_engine is None:
+            return
+        matrix = getattr(knowledge_engine, "matrix", None)
+        mapping = getattr(matrix, "_mmap", None)
+        if mapping is not None and not mapping.closed:
+            mapping.close()
+        self.knowledge_engine = None
+
     def _close_mutable_resources(self) -> None:
         if self.fake_cdm_server is not None:
             self.fake_cdm_server.shutdown()
@@ -68,6 +82,7 @@ class DemoRuntime:
         if self._fake_cdm_thread is not None:
             self._fake_cdm_thread.join(timeout=2)
             self._fake_cdm_thread = None
+        self._close_knowledge_resources()
         if self._temp is not None:
             self._temp.cleanup()
             self._temp = None
