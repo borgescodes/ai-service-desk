@@ -1,4 +1,6 @@
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,6 +49,16 @@ def test_web_demo_defaults_to_deterministic_mode(monkeypatch) -> None:
 
     assert phase12_cli.main(["web-demo"]) == 0
     assert calls == [("127.0.0.1", 8000, "DETERMINISTIC")]
+
+
+def test_run_web_demo_forwards_mode_to_web_api(monkeypatch) -> None:
+    calls = []
+    fake_api = SimpleNamespace(run_web_demo=lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setitem(sys.modules, "ai_service_desk.web.api", fake_api)
+
+    phase12_cli.run_web_demo("127.0.0.1", 8000, "LOCAL_AI")
+
+    assert calls == [{"host": "127.0.0.1", "port": 8000, "mode": "LOCAL_AI"}]
 
 
 def test_web_demo_rejects_non_loopback_host() -> None:
