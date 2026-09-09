@@ -26,10 +26,9 @@ class DemoClassifierClient:
                 "entities": {},
                 "confidence": 0.92,
             }
-        elif (
-            any(term in normalized for term in ("microsoft 365", "office 365", "office365"))
-            and _access_language(normalized)
-        ):
+        elif any(
+            term in normalized for term in ("microsoft 365", "office 365", "office365")
+        ) and _access_language(normalized):
             result = {
                 "intent": "PROBLEMA_ACESSO",
                 "system": "OFFICE 365",
