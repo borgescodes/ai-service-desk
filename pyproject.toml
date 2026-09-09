@@ -12,11 +12,12 @@ dependencies = [
     "numpy>=2.0,<3",
     "pandas>=2.2,<4",
     "requests>=2.32,<3",
-    "uvicorn==0.52.0",
+    "uvicorn==0.52.4",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "httpx>=0.28,<1",
     "pytest>=8",
     "ruff>=0.12",
 ]
