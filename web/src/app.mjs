@@ -7,7 +7,7 @@ import {
   renderPreventionList,
   renderRequestList,
 } from './components.mjs';
-import { escapeHtml, renderErrorState } from './render.mjs';
+import { escapeHtml, renderErrorState, renderUnauthorizedState } from './render.mjs';
 import { resolveRoute, routePath } from './router.mjs';
 import { createInitialState, selectIdentity } from './state.mjs';
 
@@ -38,7 +38,11 @@ function operationTabs() {
 }
 
 function renderRoute() {
-  if (state.transientError) return renderErrorState(state.transientError);
+  if (state.transientError) {
+    return state.transientError.kind === 'unauthorized'
+      ? renderUnauthorizedState(state.transientError.message)
+      : renderErrorState(state.transientError.message);
+  }
   if (state.loading && !state.routeData.loaded) {
     return `<section class="state-panel" role="status" aria-live="polite"><div><strong>Carregando</strong><p>Buscando o estado atual no backend.</p></div></section>`;
   }
@@ -86,12 +90,30 @@ function render() {
 
 function friendlyError(error) {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Selecione uma identidade de demonstração válida.';
-    if (error.status === 403) return 'Esta identidade não tem acesso a esta operação.';
-    if (error.status === 409) return 'O estado mudou. Recarregue os dados e tente novamente.';
-    return error.message;
+    if (error.status === 401) {
+      return {
+        kind: 'unauthorized',
+        message: 'Selecione uma identidade de demonstração válida.',
+      };
+    }
+    if (error.status === 403) {
+      return {
+        kind: 'unauthorized',
+        message: 'Esta identidade não tem acesso a esta operação.',
+      };
+    }
+    if (error.status === 409) {
+      return {
+        kind: 'error',
+        message: 'O estado mudou. Recarregue os dados e tente novamente.',
+      };
+    }
+    return { kind: 'error', message: error.message };
   }
-  return 'Não foi possível falar com o Jup Resolve. Tente novamente.';
+  return {
+    kind: 'error',
+    message: 'Não foi possível falar com o Jup Resolve. Tente novamente.',
+  };
 }
 
 async function loadRoute() {
@@ -154,16 +176,30 @@ async function submitMessage(form) {
       body: { message },
     });
     if (result.request_id) {
-      const detail = await apiRequest(`/api/requests/${encodeURIComponent(result.request_id)}`, { identityId: state.identityId });
+      const detail = await apiRequest(`/api/requests/${encodeURIComponent(result.request_id)}`, {
+        identityId: state.identityId,
+      });
       state.understood = understoodFromRequest(detail);
-      state.messages = [...state.messages, { role: 'JUP', text: `Solicitação ${detail.request_id} criada. ${detail.state_label}.` }];
+      state.messages = [
+        ...state.messages,
+        {
+          role: 'JUP',
+          text: `Solicitação ${detail.request_id} criada. ${detail.state_label}.`,
+        },
+      ];
     } else if (result.answer) {
       state.messages = [...state.messages, { role: 'JUP', text: result.answer }];
       state.understood = null;
     } else if (result.question) {
       state.messages = [...state.messages, { role: 'JUP', text: result.question }];
     } else {
-      state.messages = [...state.messages, { role: 'JUP', text: 'Contexto recebido. Continue descrevendo o que você precisa.' }];
+      state.messages = [
+        ...state.messages,
+        {
+          role: 'JUP',
+          text: 'Contexto recebido. Continue descrevendo o que você precisa.',
+        },
+      ];
     }
   } catch (error) {
     state.transientError = friendlyError(error);
@@ -175,7 +211,10 @@ async function submitMessage(form) {
 
 async function selectApproval(requestId) {
   try {
-    const selected = await apiRequest(`/api/operations/approvals/${encodeURIComponent(requestId)}`, { identityId: state.identityId });
+    const selected = await apiRequest(
+      `/api/operations/approvals/${encodeURIComponent(requestId)}`,
+      { identityId: state.identityId },
+    );
     state.selectedRequestId = requestId;
     state.routeData = { ...state.routeData, selected };
     render();
@@ -186,19 +225,34 @@ async function selectApproval(requestId) {
 }
 
 async function decide(action) {
-  const item = state.routeData.selected ?? state.routeData.items?.find((candidate) => candidate.request_id === state.selectedRequestId) ?? state.routeData.items?.[0];
+  const item =
+    state.routeData.selected ??
+    state.routeData.items?.find(
+      (candidate) => candidate.request_id === state.selectedRequestId,
+    ) ??
+    state.routeData.items?.[0];
   if (!item || item.state !== 'PENDING_APPROVAL' || state.pendingAction) return;
-  if (action === 'reject' && !window.confirm('Rejeitar esta solicitação? A execução não será iniciada.')) return;
+  if (
+    action === 'reject' &&
+    !window.confirm('Rejeitar esta solicitação? A execução não será iniciada.')
+  ) {
+    return;
+  }
 
   state.pendingAction = action;
   render();
   try {
-    const final = await apiRequest(`/api/requests/${encodeURIComponent(item.request_id)}/${action === 'approve' ? 'approve' : 'reject'}`, {
-      method: 'POST',
+    const final = await apiRequest(
+      `/api/requests/${encodeURIComponent(item.request_id)}/${action === 'approve' ? 'approve' : 'reject'}`,
+      {
+        method: 'POST',
+        identityId: state.identityId,
+        body: { expected_version: item.version },
+      },
+    );
+    const items = await apiRequest('/api/operations/approvals', {
       identityId: state.identityId,
-      body: { expected_version: item.version },
     });
-    const items = await apiRequest('/api/operations/approvals', { identityId: state.identityId });
     state.routeData = { items, selected: final, loaded: true };
     state.selectedRequestId = final.request_id;
   } catch (error) {
@@ -211,7 +265,10 @@ async function decide(action) {
 
 async function selectPrevention(opportunityId) {
   try {
-    const selected = await apiRequest(`/api/operations/prevention/${encodeURIComponent(opportunityId)}`, { identityId: state.identityId });
+    const selected = await apiRequest(
+      `/api/operations/prevention/${encodeURIComponent(opportunityId)}`,
+      { identityId: state.identityId },
+    );
     state.selectedOpportunityId = opportunityId;
     state.routeData = { ...state.routeData, selected };
     render();
@@ -257,8 +314,12 @@ function bindInteractions() {
   app.querySelectorAll('.queue-row[data-request-id]').forEach((button) => {
     button.addEventListener('click', () => void selectApproval(button.dataset.requestId));
   });
-  app.querySelector('[data-action="approve"]')?.addEventListener('click', () => void decide('approve'));
-  app.querySelector('[data-action="reject"]')?.addEventListener('click', () => void decide('reject'));
+  app.querySelector('[data-action="approve"]')?.addEventListener('click', () =>
+    void decide('approve'),
+  );
+  app.querySelector('[data-action="reject"]')?.addEventListener('click', () =>
+    void decide('reject'),
+  );
   app.querySelectorAll('.text-action[data-opportunity-id]').forEach((button) => {
     button.addEventListener('click', () => void selectPrevention(button.dataset.opportunityId));
   });
@@ -274,7 +335,9 @@ async function bootstrap() {
   try {
     const identities = await apiRequest('/api/session/identities');
     const stored = window.localStorage.getItem('jup-demo-identity');
-    const preferred = identities.some((item) => item.identity_id === stored) ? stored : identities[0]?.identity_id ?? null;
+    const preferred = identities.some((item) => item.identity_id === stored)
+      ? stored
+      : (identities[0]?.identity_id ?? null);
     state.identities = identities;
     state.identityId = preferred;
     await loadRoute();
