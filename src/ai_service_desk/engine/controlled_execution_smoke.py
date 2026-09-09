@@ -157,7 +157,7 @@ def run_controlled_execution_smoke(cases_path: str | Path, report_path: str | Pa
                         "reason_code": "CONTROLLED_EXECUTION_SMOKE_ERROR",
                         "result_code": None,
                         "error_code": "CONTROLLED_EXECUTION_SMOKE_ERROR",
-                        "executor_calls": 0,
+                        "executor_calls": None,
                         "passed": False,
                     }
                 )

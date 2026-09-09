@@ -143,3 +143,17 @@ def test_smoke_makes_zero_external_calls(monkeypatch, tmp_path):
     monkeypatch.setattr(LocalEmbedder, "embed", forbidden)
     assert run_controlled_execution_smoke(FIXTURE, tmp_path / "report.json")["ok"] is True
     assert attempts == []
+
+
+def test_smoke_unexpected_failure_does_not_claim_zero_executor_calls(monkeypatch, tmp_path):
+    from ai_service_desk.engine import controlled_execution_smoke as smoke
+
+    def fail_after_unobserved_work(case):
+        raise RuntimeError("PRIVATE_EXCEPTION")
+
+    monkeypatch.setattr(smoke, "_run_case", fail_after_unobserved_work)
+    target = tmp_path / "report.json"
+    report = smoke.run_controlled_execution_smoke(FIXTURE, target)
+    assert report["ok"] is False
+    assert all(row["executor_calls"] is None for row in report["cases"])
+    assert "PRIVATE_EXCEPTION" not in target.read_text()
