@@ -102,7 +102,9 @@ def test_message_cdm_creates_real_pending_request_and_routes_to_tech_cdm() -> No
         record = runtime.request_repository.get(request_id)
         assignment = runtime.routing_store.get(request_id)
         assert record.state == "PENDING_APPROVAL"
-        assert record.context.requester == runtime.identity_provider.requester_identity("pedro-miranda")
+        assert record.context.requester == runtime.identity_provider.requester_identity(
+            "pedro-miranda"
+        )
         assert record.context.requested_role == "SOLICITANTE"
         assert record.creation_policy.decision == "REQUIRE_APPROVAL"
         assert record.confidence.level == "HIGH"
