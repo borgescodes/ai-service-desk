@@ -279,6 +279,25 @@ FAILED + execution_error_code ausente -> inválido
 DENIED_POLICY criado diretamente + decided_by preenchido -> inválido
 ```
 
+Além da coerência de estado, todo `AccessRequestRecord` deve satisfazer cronologia não decrescente antes de qualquer escrita:
+
+```text
+created_at <= updated_at
+created_at <= decided_at, quando decided_at existir
+decided_at <= execution_started_at, quando ambos existirem
+execution_started_at <= execution_finished_at, quando ambos existirem
+```
+
+Igualdade entre timestamps é válida. Quando dois timestamps forem iguais, `version` define a ordem entre versões do record.
+
+Qualquer violação temporal do record falha antes da escrita com erro explícito de domínio:
+
+```text
+reason_code = RECORD_INVARIANT_INVALID
+```
+
+Nenhum record temporalmente inválido pode substituir a versão armazenada.
+
 ## 8. request_id determinístico
 
 Na `InMemoryRequestRepository`, o `request_id` é determinístico e monotônico por instância do repositório:
@@ -349,6 +368,22 @@ O `reason_code` de eventos de policy deve reutilizar o `PolicyDecision.reason_co
 
 A auditoria não duplica `purpose`, email, nome ou texto livre do request em cada evento. Esses dados já existem no snapshot do record. A auditoria também não persiste traceback, `repr(exception)` ou mensagem bruta de exceção.
 
+A cronologia do audit é não decrescente por `request_id`. Antes de qualquer append, o repositório deve validar:
+
+```text
+novo_evento.occurred_at >= evento_anterior.occurred_at
+```
+
+Se uma única operação acrescentar múltiplos eventos, a mesma regra vale entre eventos consecutivos desse batch e entre o último evento já persistido e o primeiro evento novo.
+
+Igualdade de `occurred_at` é permitida. Em caso de igualdade, `record_version` e a ordem física de append são o desempate canônico.
+
+Qualquer retrocesso temporal do audit falha antes de qualquer mutação com:
+
+```text
+reason_code = AUDIT_EVENT_INVALID
+```
+
 ## 10. RequestRepository
 
 `RequestRepository` é a fronteira de armazenamento da Fase 8.
@@ -405,6 +440,7 @@ Na criação:
 - `version` deve ser `1`;
 - `state` deve ser `TRIAGED`;
 - o evento `REQUEST_CREATED` deve corresponder ao mesmo `request_id` e `record_version=1`;
+- record e evento são validados integralmente, inclusive cronologia, antes da primeira mutação;
 - record e evento são gravados na mesma seção crítica.
 
 Em `save(...)`:
@@ -413,10 +449,11 @@ Em `save(...)`:
 - `expected_version` deve ser exatamente igual à versão atualmente armazenada;
 - o novo record deve ter `version == expected_version + 1`;
 - `request_id`, `context`, `creation_policy`, `confidence` e `created_at` devem ser iguais aos valores originais;
-- todos os `AuditEvent` recebidos são validados antes da mutação;
+- o novo record é validado integralmente, inclusive cronologia, antes da mutação;
+- todos os `AuditEvent` recebidos são validados antes da mutação, inclusive sua ordem temporal em relação ao audit já persistido;
 - cada evento deve apontar para o mesmo `request_id` e para a nova `record_version` quando representa a transição;
 - a atualização do record e o append dos eventos ocorrem atomicamente sob o lock;
-- em qualquer erro de validação ou concorrência, não há escrita parcial.
+- em qualquer erro de validação, cronologia ou concorrência, não há escrita parcial.
 
 ## 12. Optimistic concurrency e version
 
@@ -512,7 +549,7 @@ O mecanismo interno de transition recebe record atual, destino, `expected_versio
 
 1. confirma que `(from_state, to_state)` existe na matriz;
 2. constrói o novo record imutável com `version + 1`;
-3. valida coerência do record;
+3. valida coerência do record, incluindo invariantes temporais;
 4. delega o CAS atômico ao repository;
 5. retorna somente o record efetivamente persistido.
 
@@ -551,7 +588,53 @@ Responsabilidades:
 - confirmar que a identidade apresentada corresponde à identidade registrada;
 - responder autorização somente para a capability exata do request.
 
-Interface conceitual:
+Uma entrada conceitual de configuração é composta por uma `TechnicianIdentity` canônica e um conjunto explícito de capabilities. Toda configuração é validada fail-closed antes de qualquer indexação.
+
+A construção ocorre obrigatoriamente em duas passagens conceituais:
+
+```text
+1. validar todas as entradas em runtime
+2. somente depois construir índices e validar unicidade
+```
+
+Na primeira passagem, cada entrada deve satisfazer integralmente:
+
+- a identidade é uma `TechnicianIdentity` estruturalmente válida;
+- `technician_id`, `username`, `name` e `email` são strings não vazias dentro dos limites do domínio;
+- a coleção de capabilities é explícita e contém apenas strings;
+- cada capability é simbólica válida e casa `^[A-Z][A-Z0-9_]{2,119}$`;
+- capability vazia, wildcard, prefix expression, fuzzy token ou valor não-string é inválido;
+- nenhuma normalização transforma uma capability inválida em uma capability válida.
+
+Qualquer entrada inválida encerra a construção antes de criar índices:
+
+```text
+TechnicianRegistryConfigurationError
+reason_code = TECHNICIAN_REGISTRY_INVALID
+```
+
+Nenhuma configuração parcialmente válida fica operacional.
+
+Depois que todas as entradas forem válidas, a segunda passagem constrói índices por identidade normalizada. Para unicidade, os identificadores são normalizados deterministicamente com `strip().casefold()`:
+
+```text
+technician_id normalizado deve ser único
+username normalizado deve ser único
+email normalizado deve ser único
+```
+
+Qualquer duplicidade em qualquer um desses três índices encerra a construção com:
+
+```text
+TechnicianRegistryConfigurationError
+reason_code = TECHNICIAN_REGISTRY_CONFLICT
+```
+
+Nenhuma entrada prevalece. Não existe `last-write-wins`, merge de capabilities, sobrescrita silenciosa ou escolha arbitrária da primeira/última ocorrência.
+
+Se uma configuração contém simultaneamente uma entrada inválida e uma duplicidade potencial, `TECHNICIAN_REGISTRY_INVALID` prevalece porque a indexação ainda não começou.
+
+Interface conceitual de autorização:
 
 ```python
 require_capability(
@@ -560,12 +643,14 @@ require_capability(
 ) -> None
 ```
 
-Se o técnico não estiver registrado, sua identidade divergir da entrada canônica ou não possuir a capability:
+Se o técnico não estiver registrado, sua identidade divergir da entrada canônica ou não possuir a capability exata:
 
 ```text
 TechnicianAuthorizationError
 reason_code = TECHNICIAN_CAPABILITY_REQUIRED
 ```
+
+O argumento runtime `capability` de `require_capability(...)` também deve ser string simbólica válida. Entrada inválida não autoriza e falha de modo explícito; ela nunca é reinterpretada por wildcard, prefixo ou fuzzy matching.
 
 Não existe wildcard `*`, prefix match, fuzzy match ou herança implícita de capabilities na Fase 8.
 
@@ -698,7 +783,28 @@ class ActionExecutionResult:
     result_code: str
 ```
 
-`result_code` é um código de máquina seguro. Não é corpo HTTP, traceback ou mensagem livre de exceção.
+A validação runtime do retorno é fechada e obrigatória. Um retorno só é válido se:
+
+```text
+type(result) is ActionExecutionResult
+type(result.success) is bool
+isinstance(result.result_code, str)
+result.result_code casa ^[A-Z][A-Z0-9_]{2,119}$
+```
+
+O uso de `type(success) is bool` é deliberado: valores como `1` e `0` não são aceitos como booleanos por coerção.
+
+`result_code` é um código de máquina seguro. Não é corpo HTTP, traceback ou mensagem livre de exceção. String vazia, string com espaço, valor não-string, valor unhashable ou objeto de retorno de outro tipo são inválidos.
+
+Qualquer retorno fora desse contrato deve ser tratado exclusivamente como:
+
+```text
+FAILED
+execution_result_code = None
+execution_error_code = EXECUTOR_INVALID_RESULT
+```
+
+O audit correspondente usa somente `EXECUTOR_INVALID_RESULT`. Nenhum valor arbitrário, representação, `repr`, texto ou campo do retorno inválido pode ser persistido em `AccessRequestRecord` ou `AuditEvent`.
 
 A Fase 8 não cria uma implementação real de integração. `ActionExecutor` não contém semântica CDM específica.
 
@@ -816,7 +922,7 @@ O evento `EXECUTION_STARTED` reutiliza o `policy_id` e `reason_code` da revalida
 
 ### 20.3 Sucesso
 
-Se o executor retorna resultado válido com `success=True`:
+Se o executor retorna `ActionExecutionResult` válido com `success=True`:
 
 ```text
 EXECUTING -> COMPLETED
@@ -834,7 +940,7 @@ reason_code = result.result_code
 
 ### 20.4 Falha retornada
 
-Se o executor retorna resultado válido com `success=False`:
+Se o executor retorna `ActionExecutionResult` válido com `success=False`:
 
 ```text
 EXECUTING -> FAILED
@@ -852,14 +958,23 @@ reason_code = result.result_code
 
 ### 20.5 Resultado inválido
 
-Se o executor retorna objeto fora do contrato `ActionExecutionResult` ou `result_code` inválido:
+Se qualquer requisito runtime da seção 18 falhar, inclusive objeto de tipo incorreto, `success` não-bool exato ou `result_code` inválido:
 
 ```text
 EXECUTING -> FAILED
+execution_result_code = None
 execution_error_code = EXECUTOR_INVALID_RESULT
+execution_finished_at = timestamp timezone-aware
 ```
 
-Nenhum dado arbitrário retornado pelo executor é persistido.
+Audit:
+
+```text
+event_type = EXECUTION_FAILED
+reason_code = EXECUTOR_INVALID_RESULT
+```
+
+Nenhum dado arbitrário retornado pelo executor é persistido. A validação ocorre antes de ler ou reutilizar qualquer campo do retorno como código persistente.
 
 ### 20.6 Exceção
 
@@ -907,7 +1022,7 @@ CAS APPROVED -> EXECUTING persistido com sucesso
 
 Só depois desses quatro gates o executor é chamado.
 
-## 22. Timestamps timezone-aware
+## 22. Timestamps timezone-aware e cronologia
 
 Todos os timestamps persistidos ou auditados são timezone-aware.
 
@@ -933,6 +1048,20 @@ O default de runtime deve usar UTC timezone-aware. Testes podem injetar uma fun�
 
 Datetime naive é erro de domínio e não pode ser persistido.
 
+Além de timezone-aware, a cronologia é fechada:
+
+```text
+created_at <= updated_at
+created_at <= decided_at, quando decided_at existir
+decided_at <= execution_started_at, quando ambos existirem
+execution_started_at <= execution_finished_at, quando ambos existirem
+AuditEvent.occurred_at >= occurred_at do evento anterior do mesmo request
+```
+
+Igualdade é permitida em todas as comparações. `version` do record e ordem de append do audit são os desempates canônicos quando timestamps forem iguais.
+
+A validação cronológica ocorre antes de qualquer escrita. Violação em record retorna `RECORD_INVARIANT_INVALID`. Violação em audit retorna `AUDIT_EVENT_INVALID`. Nenhuma falha temporal pode produzir mutação parcial.
+
 ## 23. Erros de domínio e reason codes
 
 A Fase 8 deve usar erros explícitos e códigos estáveis. Conjunto mínimo:
@@ -941,6 +1070,8 @@ A Fase 8 deve usar erros explícitos e códigos estáveis. Conjunto mínimo:
 REQUEST_NOT_FOUND
 INVALID_STATE_TRANSITION
 VERSION_CONFLICT
+TECHNICIAN_REGISTRY_INVALID
+TECHNICIAN_REGISTRY_CONFLICT
 TECHNICIAN_CAPABILITY_REQUIRED
 SELF_DECISION_NOT_ALLOWED
 AUDIT_EVENT_INVALID
@@ -954,11 +1085,13 @@ Semântica:
 - `REQUEST_NOT_FOUND`: ID inexistente;
 - `INVALID_STATE_TRANSITION`: origem/destino fora da matriz ou operação incompatível com state;
 - `VERSION_CONFLICT`: optimistic concurrency falhou;
-- `TECHNICIAN_CAPABILITY_REQUIRED`: técnico ausente, identidade divergente ou sem capability;
+- `TECHNICIAN_REGISTRY_INVALID`: configuração do registry possui entrada runtime inválida e não pode operar;
+- `TECHNICIAN_REGISTRY_CONFLICT`: configuração válida possui duplicidade normalizada de `technician_id`, `username` ou `email` e não pode operar;
+- `TECHNICIAN_CAPABILITY_REQUIRED`: técnico ausente, identidade divergente ou sem capability exata;
 - `SELF_DECISION_NOT_ALLOWED`: requester tentou decidir o próprio request;
-- `AUDIT_EVENT_INVALID`: evento não corresponde ao record/transição ou contém timestamp inválido;
-- `RECORD_INVARIANT_INVALID`: record incoerente com seu state/campos;
-- `EXECUTOR_INVALID_RESULT`: retorno do executor fora do contrato;
+- `AUDIT_EVENT_INVALID`: evento não corresponde ao record/transição, contém timestamp inválido ou retrocede a cronologia do request;
+- `RECORD_INVARIANT_INVALID`: record incoerente com seu state/campos ou com a cronologia temporal;
+- `EXECUTOR_INVALID_RESULT`: retorno do executor fora do contrato runtime fechado;
 - `EXECUTOR_EXCEPTION`: exceção capturada com código seguro.
 
 Erros de policy da Fase 7 permanecem pertencentes à Fase 7 e não são renomeados.
@@ -992,6 +1125,7 @@ get request
 -> DENY ? DENIED_POLICY : continuar
 -> lifecycle transition APPROVED -> EXECUTING com CAS
 -> somente depois ActionExecutor.execute(...)
+-> validar ActionExecutionResult em runtime
 -> COMPLETED ou FAILED
 ```
 
@@ -1281,7 +1415,26 @@ A implementação futura deve cobrir pelo menos:
 55. nenhum caminho da Fase 8 usa LLM;
 56. nenhum caminho da Fase 8 usa persistência real;
 57. smoke sintético futuro prova os fluxos aprovado, rejeitado, negado, sucesso, falha e revalidation deny;
-58. os 426 node IDs históricos continuam presentes.
+58. os 426 node IDs históricos continuam presentes;
+59. entrada estruturalmente inválida no `TechnicianAuthorizationRegistry` -> `TECHNICIAN_REGISTRY_INVALID`;
+60. capability de registry não-string ou fora de `^[A-Z][A-Z0-9_]{2,119}$` -> `TECHNICIAN_REGISTRY_INVALID`;
+61. wildcard, prefix expression ou fuzzy token no registry não concede autorização e configuração inválida não opera;
+62. `technician_id` duplicado após `strip().casefold()` -> `TECHNICIAN_REGISTRY_CONFLICT`;
+63. `username` duplicado após `strip().casefold()` -> `TECHNICIAN_REGISTRY_CONFLICT`;
+64. `email` duplicado após `strip().casefold()` -> `TECHNICIAN_REGISTRY_CONFLICT`;
+65. configuração com entrada inválida e duplicidade potencial retorna `TECHNICIAN_REGISTRY_INVALID` antes de indexar;
+66. `ActionExecutionResult(success=1, result_code="VALID_CODE")` -> `FAILED / EXECUTOR_INVALID_RESULT` sem persistir valores arbitrários;
+67. `ActionExecutionResult(success="true", result_code="VALID_CODE")` -> `FAILED / EXECUTOR_INVALID_RESULT`;
+68. `ActionExecutionResult(success=True, result_code="")` -> `FAILED / EXECUTOR_INVALID_RESULT`;
+69. `ActionExecutionResult(success=True, result_code="INVALID CODE")` -> `FAILED / EXECUTOR_INVALID_RESULT`;
+70. `ActionExecutionResult` com `result_code` não-string/unhashable -> `FAILED / EXECUTOR_INVALID_RESULT` sem `TypeError` vazado;
+71. objeto de retorno que não é `ActionExecutionResult` -> `FAILED / EXECUTOR_INVALID_RESULT`;
+72. `created_at > updated_at` -> `RECORD_INVARIANT_INVALID` e zero escrita;
+73. `created_at > decided_at` -> `RECORD_INVARIANT_INVALID` e zero escrita;
+74. `decided_at > execution_started_at` -> `RECORD_INVARIANT_INVALID` e zero escrita;
+75. `execution_started_at > execution_finished_at` -> `RECORD_INVARIANT_INVALID` e zero escrita;
+76. `AuditEvent.occurred_at` menor que o evento anterior do request -> `AUDIT_EVENT_INVALID` e zero append;
+77. timestamps iguais são aceitos e `version`/append order preservam a ordem determinística.
 
 Essa matriz é piso contratual, não orçamento final de quantidade de testes.
 
@@ -1309,7 +1462,10 @@ A Fase 8 só poderá ser considerada concluída quando houver evidência de que:
 - request creation reavalia policy;
 - `DENY` cria `DENIED_POLICY` auditável;
 - `DENIED_POLICY` nunca é aprovável;
+- `TechnicianAuthorizationRegistry` valida todas as entradas antes de indexar e falha fechado em configuração inválida;
+- duplicidades normalizadas de `technician_id`, `username` ou `email` falham com `TECHNICIAN_REGISTRY_CONFLICT` sem last-write-wins;
 - técnico precisa possuir exatamente a capability do request;
+- wildcard, prefix e fuzzy de capability permanecem proibidos;
 - requester não decide o próprio request;
 - approve e reject são separados de execution;
 - approve faz zero executor calls;
@@ -1320,9 +1476,13 @@ A Fase 8 só poderá ser considerada concluída quando houver evidência de que:
 - executor success leva a `COMPLETED`;
 - executor failure leva a `FAILED`;
 - executor exception leva a `FAILED / EXECUTOR_EXCEPTION` sem texto bruto;
+- retorno inválido do executor leva a `FAILED / EXECUTOR_INVALID_RESULT` sem persistir qualquer valor arbitrário do retorno;
+- `ActionExecutionResult.success` exige `type(success) is bool` e `result_code` exige código simbólico válido;
 - `FAILED` não possui retry;
 - audit é append-only;
 - timestamps são timezone-aware;
+- cronologia do record e do audit é não decrescente, com igualdade permitida;
+- violações temporais falham antes da escrita com `RECORD_INVARIANT_INVALID` ou `AUDIT_EVENT_INVALID`;
 - `InMemoryRequestRepository` é a única persistência da fase;
 - `request_id` é determinístico no repository em memória;
 - optimistic concurrency impede lost update;
@@ -1341,14 +1501,27 @@ TBD ausente
 estados fechados
 transições fechadas
 autorização de técnico explícita
+TechnicianAuthorizationRegistry fail-closed antes de indexação
+TECHNICIAN_REGISTRY_INVALID definido
+TECHNICIAN_REGISTRY_CONFLICT definido
+unicidade normalizada de technician_id, username e email
+wildcard/prefix/fuzzy proibidos
 self-decision bloqueada em approve e reject
 approve separado de execution
 revalidação de policy anterior ao executor
 revalidation DENY com zero executor calls
+ActionExecutionResult validado em runtime
+type(success) is bool
+result_code simbólico fechado
+retorno inválido não persiste valor arbitrário
 optimistic concurrency com expected_version
 request_id determinístico
 AuditEvent append-only
 timestamps timezone-aware
+cronologia temporal não decrescente
+igualdade temporal permitida com version/append order como desempate
+record temporal inválido -> RECORD_INVARIANT_INVALID
+audit temporal inválido -> AUDIT_EVENT_INVALID
 FAILED terminal sem retry
 arquivos protegidos intactos por contrato
 Fase 9 restrita à integração CDM
