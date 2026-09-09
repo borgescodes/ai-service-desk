@@ -1,7 +1,11 @@
 import pytest
 
 from ai_service_desk.engine.knowledge import load_knowledge
-from ai_service_desk.engine.learning_prevention import validate_outcome_record
+from ai_service_desk.engine.learning_prevention import (
+    OpportunityEngine,
+    PatternAggregator,
+    validate_outcome_record,
+)
 from ai_service_desk.engine.playbook import load_playbooks
 from ai_service_desk.engine.policy import PolicyEngine, PolicyRule
 from ai_service_desk.engine.routing import InMemoryRoutingAssignmentStore, RoutingAssignment
@@ -322,5 +326,41 @@ def test_policy_revalidation_can_block_after_valid_approval_without_cdm_call() -
         assert result["state"] == "DENIED_POLICY"
         assert result["timeline"][-1]["event_type"] == "POLICY_DENIED_BEFORE_EXECUTION"
         assert runtime.fake_cdm_store.access_count == 0
+    finally:
+        runtime.close()
+
+
+def test_prevention_is_generated_by_phase11_engine_and_requester_is_unauthorized() -> None:
+    runtime = DemoRuntime.create()
+    try:
+        expected = OpportunityEngine().generate(
+            PatternAggregator.aggregate(runtime.outcome_store.snapshot())
+        )
+        assert expected
+
+        with pytest.raises(WebDemoError) as exc_info:
+            runtime.list_prevention("pedro-miranda")
+        assert exc_info.value.code == "NOT_AUTHORIZED"
+
+        items = runtime.list_prevention("tecnico-cdm")
+        assert [item["opportunity_id"] for item in items] == [
+            item.opportunity_id for item in expected
+        ]
+        assert [item["occurrence_count"] for item in items] == [
+            item.occurrence_count for item in expected
+        ]
+    finally:
+        runtime.close()
+
+
+def test_prevention_detail_uses_real_opportunity_id_and_unknown_fails_closed() -> None:
+    runtime = DemoRuntime.create()
+    try:
+        item = runtime.list_prevention("tecnico-cdm")[0]
+        detail = runtime.get_prevention("tecnico-cdm", item["opportunity_id"])
+        assert detail == item
+        with pytest.raises(WebDemoError) as exc_info:
+            runtime.get_prevention("tecnico-cdm", "OPP-DOES-NOT-EXIST")
+        assert exc_info.value.code == "PREVENTION_NOT_FOUND"
     finally:
         runtime.close()
