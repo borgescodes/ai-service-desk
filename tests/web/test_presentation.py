@@ -55,9 +55,7 @@ def test_present_timeline_contains_only_real_audit_events() -> None:
     try:
         record, audit, _ = _pending_request(runtime)
         timeline = present_timeline(audit)
-        assert [item["event_type"] for item in timeline] == [
-            event.event_type for event in audit
-        ]
+        assert [item["event_type"] for item in timeline] == [event.event_type for event in audit]
         assert len(timeline) == len(audit)
         assert timeline[-1]["record_version"] == record.version
     finally:
