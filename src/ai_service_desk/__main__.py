@@ -1,3 +1,11 @@
+import sys
+
+from ai_service_desk.phase9_cli import handles, main as phase9_main
+
+argv = sys.argv[1:]
+if handles(argv):
+    raise SystemExit(phase9_main(argv))
+
 from ai_service_desk.cli import main
 
-raise SystemExit(main())
+raise SystemExit(main(argv))
