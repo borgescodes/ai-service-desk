@@ -39,9 +39,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         report = run_cdm_integration_smoke(args.cases, args.report, token)
         print(
-            "CDM INTEGRATION SMOKE OK"
-            if report["ok"]
-            else "CDM INTEGRATION SMOKE REQUER REVISAO"
+            "CDM INTEGRATION SMOKE OK" if report["ok"] else "CDM INTEGRATION SMOKE REQUER REVISAO"
         )
         print(f"Casos sinteticos: {report['case_count']}")
         print("Relatorio agregado local: " + str(args.report))
