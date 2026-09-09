@@ -8,9 +8,7 @@ from ai_service_desk.engine.learning_prevention_smoke import (
 )
 
 FIXTURE = (
-    Path(__file__).resolve().parents[1]
-    / "fixtures"
-    / "phase11_learning_prevention_cases.jsonl"
+    Path(__file__).resolve().parents[1] / "fixtures" / "phase11_learning_prevention_cases.jsonl"
 )
 
 EXPECTED_CASE_IDS = (
