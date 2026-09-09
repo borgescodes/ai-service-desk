@@ -30,11 +30,8 @@ jobs:
           echo "CDM_API_TOKEN=$token" >> "$GITHUB_ENV"
       - name: Ruff lint
         run: python -m ruff check .
-      - name: Ruff format diagnostic
-        run: |
-          python -m ruff format .
-          git diff -- src/ai_service_desk/engine/cdm_integration_smoke.py src/ai_service_desk/phase9_cli.py tests/engine/test_phase9_security.py
-          git diff --exit-code
+      - name: Ruff format
+        run: python -m ruff format --check .
       - name: Historical node ID preservation
         env:
           PHASE9_BASELINE_SHA: fd48e294617ea4d4cff91effeec507abbf44e4d5
