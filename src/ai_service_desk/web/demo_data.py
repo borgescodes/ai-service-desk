@@ -72,7 +72,8 @@ def write_demo_playbooks(path: str | Path) -> Path:
                         "type": "ACTION_PROPOSAL",
                         "title": "Solicitar acesso de solicitante",
                         "instruction": (
-                            "Criar solicitação controlada de acesso ao CDM para o perfil SOLICITANTE."
+                            "Criar solicitação controlada de acesso ao CDM para o perfil "
+                            "SOLICITANTE."
                         ),
                         "capability": "CDM_ACCESS_REQUEST",
                     }
