@@ -30,7 +30,7 @@ jobs:
       - name: Ruff lint
         run: python -m ruff check .
       - name: Ruff format
-        run: python -m ruff format --check .
+        run: python -m ruff format --diff .
       - name: Historical node ID preservation
         env:
           PHASE10_BASELINE_SHA: e5d0e3ccde56effff5c5f9558591b0d12c0740bb
