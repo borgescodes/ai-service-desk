@@ -16,7 +16,10 @@ from ai_service_desk.engine.learning_prevention import (
     PatternAggregator,
 )
 from ai_service_desk.engine.playbook import build_playbook_catalog
-from ai_service_desk.engine.playbook_resolution import PlaybookEngine, action_proposal_descriptor
+from ai_service_desk.engine.playbook_resolution import (
+    PlaybookEngine,
+    action_proposal_descriptor,
+)
 from ai_service_desk.engine.policy import PolicyEngine
 from ai_service_desk.engine.request_lifecycle import RequestLifecycleService
 from ai_service_desk.engine.request_repository import InMemoryRequestRepository
@@ -37,7 +40,11 @@ from ai_service_desk.engine.triage import TriageEngine
 from ai_service_desk.integrations.cdm import CDMAdapter
 from ai_service_desk.integrations.cdm_fake_api import CDMFakeStore, build_cdm_server
 from ai_service_desk.web.demo_ai import DemoClassifierClient, DemoEmbedder
-from ai_service_desk.web.demo_data import demo_outcomes, write_demo_knowledge, write_demo_playbooks
+from ai_service_desk.web.demo_data import (
+    demo_outcomes,
+    write_demo_knowledge,
+    write_demo_playbooks,
+)
 from ai_service_desk.web.demo_identity import DemoIdentityProvider, IdentityNotFoundError
 from ai_service_desk.web.errors import WebDemoError
 from ai_service_desk.web.presentation import present_prevention, present_request
