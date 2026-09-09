@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from ai_service_desk.engine.request_lifecycle import (
@@ -17,6 +18,7 @@ from ai_service_desk.web.demo_runtime import DemoRuntime
 from ai_service_desk.web.errors import WebDemoError
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
+_CSP = "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"
 
 
 class MessageBody(BaseModel):
@@ -34,19 +36,41 @@ def _error(status_code: int, code: str, message: str) -> JSONResponse:
     )
 
 
-def create_app(runtime: DemoRuntime | None = None, *, demo_mode: bool = True) -> FastAPI:
+def _default_static_dir() -> Path:
+    return Path(__file__).resolve().parents[3] / "web" / "dist"
+
+
+def _resolve_static_dir(static_dir: str | Path | None) -> Path | None:
+    if static_dir is None:
+        return None
+    root = Path(static_dir).resolve()
+    if not root.is_dir() or not (root / "index.html").is_file():
+        raise RuntimeError(
+            "Build web ausente. Execute `cd web && npm run build` antes de iniciar a demo."
+        )
+    return root
+
+
+def create_app(
+    runtime: DemoRuntime | None = None,
+    *,
+    demo_mode: bool = True,
+    static_dir: str | Path | None = None,
+) -> FastAPI:
     app = FastAPI(title="Jup Resolve", docs_url=None, redoc_url=None)
     app.state.runtime = runtime if runtime is not None else DemoRuntime.create()
     app.state.owns_runtime = runtime is None
     app.state.demo_mode = demo_mode
+    app.state.static_dir = _resolve_static_dir(static_dir)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next: Callable):
         response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Content-Security-Policy"] = _CSP
         if request.url.path.startswith("/api"):
             response.headers["Cache-Control"] = "no-store"
-            response.headers["X-Content-Type-Options"] = "nosniff"
-            response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
     @app.exception_handler(IdentityNotFoundError)
@@ -185,6 +209,23 @@ def create_app(runtime: DemoRuntime | None = None, *, demo_mode: bool = True) ->
             app.state.runtime.reset()
             return {"ok": True}
 
+    if app.state.static_dir is not None:
+        static_root: Path = app.state.static_dir
+        index_file = static_root / "index.html"
+
+        @app.get("/{path:path}")
+        def serve_web(path: str):
+            if path == "api" or path.startswith("api/"):
+                return JSONResponse(status_code=404, content={"detail": "Not Found"})
+            requested = (static_root / path).resolve() if path else index_file
+            try:
+                requested.relative_to(static_root)
+            except ValueError:
+                return JSONResponse(status_code=404, content={"detail": "Not Found"})
+            if requested.is_file():
+                return FileResponse(requested)
+            return FileResponse(index_file, media_type="text/html")
+
     @app.on_event("shutdown")
     def shutdown_runtime() -> None:
         if app.state.owns_runtime:
@@ -194,4 +235,9 @@ def create_app(runtime: DemoRuntime | None = None, *, demo_mode: bool = True) ->
 
 
 def run_web_demo(*, host: str, port: int) -> None:
-    uvicorn.run(create_app(), host=host, port=port, log_level="info")
+    uvicorn.run(
+        create_app(static_dir=_default_static_dir()),
+        host=host,
+        port=port,
+        log_level="info",
+    )
