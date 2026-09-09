@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import Literal, NoReturn
 
 from ai_service_desk.engine.access_request import (
@@ -8,11 +8,12 @@ from ai_service_desk.engine.access_request import (
     SessionIdentity,
     validate_access_request_context,
 )
-from ai_service_desk.engine.confidence import ConfidenceAssessment
+from ai_service_desk.engine.confidence import ConfidenceAssessment, assess_confidence
 from ai_service_desk.engine.policy import (
     MACHINE_CODE_RE,
     POLICY_DECISIONS,
     PolicyDecision,
+    PolicyEngine,
 )
 
 RequestState = Literal[
@@ -376,3 +377,236 @@ def validate_audit_event(event: AuditEvent) -> None:
     fixed_reason = _FIXED_EVENT_REASONS.get(event.event_type)
     if fixed_reason is not None and event.reason_code != fixed_reason:
         _invalid_audit("reason_code nao corresponde ao evento canonico.")
+
+
+class RequestLifecycleService:
+    def __init__(self, repository, policy_engine=None, clock=None):
+        self.repository = repository
+        self.policy_engine = policy_engine if policy_engine is not None else PolicyEngine()
+        self.clock = clock if clock is not None else lambda: datetime.now(UTC)
+
+    def create_request(self, context: AccessRequestContext) -> AccessRequestRecord:
+        validate_access_request_context(context)
+        policy = self.policy_engine.evaluate(context)
+        _validate_policy_decision(policy)
+        confidence = assess_confidence(context)
+        initial_timestamp = self.clock()
+        if not _is_aware_datetime(initial_timestamp):
+            _invalid_record("Clock deve retornar datetime timezone-aware.")
+        record = AccessRequestRecord(
+            request_id=self.repository.allocate_request_id(),
+            version=1,
+            state="TRIAGED",
+            context=context,
+            creation_policy=policy,
+            latest_policy=policy,
+            confidence=confidence,
+            created_at=initial_timestamp,
+            updated_at=initial_timestamp,
+            decided_by=None,
+            decided_at=None,
+            execution_started_at=None,
+            execution_finished_at=None,
+            execution_result_code=None,
+            execution_error_code=None,
+        )
+        event = AuditEvent(
+            record.request_id,
+            "REQUEST_CREATED",
+            "SYSTEM",
+            "SYSTEM",
+            None,
+            "TRIAGED",
+            1,
+            "REQUEST_CREATED",
+            None,
+            initial_timestamp,
+        )
+        record = self.repository.create(record, audit_events=(event,))
+        if policy.decision == "DENY":
+            return self.transition_to_denied_policy(
+                record, policy, expected_version=1, occurred_at=initial_timestamp
+            )
+        return self.transition_to_pending_approval(
+            record, expected_version=1, occurred_at=initial_timestamp
+        )
+
+    def _transition(
+        self,
+        record,
+        target,
+        event_type,
+        reason_code,
+        *,
+        expected_version,
+        occurred_at,
+        policy_id=None,
+        actor_id="SYSTEM",
+        **changes,
+    ):
+        validate_expected_version(expected_version)
+        if expected_version != record.version:
+            raise ConcurrencyConflictError("VERSION_CONFLICT", "Versao stale.")
+        if (record.state, target) not in ALLOWED_TRANSITIONS:
+            raise InvalidStateTransitionError(
+                "INVALID_STATE_TRANSITION", "Transicao fora da matriz."
+            )
+        updated = replace(
+            record, state=target, version=record.version + 1, updated_at=occurred_at, **changes
+        )
+        validate_access_request_record(updated)
+        actor_type = "TECHNICIAN" if event_type in _TECHNICIAN_EVENTS else "SYSTEM"
+        event = AuditEvent(
+            record.request_id,
+            event_type,
+            actor_type,
+            actor_id,
+            record.state,
+            target,
+            updated.version,
+            reason_code,
+            policy_id,
+            occurred_at,
+        )
+        return self.repository.save(
+            updated, expected_version=expected_version, audit_events=(event,)
+        )
+
+    def transition_to_pending_approval(
+        self, record: AccessRequestRecord, *, expected_version: int, occurred_at: datetime
+    ) -> AccessRequestRecord:
+        return self._transition(
+            record,
+            "PENDING_APPROVAL",
+            "POLICY_REQUIRES_APPROVAL",
+            record.creation_policy.reason_code,
+            expected_version=expected_version,
+            occurred_at=occurred_at,
+            policy_id=record.creation_policy.policy_id,
+        )
+
+    def transition_to_denied_policy(
+        self,
+        record: AccessRequestRecord,
+        policy: PolicyDecision,
+        *,
+        expected_version: int,
+        occurred_at: datetime,
+    ) -> AccessRequestRecord:
+        _validate_policy_decision(policy)
+        event_type = (
+            "POLICY_DENIED_AT_CREATION"
+            if record.state == "TRIAGED"
+            else "POLICY_DENIED_BEFORE_EXECUTION"
+        )
+        return self._transition(
+            record,
+            "DENIED_POLICY",
+            event_type,
+            policy.reason_code,
+            expected_version=expected_version,
+            occurred_at=occurred_at,
+            policy_id=policy.policy_id,
+            latest_policy=policy,
+        )
+
+    def transition_to_approved(
+        self,
+        record: AccessRequestRecord,
+        technician_id: str,
+        *,
+        expected_version: int,
+        occurred_at: datetime,
+    ) -> AccessRequestRecord:
+        return self._transition(
+            record,
+            "APPROVED",
+            "REQUEST_APPROVED",
+            "APPROVED_BY_AUTHORIZED_TECHNICIAN",
+            expected_version=expected_version,
+            occurred_at=occurred_at,
+            actor_id=technician_id,
+            decided_by=technician_id,
+            decided_at=occurred_at,
+        )
+
+    def transition_to_rejected(
+        self,
+        record: AccessRequestRecord,
+        technician_id: str,
+        *,
+        expected_version: int,
+        occurred_at: datetime,
+    ) -> AccessRequestRecord:
+        return self._transition(
+            record,
+            "REJECTED",
+            "REQUEST_REJECTED",
+            "REJECTED_BY_AUTHORIZED_TECHNICIAN",
+            expected_version=expected_version,
+            occurred_at=occurred_at,
+            actor_id=technician_id,
+            decided_by=technician_id,
+            decided_at=occurred_at,
+        )
+
+    def transition_to_executing(
+        self,
+        record: AccessRequestRecord,
+        policy: PolicyDecision,
+        *,
+        expected_version: int,
+        occurred_at: datetime,
+    ) -> AccessRequestRecord:
+        _validate_policy_decision(policy)
+        return self._transition(
+            record,
+            "EXECUTING",
+            "EXECUTION_STARTED",
+            policy.reason_code,
+            expected_version=expected_version,
+            occurred_at=occurred_at,
+            policy_id=policy.policy_id,
+            latest_policy=policy,
+            execution_started_at=occurred_at,
+        )
+
+    def transition_to_completed(
+        self,
+        record: AccessRequestRecord,
+        result_code: str,
+        *,
+        expected_version: int,
+        occurred_at: datetime,
+    ) -> AccessRequestRecord:
+        return self._transition(
+            record,
+            "COMPLETED",
+            "EXECUTION_COMPLETED",
+            result_code,
+            expected_version=expected_version,
+            occurred_at=occurred_at,
+            execution_result_code=result_code,
+            execution_finished_at=occurred_at,
+        )
+
+    def transition_to_failed(
+        self,
+        record: AccessRequestRecord,
+        error_code: str,
+        *,
+        expected_version: int,
+        occurred_at: datetime,
+        result_code: str | None = None,
+    ) -> AccessRequestRecord:
+        return self._transition(
+            record,
+            "FAILED",
+            "EXECUTION_FAILED",
+            error_code,
+            expected_version=expected_version,
+            occurred_at=occurred_at,
+            execution_error_code=error_code,
+            execution_result_code=result_code,
+            execution_finished_at=occurred_at,
+        )

@@ -15,13 +15,16 @@ from ai_service_desk.engine.request_lifecycle import (
     InvalidStateTransitionError,
     Phase8DomainError,
     RecordInvariantError,
+    RequestLifecycleService,
     RequestNotFoundError,
     validate_access_request_record,
     validate_audit_event,
     validate_expected_version,
 )
+from ai_service_desk.engine.request_repository import InMemoryRequestRepository
 from tests.engine.phase8_helpers import (
     DEFAULT_TIMESTAMP,
+    FixedClock,
     make_context,
     make_policy_decision,
     make_record,
@@ -361,3 +364,123 @@ def test_validate_audit_event_rejects_noncanonical_event_semantics(event: AuditE
         validate_audit_event(event)
 
     assert exc_info.value.reason_code == "AUDIT_EVENT_INVALID"
+
+
+def create_lifecycle(role="SOLICITANTE"):
+    repo = InMemoryRequestRepository()
+    clock = FixedClock()
+    service = RequestLifecycleService(repo, clock=clock)
+    return repo, clock, service, service.create_request(make_context(requested_role=role))
+
+
+def test_create_request_require_approval_enters_pending_approval():
+    _, _, _, record = create_lifecycle()
+    assert record.state == "PENDING_APPROVAL"
+    assert record.version == 2
+    assert record.creation_policy.decision == "REQUIRE_APPROVAL"
+
+
+def test_create_request_deny_enters_denied_policy_with_audit():
+    repo, _, _, record = create_lifecycle("ADMIN")
+    assert record.state == "DENIED_POLICY"
+    assert record.creation_policy.decision == "DENY"
+    assert repo.audit_for(record.request_id)[-1].reason_code == record.creation_policy.reason_code
+
+
+def test_pending_creation_audit_is_request_created_then_policy_requires_approval():
+    repo, _, _, record = create_lifecycle()
+    assert [e.event_type for e in repo.audit_for(record.request_id)] == [
+        "REQUEST_CREATED",
+        "POLICY_REQUIRES_APPROVAL",
+    ]
+
+
+def test_denied_creation_audit_is_request_created_then_policy_denied():
+    repo, _, _, record = create_lifecycle("ADMIN")
+    assert [e.event_type for e in repo.audit_for(record.request_id)] == [
+        "REQUEST_CREATED",
+        "POLICY_DENIED_AT_CREATION",
+    ]
+
+
+def check_creation_timestamp(role):
+    repo, clock, _, record = create_lifecycle(role)
+    assert clock.calls == 1
+    assert record.created_at == record.updated_at == DEFAULT_TIMESTAMP
+    assert [e.occurred_at for e in repo.audit_for(record.request_id)] == [DEFAULT_TIMESTAMP] * 2
+    assert [e.record_version for e in repo.audit_for(record.request_id)] == [1, 2]
+
+
+def test_pending_creation_uses_one_timestamp_for_version_one_and_two():
+    check_creation_timestamp("SOLICITANTE")
+
+
+def test_denied_creation_uses_one_timestamp_for_version_one_and_two():
+    check_creation_timestamp("ADMIN")
+
+
+def test_every_persisted_transition_increments_version_by_one():
+    repo, _, service, pending = create_lifecycle()
+    approved = service.transition_to_approved(
+        pending, "TECH-SYNTHETIC", expected_version=2, occurred_at=DEFAULT_TIMESTAMP
+    )
+    executing = service.transition_to_executing(
+        approved, approved.latest_policy, expected_version=3, occurred_at=DEFAULT_TIMESTAMP
+    )
+    completed = service.transition_to_completed(
+        executing, "FAKE_EXECUTION_SUCCEEDED", expected_version=4, occurred_at=DEFAULT_TIMESTAMP
+    )
+    assert [pending.version, approved.version, executing.version, completed.version] == [2, 3, 4, 5]
+    assert [e.record_version for e in repo.audit_for(completed.request_id)] == [1, 2, 3, 4, 5]
+
+
+def test_context_is_identical_across_versions():
+    _, _, service, pending = create_lifecycle()
+    approved = service.transition_to_approved(
+        pending, "TECH-SYNTHETIC", expected_version=2, occurred_at=DEFAULT_TIMESTAMP
+    )
+    assert approved.context is pending.context
+    assert approved.creation_policy is pending.creation_policy
+    assert approved.confidence is pending.confidence
+    assert pending.state == "PENDING_APPROVAL"
+
+
+def test_lifecycle_rejects_forbidden_edge_without_mutation():
+    repo, _, service, pending = create_lifecycle()
+    before = repo.audit_for(pending.request_id)
+    with pytest.raises(InvalidStateTransitionError):
+        service.transition_to_executing(
+            pending, pending.latest_policy, expected_version=2, occurred_at=DEFAULT_TIMESTAMP
+        )
+    assert repo.get(pending.request_id) == pending
+    assert repo.audit_for(pending.request_id) == before
+
+
+def test_creation_validates_context_before_policy_and_id_allocation():
+    class ForbiddenPolicy:
+        def evaluate(self, context):
+            raise AssertionError("policy called before context validation")
+
+    repo = InMemoryRequestRepository()
+    service = RequestLifecycleService(repo, policy_engine=ForbiddenPolicy())
+    with pytest.raises(ValueError):
+        service.create_request(make_context(requester=None))
+    assert repo.allocate_request_id() == "REQ-000001"
+
+
+def test_creation_re_evaluates_policy_and_rejects_caller_decision():
+    from ai_service_desk.engine.policy import PolicyEngine
+
+    class PolicySpy(PolicyEngine):
+        calls = 0
+
+        def evaluate(self, context):
+            self.calls += 1
+            return super().evaluate(context)
+
+    spy = PolicySpy()
+    service = RequestLifecycleService(InMemoryRequestRepository(), policy_engine=spy)
+    assert service.create_request(make_context()).state == "PENDING_APPROVAL"
+    assert spy.calls == 1
+    with pytest.raises(TypeError):
+        service.create_request(make_context(), policy=make_policy_decision())
