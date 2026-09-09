@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 WORKFLOW = Path(".github/workflows/phase12-web-demo.yml")
 BASELINE = "a4c4dc25afd07f449036dd837dbcfa4a219806c2"
 
