@@ -175,32 +175,24 @@ async function submitMessage(form) {
       identityId: state.identityId,
       body: { message },
     });
+    if (typeof result.assistant_message !== 'string' || !result.assistant_message.trim()) {
+      throw new Error('Resposta conversacional ausente.');
+    }
     if (result.request_id) {
       const detail = await apiRequest(`/api/requests/${encodeURIComponent(result.request_id)}`, {
         identityId: state.identityId,
       });
       state.understood = understoodFromRequest(detail);
-      state.messages = [
-        ...state.messages,
-        {
-          role: 'JUP',
-          text: `Solicitação ${detail.request_id} criada. ${detail.state_label}.`,
-        },
-      ];
-    } else if (result.answer) {
-      state.messages = [...state.messages, { role: 'JUP', text: result.answer }];
-      state.understood = null;
-    } else if (result.question) {
-      state.messages = [...state.messages, { role: 'JUP', text: result.question }];
     } else {
-      state.messages = [
-        ...state.messages,
-        {
-          role: 'JUP',
-          text: 'Contexto recebido. Continue descrevendo o que você precisa.',
-        },
-      ];
+      state.understood = null;
     }
+    state.messages = [
+      ...state.messages,
+      {
+        role: 'JUP',
+        text: result.assistant_message,
+      },
+    ];
   } catch (error) {
     state.transientError = friendlyError(error);
   } finally {
