@@ -62,9 +62,7 @@ def create_app(
     static_dir: str | Path | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Jup Resolve", docs_url=None, redoc_url=None)
-    app.state.runtime = (
-        runtime if runtime is not None else DemoRuntime.create(mode=runtime_mode)
-    )
+    app.state.runtime = runtime if runtime is not None else DemoRuntime.create(mode=runtime_mode)
     app.state.owns_runtime = runtime is None
     app.state.demo_mode = demo_mode
     app.state.static_dir = _resolve_static_dir(static_dir)
