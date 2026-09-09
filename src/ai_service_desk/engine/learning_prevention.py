@@ -1,6 +1,14 @@
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from threading import RLock
+
+from ai_service_desk.engine.request_lifecycle import (
+    AccessRequestRecord,
+    validate_access_request_record,
+)
+from ai_service_desk.engine.routing import RoutingAssignment
+from ai_service_desk.engine.triage import TriageState
 
 LEARNING_RULES_VERSION = 1
 MIN_RECURRENCE = 3
@@ -56,6 +64,10 @@ class OutcomeRecord:
 
 def _invalid(message: str) -> None:
     raise OutcomeValidationError("OUTCOME_INVALID", message)
+
+
+def _evidence_invalid(message: str) -> None:
+    raise OutcomeValidationError("OUTCOME_EVIDENCE_INVALID", message)
 
 
 def _required_text(value: object, field: str, limit: int) -> str:
@@ -132,3 +144,132 @@ class InMemoryOutcomeStore:
     def snapshot(self) -> tuple[OutcomeRecord, ...]:
         with self._lock:
             return tuple(self._records[key] for key in sorted(self._records))
+
+
+class OutcomeCollector:
+    @staticmethod
+    def from_knowledge(
+        interaction_id: str,
+        triage: TriageState,
+        result: Mapping[str, object],
+        *,
+        area: str = "",
+    ) -> OutcomeRecord:
+        if type(triage) is not TriageState or triage.status != "ANSWERED":
+            _evidence_invalid("Knowledge exige triage ANSWERED.")
+        if not isinstance(result, Mapping) or result.get("status") != "KNOWLEDGE_FOUND":
+            _evidence_invalid("Resultado de Knowledge nao comprova resolucao.")
+        knowledge = result.get("knowledge")
+        if not isinstance(knowledge, Mapping):
+            _evidence_invalid("KNOWLEDGE_FOUND sem knowledge estruturado.")
+        knowledge_id = knowledge.get("knowledge_id")
+        if not isinstance(knowledge_id, str) or not knowledge_id.strip():
+            _evidence_invalid("KNOWLEDGE_FOUND sem knowledge_id.")
+        record = OutcomeRecord(
+            interaction_id=interaction_id,
+            system=triage.system,
+            intent=triage.intent,
+            capability="",
+            area=area,
+            knowledge_id=knowledge_id,
+            playbook_id="",
+            playbook_version=None,
+            step_id="",
+            outcome="RESOLVED_BY_KNOWLEDGE",
+            reason_code="KNOWLEDGE_FOUND",
+        )
+        validate_outcome_record(record)
+        return record
+
+    @staticmethod
+    def from_playbook(
+        interaction_id: str,
+        triage: TriageState,
+        result: Mapping[str, object],
+        *,
+        area: str = "",
+    ) -> OutcomeRecord:
+        if type(triage) is not TriageState or triage.status != "ANSWERED":
+            _evidence_invalid("Playbook exige triage ANSWERED.")
+        if not isinstance(result, Mapping) or result.get("status") != "PLAYBOOK_FOUND":
+            _evidence_invalid("Resultado nao comprova PLAYBOOK_FOUND.")
+        knowledge_id = result.get("knowledge_id")
+        playbook = result.get("playbook")
+        if not isinstance(knowledge_id, str) or not knowledge_id.strip():
+            _evidence_invalid("PLAYBOOK_FOUND sem knowledge_id.")
+        if not isinstance(playbook, Mapping):
+            _evidence_invalid("PLAYBOOK_FOUND sem playbook estruturado.")
+        playbook_id = playbook.get("playbook_id")
+        playbook_version = playbook.get("playbook_version")
+        if not isinstance(playbook_id, str) or not playbook_id.strip():
+            _evidence_invalid("PLAYBOOK_FOUND sem playbook_id.")
+        if type(playbook_version) is not int or playbook_version <= 0:
+            _evidence_invalid("PLAYBOOK_FOUND sem playbook_version valido.")
+        record = OutcomeRecord(
+            interaction_id=interaction_id,
+            system=triage.system,
+            intent=triage.intent,
+            capability="",
+            area=area,
+            knowledge_id=knowledge_id,
+            playbook_id=playbook_id,
+            playbook_version=playbook_version,
+            step_id="",
+            outcome="GUIDED_BY_PLAYBOOK",
+            reason_code="PLAYBOOK_FOUND",
+        )
+        validate_outcome_record(record)
+        return record
+
+    @staticmethod
+    def from_request(
+        interaction_id: str,
+        record: AccessRequestRecord,
+        assignment: RoutingAssignment | None = None,
+    ) -> OutcomeRecord:
+        validate_access_request_record(record)
+        state = record.state
+        if state == "PENDING_APPROVAL":
+            if (
+                type(assignment) is not RoutingAssignment
+                or assignment.request_id != record.request_id
+                or assignment.system != record.context.system
+                or assignment.capability != record.context.capability
+            ):
+                _evidence_invalid("PENDING_APPROVAL exige RoutingAssignment compativel.")
+            outcome = "ROUTED_TO_HUMAN"
+            reason_code = "ROUTED_TO_HUMAN"
+        elif state == "APPROVED":
+            outcome = "APPROVED"
+            reason_code = "APPROVED"
+        elif state == "REJECTED":
+            outcome = "REJECTED"
+            reason_code = "REJECTED"
+        elif state == "DENIED_POLICY":
+            outcome = "DENIED_POLICY"
+            reason_code = record.latest_policy.reason_code
+        elif state == "COMPLETED":
+            outcome = "EXECUTION_COMPLETED"
+            reason_code = record.execution_result_code or ""
+        elif state == "FAILED":
+            outcome = "EXECUTION_FAILED"
+            reason_code = record.execution_error_code or ""
+        else:
+            _evidence_invalid("State do request nao representa outcome analitico estavel.")
+
+        context = record.context
+        outcome_record = OutcomeRecord(
+            interaction_id=interaction_id,
+            system=context.system,
+            intent=context.intent,
+            capability=context.capability,
+            area=context.requester.area,
+            knowledge_id=context.knowledge_id,
+            playbook_id=context.playbook_id,
+            playbook_version=context.playbook_version,
+            step_id=context.step_id,
+            outcome=outcome,
+            reason_code=reason_code,
+        )
+        validate_outcome_record(outcome_record)
+        return outcome_record
