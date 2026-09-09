@@ -163,9 +163,7 @@ def run_cdm_integration_smoke(
                     "SOLICITANTE",
                 )
                 actual = (
-                    second.outcome
-                    if first.access_id == second.access_id
-                    else "ACCESS_ID_MISMATCH"
+                    second.outcome if first.access_id == second.access_id else "ACCESS_ID_MISMATCH"
                 )
             elif case_id == "IDEMPOTENCY_CONFLICT":
                 context = _context(case_id)
