@@ -1,6 +1,3 @@
-import pytest
-
-
 DOMAIN_ROUTES = (
     ("CDM", "CDM_ACCESS_REQUEST", "TECH-CDM"),
     ("HARDWARE", "HARDWARE_SUPPORT_REQUEST", "TECH-HARDWARE"),
@@ -45,6 +42,8 @@ def test_five_demo_domains_resolve_to_distinct_authorized_owners():
 
 
 def test_routing_does_not_replace_approval_authorization_gate():
+    import pytest
+
     from ai_service_desk.engine.approval import ApprovalService
     from ai_service_desk.engine.policy import PolicyEngine
     from ai_service_desk.engine.request_lifecycle import RequestLifecycleService
