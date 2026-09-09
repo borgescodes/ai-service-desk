@@ -12,12 +12,41 @@ def test_phase12_handles_only_its_commands() -> None:
     assert not phase12_cli.handles([])
 
 
-def test_web_demo_dispatches_loopback_host_and_port(monkeypatch) -> None:
+def test_web_demo_dispatches_loopback_host_port_and_mode(monkeypatch) -> None:
     calls = []
-    monkeypatch.setattr(phase12_cli, "run_web_demo", lambda host, port: calls.append((host, port)))
+    monkeypatch.setattr(
+        phase12_cli,
+        "run_web_demo",
+        lambda host, port, mode: calls.append((host, port, mode)),
+    )
 
-    assert phase12_cli.main(["web-demo", "--host", "127.0.0.1", "--port", "8123"]) == 0
-    assert calls == [("127.0.0.1", 8123)]
+    assert (
+        phase12_cli.main(
+            [
+                "web-demo",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8123",
+                "--mode",
+                "LOCAL_AI",
+            ]
+        )
+        == 0
+    )
+    assert calls == [("127.0.0.1", 8123, "LOCAL_AI")]
+
+
+def test_web_demo_defaults_to_deterministic_mode(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        phase12_cli,
+        "run_web_demo",
+        lambda host, port, mode: calls.append((host, port, mode)),
+    )
+
+    assert phase12_cli.main(["web-demo"]) == 0
+    assert calls == [("127.0.0.1", 8000, "DETERMINISTIC")]
 
 
 def test_web_demo_rejects_non_loopback_host() -> None:
@@ -45,7 +74,7 @@ def test_phase12_operator_docs_and_windows_launcher_cover_demo_flow() -> None:
 
     assert "where node" in launcher
     assert "node web\\scripts\\build.mjs" in launcher
-    assert "web-demo --host 127.0.0.1 --port 8000" in launcher
+    assert "web-demo --mode LOCAL_AI --host 127.0.0.1 --port 8000" in launcher
 
     for marker in [
         "Pré-requisitos",
