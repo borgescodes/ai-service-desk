@@ -149,6 +149,11 @@ class BusinessVocabulary:
                 "Cadastro de material para revenda é contexto forte CDM; compra, pedido e "
                 "movimentação não bastam. Sistema explícito prevalece. "
                 "Não inferir SAP por migração.",
+                "Cadastro de dados de negócio cria registros, não instala programas. "
+                "INSTALACAO_SOFTWARE exige uma necessidade de instalar aplicativo ou programa, "
+                "não criar cadastros. Pedidos de processo de negócio fora das categorias de TI "
+                "são OUTRO; dúvidas sobre como fazer são ORIENTACAO. "
+                "O sistema mencionado não determina a intenção.",
                 "Use esse contexto para compreender a mensagem, preservando produto e intenção. "
                 "Reconhecer sistema não implica orientação aprovada ou capacidade de ação. "
                 "Não converta cadastro em problema de acesso. Identidade, decisões e execução "

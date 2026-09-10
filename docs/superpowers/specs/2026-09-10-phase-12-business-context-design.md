@@ -74,3 +74,16 @@ O workflow deve fixar os blobs exatos resultantes desses três arquivos; todos
 os demais continuam comparados à baseline F11. Não usar allowlist irrestrita.
 Preservar os 925 node IDs históricos e provar comportamento sem injeção.
 Qwen real exige QA Windows posterior, sem confundir testes com doubles com QA.
+
+## Ajuste após QA real
+
+A coleta inicial de 26 interações reconheceu sistemas/produtos conforme esperado,
+mas expôs dois casos em que o Qwen confundiu cadastro de material com instalação
+de software. O contexto funcional F12 passou a distinguir criação de registros
+de negócio de instalação de aplicativos, respeitando o catálogo existente de
+intents. Nenhuma correção de intent por frase foi acrescentada ao backend.
+
+Regressões reais são opt-in por `JUP_BUSINESS_LOCAL_QA=1`; sem essa variável o CI
+hospedado não instancia Ollama. Elas incluem um controle positivo de instalação.
+Relatórios de QA ficam fora do Git. O escopo não amplia a knowledge sintética,
+o limiar de retrieval ou os estados de domínio.
