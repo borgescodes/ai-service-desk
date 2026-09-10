@@ -18,7 +18,10 @@ _META_LEAK_MARKERS = (
     "o usuário",
     "o usuario",
 )
-_MISSING_SYSTEM_QUESTION = "Qual sistema esta com o problema?"
+_SYSTEM_QUESTIONS = (
+    "Qual sistema esta com o problema?",
+    "Qual e o sistema correto?",
+)
 _OFFICE_SYSTEM_QUESTION = (
     "Quando você diz Office, está falando do Microsoft 365/Office 365 ou de outro sistema?"
 )
@@ -78,7 +81,7 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
 
 
 def _contextual_question(message: str, question: str) -> str:
-    if question == _MISSING_SYSTEM_QUESTION and re.search(r"\boffice\b", message, re.IGNORECASE):
+    if question in _SYSTEM_QUESTIONS and re.search(r"\boffice\b", message, re.IGNORECASE):
         return _OFFICE_SYSTEM_QUESTION
     return question
 
