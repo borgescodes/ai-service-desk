@@ -9,7 +9,6 @@ from ai_service_desk.engine.cdm_execution import CDMActionExecutor
 from ai_service_desk.engine.classification import classify_ticket
 from ai_service_desk.engine.execution import ExecutionEngine
 from ai_service_desk.engine.knowledge import build_knowledge_index
-from ai_service_desk.engine.knowledge_retrieval import KnowledgeEngine
 from ai_service_desk.engine.learning_prevention import (
     InMemoryOutcomeStore,
     OpportunityEngine,
@@ -54,6 +53,7 @@ from ai_service_desk.web.demo_data import (
     write_demo_playbooks,
 )
 from ai_service_desk.web.demo_identity import DemoIdentityProvider, IdentityNotFoundError
+from ai_service_desk.web.demo_knowledge import DemoKnowledgeEngine
 from ai_service_desk.web.errors import WebDemoError
 from ai_service_desk.web.presentation import present_prevention, present_request
 
@@ -145,7 +145,7 @@ class DemoRuntime:
         self.demo_classifier_client = DemoClassifierClient()
         build_knowledge_index(knowledge_source, knowledge_index, self.demo_embedder, batch_size=2)
         build_playbook_catalog(playbook_source, knowledge_index, playbook_catalog)
-        self.knowledge_engine = KnowledgeEngine(
+        self.knowledge_engine = DemoKnowledgeEngine(
             knowledge_index,
             self.demo_classifier_client,
             self.demo_embedder,
