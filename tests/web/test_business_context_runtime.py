@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -162,3 +163,34 @@ def test_correction_preserves_only_product_of_selected_system(runtime, correctio
     runtime.send_message("pedro-miranda", "Teams e SAP não entram")
     result = runtime.send_message("pedro-miranda", correction)
     assert result["business_context"] == {"system": system, "product": product}
+
+
+@pytest.mark.skipif(
+    os.environ.get("JUP_BUSINESS_LOCAL_QA") != "1",
+    reason="QA explícita com Qwen local; CI hospedado permanece determinístico",
+)
+@pytest.mark.parametrize(
+    "message,allowed_intents",
+    [
+        ("Preciso cadastrar um material para revenda", {"OUTRO", "ORIENTACAO"}),
+        ("Bom dia! Preciso cadastrar material para revenda no SIAGRI", {"OUTRO", "ORIENTACAO"}),
+        ("Preciso instalar o Teams", {"INSTALACAO_SOFTWARE"}),
+    ],
+)
+def test_real_qwen_distinguishes_business_registration_from_software_installation(
+    message,
+    allowed_intents,
+    record_property,
+):
+    instance = demo_runtime.DemoRuntime.create(mode="LOCAL_AI")
+    try:
+        result = instance.send_message("pedro-miranda", message)
+        state = instance._triage["pedro-miranda"][1]
+        record_property("input", message)
+        record_property("intent", state.intent)
+        record_property("response", result["assistant_message"])
+        assert state.intent in allowed_intents
+        assert result["request_id"] is None
+        assert instance.fake_cdm_store.access_count == 0
+    finally:
+        instance.close()
