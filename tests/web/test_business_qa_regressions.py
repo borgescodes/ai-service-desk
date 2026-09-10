@@ -17,10 +17,14 @@ class AccessGateway:
     def chat(self, payload):
         properties = payload["format"]["properties"]
         if "assistant_message" in properties:
-            choices = properties["assistant_message"].get("enum") or ["Entendi seu relato."]
+            choices = properties["assistant_message"].get("enum") or [
+                "Entendi seu relato."
+            ]
             return {
                 "message": {
-                    "content": json.dumps({"assistant_message": choices[0]}, ensure_ascii=False)
+                    "content": json.dumps(
+                        {"assistant_message": choices[0]}, ensure_ascii=False
+                    )
                 }
             }
         return {
@@ -51,7 +55,11 @@ def access_runtime(monkeypatch):
     [
         ("Não consigo acessar o Microsoft 365 desde cedo.", "OFFICE 365", ""),
         ("Outlook não abre e eu preciso ver meus e-mails.", "OFFICE 365", "OUTLOOK"),
-        ("O One Drive não está sincronizando minhas pastas.", "OFFICE 365", "ONEDRIVE"),
+        (
+            "O One Drive não está sincronizando minhas pastas.",
+            "OFFICE 365",
+            "ONEDRIVE",
+        ),
     ],
 )
 def test_password_knowledge_requires_explicit_password_evidence(
@@ -76,8 +84,12 @@ def test_password_knowledge_still_answers_when_password_is_explicit(access_runti
     assert "recuperação de senha" in result["assistant_message"].casefold()
 
 
-def test_product_follow_up_without_password_does_not_receive_password_article(access_runtime):
-    first = access_runtime.send_message("pedro-miranda", "Não consigo acessar o sistema.")
+def test_product_follow_up_without_password_does_not_receive_password_article(
+    access_runtime,
+):
+    first = access_runtime.send_message(
+        "pedro-miranda", "Não consigo acessar o sistema."
+    )
     second = access_runtime.send_message("pedro-miranda", "Teams")
 
     assert first["status"] == "NEEDS_CLARIFICATION"
