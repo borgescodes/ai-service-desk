@@ -90,15 +90,25 @@ class BusinessVocabulary:
                 return entry.aliases + (products if system == "OFFICE 365" else ())
         return SYSTEM_ALIASES.get(system, (system,))
 
-    def canonical(self, value: str) -> str | None:
-        normalized = normalize_text(value)
+    def _canonical_alias(self, normalized: str) -> str | None:
         for entry in SYSTEMS:
             if any(normalized == normalize_text(alias) for alias in self.aliases(entry.name)):
                 return entry.name
         for name, aliases in SYSTEM_ALIASES.items():
-            if normalized in {normalize_text(name), *(normalize_text(a) for a in aliases)}:
+            values = {normalize_text(name), *(normalize_text(alias) for alias in aliases)}
+            if normalized in values:
                 return name
         return None
+
+    def canonical(self, value: str) -> str | None:
+        normalized = normalize_text(value)
+        direct = self._canonical_alias(normalized)
+        if direct is not None:
+            return direct
+        natural_slot = re.fullmatch(r"(?:e\s+)?(?:no|na)\s+(.+)", normalized)
+        if natural_slot is None:
+            return None
+        return self._canonical_alias(natural_slot.group(1))
 
     def systems(self, text: str) -> tuple[str, ...]:
         normalized = normalize_text(text)
@@ -120,7 +130,7 @@ class BusinessVocabulary:
             if re.search(
                 r"\b(?:cadastrar|cadastro|cadastramento|criar|criacao)\b"
                 r"[^.!?;\n]{0,80}\b(?:material|materiais)\b"
-                r"[^.!?;\n]{0,40}\bpara\s+(?:a\s+)?revenda\b",
+                r"[^.!?;\n]{0,40}\b(?:para|pra)\s+(?:a\s+)?revenda\b",
                 clause,
             ):
                 return ("CDM",)
