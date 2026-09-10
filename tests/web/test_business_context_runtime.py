@@ -149,3 +149,16 @@ def test_reset_discards_business_context(runtime):
     result = runtime.send_message("pedro-miranda", "Não consigo acessar o sistema")
     assert result["reason"] == "MISSING_SYSTEM"
     assert result["business_context"] == {"system": "", "product": ""}
+
+
+@pytest.mark.parametrize(
+    "correction,system,product",
+    [
+        ("Não é Teams, é SAP", "SAP", ""),
+        ("Não é SAP, é Teams", "OFFICE 365", "TEAMS"),
+    ],
+)
+def test_correction_preserves_only_product_of_selected_system(runtime, correction, system, product):
+    runtime.send_message("pedro-miranda", "Teams e SAP não entram")
+    result = runtime.send_message("pedro-miranda", correction)
+    assert result["business_context"] == {"system": system, "product": product}

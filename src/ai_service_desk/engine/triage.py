@@ -178,14 +178,15 @@ def _merge_turn(
 
     if evidence.kind == "SYSTEM_CORRECTION":
         assert evidence.correction is not None
+        entities = state.entities
+        if resolver is not None:
+            correction = _CORRECTION_RE.fullmatch(normalize_text(message).strip())
+            assert correction is not None
+            entities = {**entities, **resolver.entities(correction.group(2))}
         return replace(
             state,
             system=evidence.correction[1],
-            entities=(
-                {**state.entities, **resolver.entities(message)}
-                if resolver is not None
-                else state.entities
-            ),
+            entities=entities,
             pending_field="" if state.pending_field == "system" else state.pending_field,
         )
 
