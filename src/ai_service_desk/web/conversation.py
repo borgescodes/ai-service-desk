@@ -70,6 +70,7 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
                 chat,
                 "OPERATIONAL_RESPONSE_UNAVAILABLE",
             )
+            acknowledgment = _strip_interrogative_sentences(acknowledgment)
             _validate_clarification_acknowledgment(acknowledgment)
         return f"{acknowledgment}\n\n{rendered_question}" if rendered_question else acknowledgment
 
@@ -80,6 +81,17 @@ def _contextual_question(message: str, question: str) -> str:
     if question == _MISSING_SYSTEM_QUESTION and re.search(r"\boffice\b", message, re.IGNORECASE):
         return _OFFICE_SYSTEM_QUESTION
     return question
+
+
+def _strip_interrogative_sentences(text: str) -> str:
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    cleaned = " ".join(sentence for sentence in sentences if "?" not in sentence).strip()
+    if not cleaned:
+        raise WebDemoError(
+            "OPERATIONAL_RESPONSE_UNAVAILABLE",
+            "A resposta conversacional do Ollama não trouxe reconhecimento declarativo.",
+        )
+    return cleaned
 
 
 def _validate_clarification_acknowledgment(text: str) -> None:
