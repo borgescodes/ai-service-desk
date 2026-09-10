@@ -60,7 +60,10 @@ def test_password_article_requires_evidence(access_runtime, message, system, pro
 
 
 def test_password_article_answers_with_password_evidence(access_runtime):
-    message = "Esqueci minha senha do Office e não consigo entrar."
+    message = (
+        "Cara, esqueci minha senha do Office e não consigo entrar. "
+        "O que eu faço?"
+    )
     result = access_runtime.send_message("pedro-miranda", message)
 
     assert result["status"] == "KNOWLEDGE_FOUND"
