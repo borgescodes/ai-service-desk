@@ -1,0 +1,32 @@
+"""Evidence gates for the synthetic Phase 12 knowledge set."""
+
+from ai_service_desk.engine.knowledge_retrieval import KnowledgeEngine
+from ai_service_desk.engine.validation import normalize_text
+
+_REQUIRED_EVIDENCE = {
+    "KB-SYN-M365-PASSWORD-001": frozenset({"senha"}),
+}
+
+
+class DemoKnowledgeEngine(KnowledgeEngine):
+    """Keep synthetic similarity matches behind explicit user evidence."""
+
+    def search_classified(self, text, classification) -> dict:
+        result = super().search_classified(text, classification)
+        if result["status"] != "KNOWLEDGE_FOUND":
+            return result
+
+        knowledge = result["knowledge"]
+        required = _REQUIRED_EVIDENCE.get(knowledge["knowledge_id"], frozenset())
+        if not required:
+            return result
+
+        tokens = frozenset(normalize_text(text).split())
+        if tokens & required:
+            return result
+
+        blocked = dict(result)
+        blocked["status"] = "NO_APPROVED_KNOWLEDGE"
+        blocked["reason"] = "KNOWLEDGE_EVIDENCE_MISMATCH"
+        blocked["knowledge"] = None
+        return blocked
