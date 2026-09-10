@@ -77,9 +77,7 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
 
 
 def _contextual_question(message: str, question: str) -> str:
-    if question == _MISSING_SYSTEM_QUESTION and re.search(
-        r"\boffice\b", message, re.IGNORECASE
-    ):
+    if question == _MISSING_SYSTEM_QUESTION and re.search(r"\boffice\b", message, re.IGNORECASE):
         return _OFFICE_SYSTEM_QUESTION
     return question
 
