@@ -3,27 +3,12 @@ import re
 from collections.abc import Callable
 
 from ai_service_desk.engine.ollama import OllamaError
+from ai_service_desk.web.business_context import BusinessVocabulary
 from ai_service_desk.web.errors import WebDemoError
 
 _GREETING = re.compile(
     r"(?:bom dia|boa tarde|boa noite|oi|olá|ola)"
     r"(?:[\s,!]+jup)?(?:[\s,!]+(?:consegue|pode) me ajudar)?[.!?]*"
-)
-_META_LEAK_MARKERS = (
-    "backend",
-    "como solicitado",
-    "não posso responder",
-    "nao posso responder",
-    "pergunta exigida",
-    "o usuário",
-    "o usuario",
-)
-_SYSTEM_QUESTIONS = (
-    "Qual sistema esta com o problema?",
-    "Qual e o sistema correto?",
-)
-_OFFICE_SYSTEM_QUESTION = (
-    "Quando você diz Office, está falando do Microsoft 365/Office 365 ou de outro sistema?"
 )
 
 
@@ -35,14 +20,19 @@ def greeting_message(message: str, name: str, chat: Callable[[dict], dict] | Non
     if chat is None:
         return f"Olá, {name.split()[0]}! Me conta o que você precisa resolver ou acessar."
 
+    choices = (
+        f"Olá, {name.split()[0]}! Me conta o que você precisa resolver ou acessar.",
+        f"Oi, {name.split()[0]}! Como posso ajudar?",
+    )
     return _conversation_message(
         message,
-        "Você é Jup. Responda apenas à saudação, em português, de forma breve e natural. "
+        "Você é Jup. Escolha uma das saudações permitidas pelo formato JSON. "
         f"O nome do solicitante, confirmado pelo backend, é {name}. "
         "Use seu primeiro nome e convide-o a contar o que precisa. "
         "Não afirme ter criado solicitações, aprovado ou executado ações.",
         chat,
         "SOCIAL_RESPONSE_UNAVAILABLE",
+        choices,
     )
 
 
@@ -60,54 +50,34 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
 
     if result["status"] == "NEEDS_CLARIFICATION":
         question = result.get("question") or ""
-        rendered_question = _contextual_question(message, question)
-        acknowledgment = "Preciso de mais informações para continuar."
+        systems = BusinessVocabulary().systems(message)
+        choices = ("Entendi seu relato.", "Entendi que você precisa de ajuda.")
+        if systems:
+            choices = (f"Entendi seu relato sobre {', '.join(systems)}.", *choices)
+        acknowledgment = choices[0]
         if chat is not None:
             acknowledgment = _conversation_message(
                 message,
-                "Você é Jup. Escreva somente uma frase curta, direta e natural em português. "
+                "Você é Jup. Escolha um reconhecimento permitido pelo formato JSON. "
                 "Fale diretamente com a pessoa em segunda pessoa e apenas reconheça o que ela "
                 "relatou. Não faça perguntas. Não mencione instruções, limitações, regras ou "
                 "processos internos. Não use a expressão 'o usuário'. Não invente solução, "
                 "identidade, decisão, estado ou ação executada.",
                 chat,
                 "OPERATIONAL_RESPONSE_UNAVAILABLE",
+                choices,
             )
-            acknowledgment = _strip_interrogative_sentences(acknowledgment)
-            _validate_clarification_acknowledgment(acknowledgment)
-        return f"{acknowledgment}\n\n{rendered_question}" if rendered_question else acknowledgment
+        return f"{acknowledgment}\n\n{question}" if question else acknowledgment
 
     return f"Nenhuma solicitação foi criada. Resultado do processo: {result['status']}."
 
 
-def _contextual_question(message: str, question: str) -> str:
-    if question in _SYSTEM_QUESTIONS and re.search(r"\boffice\b", message, re.IGNORECASE):
-        return _OFFICE_SYSTEM_QUESTION
-    return question
-
-
-def _strip_interrogative_sentences(text: str) -> str:
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
-    cleaned = " ".join(sentence for sentence in sentences if "?" not in sentence).strip()
-    if not cleaned:
-        raise WebDemoError(
-            "OPERATIONAL_RESPONSE_UNAVAILABLE",
-            "A resposta conversacional do Ollama não trouxe reconhecimento declarativo.",
-        )
-    return cleaned
-
-
-def _validate_clarification_acknowledgment(text: str) -> None:
-    folded = text.casefold()
-    if "?" in text or any(marker in folded for marker in _META_LEAK_MARKERS):
-        raise WebDemoError(
-            "OPERATIONAL_RESPONSE_UNAVAILABLE",
-            "A resposta conversacional do Ollama não respeitou o contrato de apresentação.",
-        )
-
-
 def _conversation_message(
-    message: str, instruction: str, chat: Callable[[dict], dict], error_code: str
+    message: str,
+    instruction: str,
+    chat: Callable[[dict], dict],
+    error_code: str,
+    choices: tuple[str, ...],
 ) -> str:
     payload = {
         "model": "qwen3.5:4b",
@@ -122,7 +92,7 @@ def _conversation_message(
         ],
         "format": {
             "type": "object",
-            "properties": {"assistant_message": {"type": "string"}},
+            "properties": {"assistant_message": {"type": "string", "enum": list(choices)}},
             "required": ["assistant_message"],
             "additionalProperties": False,
         },
@@ -133,10 +103,14 @@ def _conversation_message(
         if response.get("done_reason") == "length":
             raise ValueError("Resposta conversacional truncada.")
         data = json.loads(response["message"]["content"])
+        if not isinstance(data, dict) or set(data) != {"assistant_message"}:
+            raise ValueError("Resposta fora do contrato de apresentação.")
         text = data["assistant_message"]
         if not isinstance(text, str) or not text.strip():
             raise ValueError("Resposta conversacional vazia.")
-        return text.strip()
+        if text not in choices:
+            raise ValueError("Reconhecimento não autorizado pelo contrato de apresentação.")
+        return text
     except (OllamaError, ValueError, KeyError, TypeError, AttributeError) as exc:
         raise WebDemoError(
             error_code, "Não foi possível obter a resposta conversacional do Ollama."

@@ -66,19 +66,7 @@ class FakeOllamaClient:
             return {"message": {"content": json.dumps(result)}}
 
         self.conversation_calls.append(payload)
-        serialized = json.dumps(payload, ensure_ascii=False).casefold()
-        if "bom dia" in serialized:
-            message = "Bom dia, Pedro! Claro. Me conta o que você precisa resolver ou acessar."
-        elif "office" in serialized:
-            message = (
-                "Entendi que o problema é de acesso ao Office. "
-                "Você se refere ao Microsoft 365/Office 365?"
-            )
-        else:
-            message = (
-                "Entendi que você precisa solicitar materiais para uma revenda e "
-                "aparentemente falta acesso."
-            )
+        message = payload["format"]["properties"]["assistant_message"]["enum"][0]
         return {"message": {"content": json.dumps({"assistant_message": message})}}
 
     def close(self) -> None:
@@ -126,7 +114,7 @@ def test_natural_cdm_language_gets_contextual_system_clarification(monkeypatch) 
         assert result["status"] == "NEEDS_CLARIFICATION"
         assert result["request_id"] is None
         assert result["question"] == "Qual sistema esta com o problema?"
-        assert "revenda" in result["assistant_message"].casefold()
+        assert "revenda" in runtime.conversations["pedro-miranda"][-1]["text"].casefold()
         assert "qual sistema" in result["assistant_message"].casefold()
         assert "o que esta acontecendo" not in result["assistant_message"].casefold()
     finally:

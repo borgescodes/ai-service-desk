@@ -32,10 +32,7 @@ def test_clarification_prompt_keeps_backend_question_out_of_llm_input() -> None:
 
     def chat(payload: dict) -> dict:
         captured.update(payload)
-        return _chat_response(
-            "Entendi que você precisa solicitar materiais para uma revenda e aparentemente "
-            "falta acesso."
-        )
+        return _chat_response(payload["format"]["properties"]["assistant_message"]["enum"][0])
 
     rendered = operational_message(_clarification_result(), message, chat)
 
@@ -67,10 +64,8 @@ def test_clarification_rejects_meta_instruction_leak_from_llm() -> None:
 def test_office_clarification_uses_contextual_system_question() -> None:
     result = _clarification_result()
 
-    def chat(_payload: dict) -> dict:
-        return _chat_response(
-            "Entendi que você esqueceu sua senha do Office e não consegue entrar."
-        )
+    def chat(payload: dict) -> dict:
+        return _chat_response(payload["format"]["properties"]["assistant_message"]["enum"][0])
 
     rendered = operational_message(
         result,
@@ -79,9 +74,10 @@ def test_office_clarification_uses_contextual_system_question() -> None:
     )
 
     assert result["question"] == "Qual sistema esta com o problema?"
-    assert "microsoft 365/office 365" in rendered.casefold()
-    assert "outro sistema" in rendered.casefold()
-    assert "Qual sistema esta com o problema?" not in rendered
+    # O node histórico permanece; a F12 agora resolve Office antes da apresentação.
+    assert "office 365" in rendered.casefold()
+    assert "outro sistema" not in rendered.casefold()
+    assert rendered.endswith(result["question"])
 
 
 def test_clarification_discards_llm_question_before_backend_question() -> None:
@@ -93,14 +89,11 @@ def test_clarification_discards_llm_question_before_backend_question() -> None:
             "Você se refere ao Microsoft 365/Office 365?"
         )
 
-    rendered = operational_message(
-        result,
-        "Cara, esqueci minha senha do Office e não consigo entrar. O que eu faço?",
-        chat,
-    )
-
-    assert rendered.startswith("Entendi que o problema é de acesso ao Office.")
-    assert "Você se refere ao Microsoft 365/Office 365?" not in rendered
-    assert rendered.endswith(
-        "Quando você diz Office, está falando do Microsoft 365/Office 365 ou de outro sistema?"
-    )
+    # Texto fora da enum é rejeitado integralmente, inclusive perguntas adicionais.
+    with pytest.raises(WebDemoError) as exc_info:
+        operational_message(
+            result,
+            "Cara, esqueci minha senha do Office e não consigo entrar. O que eu faço?",
+            chat,
+        )
+    assert exc_info.value.code == "OPERATIONAL_RESPONSE_UNAVAILABLE"
