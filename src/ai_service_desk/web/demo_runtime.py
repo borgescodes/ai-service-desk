@@ -41,6 +41,7 @@ from ai_service_desk.engine.technician_authorization import (
 from ai_service_desk.engine.triage import TriageEngine
 from ai_service_desk.integrations.cdm import CDMAdapter
 from ai_service_desk.integrations.cdm_fake_api import CDMFakeStore, build_cdm_server
+from ai_service_desk.web.business_context import BusinessVocabulary
 from ai_service_desk.web.conversation import (
     greeting_message,
     is_social_greeting,
@@ -140,6 +141,7 @@ class DemoRuntime:
         playbook_catalog = root / "playbook-catalog"
 
         self.demo_embedder = DemoEmbedder()
+        self.business_vocabulary = BusinessVocabulary()
         self.demo_classifier_client = DemoClassifierClient()
         build_knowledge_index(knowledge_source, knowledge_index, self.demo_embedder, batch_size=2)
         build_playbook_catalog(playbook_source, knowledge_index, playbook_catalog)
@@ -148,6 +150,7 @@ class DemoRuntime:
             self.demo_classifier_client,
             self.demo_embedder,
             threshold=DEMO_KNOWLEDGE_THRESHOLD,
+            resolver=self.business_vocabulary,
         )
         self.playbook_engine = PlaybookEngine(playbook_catalog, knowledge_index)
 
@@ -216,15 +219,21 @@ class DemoRuntime:
 
         def classifier(text):
             if self.mode == "LOCAL_AI":
-                classification = classify_ticket(text, self._ollama_client.chat)
+
+                def chat(payload):
+                    payload["messages"][0]["content"] += "\n" + self.business_vocabulary.prompt()
+                    return self._ollama_client.chat(payload)
             else:
-                classification = classify_ticket(text, self.demo_classifier_client.chat)
+                chat = self.demo_classifier_client.chat
+            classification = classify_ticket(text, chat, resolver=self.business_vocabulary)
             normalized = " ".join(text.casefold().split())
             if classification.system.casefold() == "que" and "sistema que " in normalized:
                 return replace(classification, system="")
             return classification
 
-        engine = TriageEngine(session_id, self.knowledge_engine, classifier)
+        engine = TriageEngine(
+            session_id, self.knowledge_engine, classifier, resolver=self.business_vocabulary
+        )
         return engine, engine.initial_state()
 
     def _requester(self, identity_id: str):
@@ -299,6 +308,11 @@ class DemoRuntime:
             }
 
         result = self._send_operational_message(identity_id, message, requester)
+        state = self._triage[identity_id][1]
+        result["business_context"] = {
+            "system": state.system,
+            "product": state.entities.get("product", ""),
+        }
         chat = self._ollama_client.chat if self.mode == "LOCAL_AI" else None
         result["assistant_message"] = operational_message(result, message, chat)
         return result

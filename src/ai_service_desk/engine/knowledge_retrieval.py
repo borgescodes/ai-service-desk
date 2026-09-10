@@ -8,6 +8,7 @@ import pandas as pd
 
 from ai_service_desk.engine.classification import (
     SYSTEM_ALIASES,
+    VocabularyResolver,
     classify_ticket,
     explicit_systems,
 )
@@ -18,11 +19,16 @@ from ai_service_desk.engine.validation import normalize_matrix, normalize_text
 DEFAULT_KNOWLEDGE_THRESHOLD = 0.65
 
 
-def _system_matches(article_system: str, target: str) -> bool:
+def _system_matches(
+    article_system: str, target: str, resolver: VocabularyResolver | None = None
+) -> bool:
     article = normalize_text(article_system)
     wanted = normalize_text(target)
     if article == wanted:
         return True
+    if resolver is not None:
+        canonical = resolver.canonical(target)
+        return canonical is not None and canonical == resolver.canonical(article_system)
     target_aliases = {normalize_text(value) for value in SYSTEM_ALIASES.get(target, (target,))}
     if article in target_aliases:
         return True
@@ -48,8 +54,9 @@ def _eligible_pool(
     data: pd.DataFrame,
     classification: TicketClassification,
     text: str,
+    resolver: VocabularyResolver | None = None,
 ) -> tuple[np.ndarray, str]:
-    if len(explicit_systems(text)) > 1:
+    if len(explicit_systems(text, resolver)) > 1:
         return np.array([], dtype=int), "CONTEXTO_AMBIGUO"
 
     target_system = classification.system.strip()
@@ -58,7 +65,7 @@ def _eligible_pool(
             [
                 index
                 for index, value in enumerate(data["system"].astype(str).tolist())
-                if _system_matches(value, target_system)
+                if _system_matches(value, target_system, resolver)
             ],
             dtype=int,
         )
@@ -66,6 +73,8 @@ def _eligible_pool(
             known = target_system in SYSTEM_ALIASES or any(
                 _system_matches(canonical, target_system) for canonical in SYSTEM_ALIASES
             )
+            if resolver is not None:
+                known = resolver.canonical(target_system) is not None
             return np.array([], dtype=int), "SYSTEM_MISMATCH" if known else "UNKNOWN_SYSTEM"
     else:
         system_indices = np.flatnonzero(data["system"].astype(str).str.strip().eq("").to_numpy())
@@ -92,6 +101,8 @@ def retrieve_knowledge(
     classification: TicketClassification,
     text: str,
     threshold: float = DEFAULT_KNOWLEDGE_THRESHOLD,
+    *,
+    resolver: VocabularyResolver | None = None,
 ) -> dict:
     if not math.isfinite(threshold) or not -1 <= threshold <= 1:
         raise ValueError("Limiar de knowledge deve estar entre -1 e 1.")
@@ -109,7 +120,7 @@ def retrieve_knowledge(
     if not np.isfinite(matrix_values).all() or not np.isfinite(query_values).all():
         raise ValueError("Vetores de knowledge invalidos.")
 
-    pool, reason = _eligible_pool(data, classification, text)
+    pool, reason = _eligible_pool(data, classification, text, resolver)
     if reason != "MATCH":
         return _base_result(classification, threshold, reason)
 
@@ -157,6 +168,8 @@ class KnowledgeEngine:
         client,
         embedder,
         threshold: float = DEFAULT_KNOWLEDGE_THRESHOLD,
+        *,
+        resolver: VocabularyResolver | None = None,
     ):
         self.df, self.matrix, self.provenance = load_knowledge_index(index_directory)
         if (
@@ -168,6 +181,7 @@ class KnowledgeEngine:
         if not math.isfinite(threshold) or not -1 <= threshold <= 1:
             raise ValueError("Limiar de knowledge deve estar entre -1 e 1.")
         self.client = client
+        self.resolver = resolver
         self.embedder = embedder
         self.threshold = float(threshold)
 
@@ -183,7 +197,7 @@ class KnowledgeEngine:
         text: str,
         classification: TicketClassification,
     ) -> dict:
-        pool, reason = _eligible_pool(self.df, classification, text)
+        pool, reason = _eligible_pool(self.df, classification, text, self.resolver)
         if reason != "MATCH":
             return _base_result(classification, self.threshold, reason)
         if not len(pool):
@@ -196,8 +210,9 @@ class KnowledgeEngine:
             classification,
             text,
             threshold=self.threshold,
+            resolver=self.resolver,
         )
 
     def search(self, text: str) -> dict:
-        classification = classify_ticket(text, self.client.chat)
+        classification = classify_ticket(text, self.client.chat, resolver=self.resolver)
         return self.search_classified(text, classification)

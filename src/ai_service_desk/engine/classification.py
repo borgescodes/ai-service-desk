@@ -2,9 +2,21 @@ import json
 import math
 import re
 from collections.abc import Callable
+from typing import Protocol
 
 from ai_service_desk.engine.types import TicketClassification
 from ai_service_desk.engine.validation import normalize_text
+
+
+class VocabularyResolver(Protocol):
+    def systems(self, text: str) -> tuple[str, ...]: ...
+
+    def canonical(self, value: str) -> str | None: ...
+
+    def aliases(self, system: str) -> tuple[str, ...]: ...
+
+    def entities(self, text: str) -> dict[str, str]: ...
+
 
 CLASSIFIER_MODEL = "qwen3.5:4b"
 ALLOWED_INTENTS = {
@@ -72,7 +84,9 @@ def _contains_name(text: str, name: str) -> bool:
     )
 
 
-def explicit_systems(text: str) -> list[str]:
+def explicit_systems(text: str, resolver: VocabularyResolver | None = None) -> list[str]:
+    if resolver is not None:
+        return list(resolver.systems(text))
     return [
         name
         for name, aliases in SYSTEM_ALIASES.items()
@@ -162,8 +176,10 @@ def validate_classification(data: dict) -> TicketClassification:
     )
 
 
-def _recover_literal_system(text: str, model_system: str) -> str:
-    names = explicit_systems(text)
+def _recover_literal_system(
+    text: str, model_system: str, resolver: VocabularyResolver | None = None
+) -> str:
+    names = explicit_systems(text, resolver)
     if len(names) == 1:
         return names[0]
     if len(names) > 1:
@@ -177,8 +193,14 @@ def _recover_literal_system(text: str, model_system: str) -> str:
     return ""
 
 
-def preserve_evidence(text: str, classification: TicketClassification) -> TicketClassification:
+def preserve_evidence(
+    text: str,
+    classification: TicketClassification,
+    resolver: VocabularyResolver | None = None,
+) -> TicketClassification:
     entities = dict(classification.entities)
+    if resolver is not None:
+        entities.update(resolver.entities(text))
     for canonical, aliases, expression in [
         ("rotina", ("rotina", "routine"), r"\brotina\s*(?:n(?:umero)?\.?\s*)?[:#]?\s*(\d+)\b"),
         ("filial", ("filial", "branch"), r"\bfilial\s*[:#]?\s*(\d+)\b"),
@@ -190,13 +212,15 @@ def preserve_evidence(text: str, classification: TicketClassification) -> Ticket
             entities[canonical] = match.group(1)
     return TicketClassification(
         classification.intent,
-        _recover_literal_system(text, classification.system),
+        _recover_literal_system(text, classification.system, resolver),
         entities,
         classification.confidence,
     )
 
 
-def classify_ticket(text: str, chat: Callable[[dict], dict]) -> TicketClassification:
+def classify_ticket(
+    text: str, chat: Callable[[dict], dict], *, resolver: VocabularyResolver | None = None
+) -> TicketClassification:
     payload = chat(build_payload(text))
     if not isinstance(payload, dict) or not isinstance(payload.get("message"), dict):
         raise ValueError("Ollama retornou resposta de classificacao invalida.")
@@ -211,4 +235,4 @@ def classify_ticket(text: str, chat: Callable[[dict], dict]) -> TicketClassifica
         data = json.loads(content)
     except (json.JSONDecodeError, TypeError) as exc:
         raise ValueError("Ollama nao retornou JSON valido.") from exc
-    return preserve_evidence(text, validate_classification(data))
+    return preserve_evidence(text, validate_classification(data), resolver)

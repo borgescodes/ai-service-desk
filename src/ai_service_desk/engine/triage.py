@@ -2,7 +2,11 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-from ai_service_desk.engine.classification import SYSTEM_ALIASES, explicit_systems
+from ai_service_desk.engine.classification import (
+    SYSTEM_ALIASES,
+    VocabularyResolver,
+    explicit_systems,
+)
 from ai_service_desk.engine.types import TicketClassification
 from ai_service_desk.engine.validation import normalize_text
 
@@ -43,8 +47,12 @@ def new_triage_state(session_id: str) -> TriageState:
     return TriageState(1, session_id, "ACTIVE", 0, 0, "", "", "", {}, 0.0, "", ())
 
 
-def _canonical_for_exact_alias(value: str) -> str | None:
+def _canonical_for_exact_alias(
+    value: str, resolver: VocabularyResolver | None = None
+) -> str | None:
     wanted = normalize_text(value).strip().strip(".!?")
+    if resolver is not None:
+        return resolver.canonical(wanted)
     matches = {
         canonical
         for canonical, aliases in SYSTEM_ALIASES.items()
@@ -59,14 +67,16 @@ _CORRECTION_RE = re.compile(
 )
 
 
-def _parse_system_correction(text: str) -> tuple[str, str] | None:
+def _parse_system_correction(
+    text: str, resolver: VocabularyResolver | None = None
+) -> tuple[str, str] | None:
     normalized = normalize_text(text).strip()
     match = _CORRECTION_RE.fullmatch(normalized)
     if not match:
         return None
-    old = _canonical_for_exact_alias(match.group(1))
-    new = _canonical_for_exact_alias(match.group(2))
-    systems = tuple(explicit_systems(text))
+    old = _canonical_for_exact_alias(match.group(1), resolver)
+    new = _canonical_for_exact_alias(match.group(2), resolver)
+    systems = tuple(explicit_systems(text, resolver))
     if old is None or new is None or old == new:
         return None
     if len(systems) != 2 or set(systems) != {old, new}:
@@ -92,13 +102,14 @@ def _is_short_system_reply(
     pending_field: str,
     classification: TicketClassification,
     prior_system: str = "",
+    resolver: VocabularyResolver | None = None,
 ) -> bool:
     if pending_field != "system":
         return False
-    if _parse_system_correction(message) is not None:
+    if _parse_system_correction(message, resolver) is not None:
         return True
     normalized = _normalized_short_text(message)
-    if _canonical_for_exact_alias(normalized) is not None:
+    if _canonical_for_exact_alias(normalized, resolver) is not None:
         return True
     literal = normalize_text(classification.system).strip()
     if literal and (normalized == literal or normalized == f"sistema {literal}"):
@@ -113,9 +124,10 @@ def _analyze_turn(
     state: TriageState,
     message: str,
     classification: TicketClassification,
+    resolver: VocabularyResolver | None = None,
 ) -> TurnEvidence:
-    correction = _parse_system_correction(message)
-    systems = tuple(explicit_systems(message))
+    correction = _parse_system_correction(message, resolver)
+    systems = tuple(explicit_systems(message, resolver))
     if correction is not None:
         kind = "SYSTEM_CORRECTION"
     elif _is_short_system_reply(
@@ -123,6 +135,7 @@ def _analyze_turn(
         state.pending_field,
         classification,
         state.system,
+        resolver,
     ):
         kind = "SYSTEM_SLOT"
     elif _is_known_insufficient_problem(state, message):
@@ -137,10 +150,11 @@ def _system_from_slot(
     classification: TicketClassification,
     evidence: TurnEvidence,
     prior_system: str = "",
+    resolver: VocabularyResolver | None = None,
 ) -> str:
     if evidence.correction is not None:
         return evidence.correction[1]
-    canonical = _canonical_for_exact_alias(message)
+    canonical = _canonical_for_exact_alias(message, resolver)
     if canonical is not None:
         return canonical
     normalized = _normalized_short_text(message)
@@ -158,6 +172,7 @@ def _merge_turn(
     state: TriageState,
     message: str,
     evidence: TurnEvidence,
+    resolver: VocabularyResolver | None = None,
 ) -> TriageState:
     classification = evidence.classification
 
@@ -166,6 +181,11 @@ def _merge_turn(
         return replace(
             state,
             system=evidence.correction[1],
+            entities=(
+                {**state.entities, **resolver.entities(message)}
+                if resolver is not None
+                else state.entities
+            ),
             pending_field="" if state.pending_field == "system" else state.pending_field,
         )
 
@@ -177,8 +197,14 @@ def _merge_turn(
                 classification,
                 evidence,
                 state.system,
+                resolver,
             ),
             pending_field="",
+            entities=(
+                {**state.entities, **resolver.entities(message)}
+                if resolver is not None
+                else state.entities
+            ),
         )
 
     if evidence.kind == "INSUFFICIENT_PROBLEM":
@@ -227,13 +253,17 @@ def _merge_turn(
     )
 
 
-def _alias_values(canonical: str) -> tuple[str, ...]:
+def _alias_values(canonical: str, resolver: VocabularyResolver | None = None) -> tuple[str, ...]:
+    if resolver is not None:
+        return (canonical, *resolver.aliases(canonical))
     return (canonical, *SYSTEM_ALIASES.get(canonical, ()))
 
 
-def _contains_system_text(text: str, system: str) -> bool:
-    canonical = _canonical_for_exact_alias(system)
-    values = _alias_values(canonical) if canonical else (system,)
+def _contains_system_text(
+    text: str, system: str, resolver: VocabularyResolver | None = None
+) -> bool:
+    canonical = _canonical_for_exact_alias(system, resolver)
+    values = _alias_values(canonical, resolver) if canonical else (system,)
     return any(
         re.search(rf"(?<!\w){re.escape(value)}(?!\w)", text, flags=re.IGNORECASE)
         for value in values
@@ -241,12 +271,19 @@ def _contains_system_text(text: str, system: str) -> bool:
     )
 
 
-def _remove_conflicting_known_system_aliases(text: str, final_system: str) -> str:
-    final_canonical = _canonical_for_exact_alias(final_system)
+def _remove_conflicting_known_system_aliases(
+    text: str, final_system: str, resolver: VocabularyResolver | None = None
+) -> str:
+    final_canonical = _canonical_for_exact_alias(final_system, resolver)
     result = text
     if final_canonical is None:
         return result.strip()
-    for canonical, aliases in SYSTEM_ALIASES.items():
+    candidates = (
+        ((name, resolver.aliases(name)) for name in resolver.systems(text))
+        if resolver is not None
+        else SYSTEM_ALIASES.items()
+    )
+    for canonical, aliases in candidates:
         if canonical == final_canonical:
             continue
         for value in sorted((canonical, *aliases), key=len, reverse=True):
@@ -259,12 +296,14 @@ def _remove_conflicting_known_system_aliases(text: str, final_system: str) -> st
     return re.sub(r"\s+", " ", result).strip()
 
 
-def build_knowledge_query(problem_text: str, system: str) -> str:
+def build_knowledge_query(
+    problem_text: str, system: str, resolver: VocabularyResolver | None = None
+) -> str:
     text = problem_text.strip()
     if not system:
         return text
-    reconciled = _remove_conflicting_known_system_aliases(text, system)
-    if _contains_system_text(reconciled, system):
+    reconciled = _remove_conflicting_known_system_aliases(text, system, resolver)
+    if _contains_system_text(reconciled, system, resolver):
         return reconciled
     return reconciled + "\n" + system
 
@@ -330,12 +369,14 @@ def _ask_or_abstain(
     return next_state, _clarification(reason, question)
 
 
-def _known_alias_system(system: str) -> bool:
-    return bool(system and _canonical_for_exact_alias(system))
+def _known_alias_system(system: str, resolver: VocabularyResolver | None = None) -> bool:
+    return bool(system and _canonical_for_exact_alias(system, resolver))
 
 
-def _unknown_system(system: str, available: tuple[str, ...]) -> bool:
-    return bool(system) and not _known_alias_system(system) and system not in available
+def _unknown_system(
+    system: str, available: tuple[str, ...], resolver: VocabularyResolver | None = None
+) -> bool:
+    return bool(system) and not _known_alias_system(system, resolver) and system not in available
 
 
 class TriageEngine:
@@ -344,10 +385,13 @@ class TriageEngine:
         session_id: str,
         knowledge_engine,
         classifier: Callable[[str], TicketClassification],
+        *,
+        resolver: VocabularyResolver | None = None,
     ):
         self.session_id = new_triage_state(session_id).session_id
         self.knowledge_engine = knowledge_engine
         self.classifier = classifier
+        self.resolver = resolver
 
     def initial_state(self) -> TriageState:
         return new_triage_state(self.session_id)
@@ -363,9 +407,9 @@ class TriageEngine:
             raise ValueError("Mensagem de triagem invalida.")
 
         classification = self.classifier(message)
-        evidence = _analyze_turn(state, message, classification)
+        evidence = _analyze_turn(state, message, classification, self.resolver)
         counted = replace(state, turn_count=state.turn_count + 1)
-        merged = _merge_turn(counted, message.strip(), evidence)
+        merged = _merge_turn(counted, message.strip(), evidence, self.resolver)
 
         if not merged.problem_text or not merged.intent or merged.intent == "OUTRO":
             return _ask_or_abstain(
@@ -388,7 +432,7 @@ class TriageEngine:
                 "Qual sistema esta com o problema?",
             )
 
-        if _unknown_system(merged.system, available):
+        if _unknown_system(merged.system, available, self.resolver):
             return _ask_or_abstain(
                 merged,
                 "system",
@@ -404,7 +448,7 @@ class TriageEngine:
                 "Qual sistema esta com o problema?",
             )
 
-        query = build_knowledge_query(merged.problem_text, merged.system)
+        query = build_knowledge_query(merged.problem_text, merged.system, self.resolver)
         resolved = TicketClassification(
             merged.intent,
             merged.system,

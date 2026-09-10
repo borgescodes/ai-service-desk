@@ -163,10 +163,10 @@ def test_office_language_is_not_reduced_to_generic_problem_prompt(monkeypatch) -
             "Cara, esqueci minha senha do Office e não consigo entrar. O que eu faço?",
         )
 
-        assert result["status"] == "NEEDS_CLARIFICATION"
+        assert result["status"] == "KNOWLEDGE_FOUND"
         assert result["request_id"] is None
-        assert "office" in result["assistant_message"].casefold()
         assert "microsoft 365" in result["assistant_message"].casefold()
+        assert "qual sistema" not in result["assistant_message"].casefold()
         assert "o que esta acontecendo" not in result["assistant_message"].casefold()
     finally:
         runtime.close()

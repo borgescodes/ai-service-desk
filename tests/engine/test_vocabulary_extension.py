@@ -15,7 +15,9 @@ class NeutralVocabulary:
     """Synthetic names prove the extension has no dependency on demo terminology."""
 
     def canonical(self, value):
-        return {"alpha": "SUITE", "suite": "SUITE", "beta": "OTHER"}.get(value.casefold())
+        return {"alpha": "SUITE", "suite": "SUITE", "beta": "OTHER", "other": "OTHER"}.get(
+            value.casefold()
+        )
 
     def systems(self, text):
         words = text.casefold().replace(",", " ").split()
