@@ -69,6 +69,12 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
             )
         return f"{acknowledgment}\n\n{question}" if question else acknowledgment
 
+    if result["status"] == "TRIAGE_ABSTAINED":
+        return (
+            "Não encontrei uma orientação aprovada suficiente para esse caso. "
+            "Nenhuma solicitação foi criada."
+        )
+
     return f"Nenhuma solicitação foi criada. Resultado do processo: {result['status']}."
 
 
