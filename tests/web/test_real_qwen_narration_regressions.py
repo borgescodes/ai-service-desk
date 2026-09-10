@@ -82,3 +82,25 @@ def test_office_clarification_uses_contextual_system_question() -> None:
     assert "microsoft 365/office 365" in rendered.casefold()
     assert "outro sistema" in rendered.casefold()
     assert "Qual sistema esta com o problema?" not in rendered
+
+
+def test_clarification_discards_llm_question_before_backend_question() -> None:
+    result = _clarification_result()
+
+    def chat(_payload: dict) -> dict:
+        return _chat_response(
+            "Entendi que o problema é de acesso ao Office. "
+            "Você se refere ao Microsoft 365/Office 365?"
+        )
+
+    rendered = operational_message(
+        result,
+        "Cara, esqueci minha senha do Office e não consigo entrar. O que eu faço?",
+        chat,
+    )
+
+    assert rendered.startswith("Entendi que o problema é de acesso ao Office.")
+    assert "Você se refere ao Microsoft 365/Office 365?" not in rendered
+    assert rendered.endswith(
+        "Quando você diz Office, está falando do Microsoft 365/Office 365 ou de outro sistema?"
+    )
