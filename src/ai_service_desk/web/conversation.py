@@ -71,11 +71,7 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
                 "OPERATIONAL_RESPONSE_UNAVAILABLE",
             )
             _validate_clarification_acknowledgment(acknowledgment)
-        return (
-            f"{acknowledgment}\n\n{rendered_question}"
-            if rendered_question
-            else acknowledgment
-        )
+        return f"{acknowledgment}\n\n{rendered_question}" if rendered_question else acknowledgment
 
     return f"Nenhuma solicitação foi criada. Resultado do processo: {result['status']}."
 
