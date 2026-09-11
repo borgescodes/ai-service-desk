@@ -18,7 +18,14 @@ def is_social_greeting(message: str) -> bool:
 
 def greeting_message(message: str, name: str, chat: Callable[[dict], dict] | None) -> str:
     if chat is None:
-        return f"Olá, {name.split()[0]}! Me conta o que você precisa resolver ou acessar."
+        normalized = " ".join(message.casefold().split())
+        if normalized.startswith("bom dia"):
+            return "Bom dia! Como posso ajudar?"
+        if normalized.startswith("boa tarde"):
+            return "Boa tarde! Como posso ajudar?"
+        if normalized.startswith("boa noite"):
+            return "Boa noite! Como posso ajudar?"
+        return "Oi! Como posso ajudar?"
 
     choices = (
         f"Olá, {name.split()[0]}! Me conta o que você precisa resolver ou acessar.",
@@ -41,6 +48,12 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
         return f"Encontrei uma orientação aprovada para esse caso:\n\n{result['answer']}"
 
     if result["request_id"] is not None:
+        if result["state"] == "DENIED_POLICY" and result["policy"] == "DENY":
+            return (
+                "Esse tipo de acesso administrativo não pode ser liberado por este atendimento. "
+                "Se o que você precisa é acessar o CDM para solicitar materiais, posso te ajudar "
+                "com o perfil de solicitante."
+            )
         if result["state"] == "PENDING_APPROVAL" and result["policy"] == "REQUIRE_APPROVAL":
             return f"Sua solicitação {result['request_id']} foi registrada e aguarda aprovação."
         return (
@@ -54,7 +67,7 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
         choices = ("Entendi seu relato.", "Entendi que você precisa de ajuda.")
         if systems:
             choices = (f"Entendi seu relato sobre {', '.join(systems)}.", *choices)
-        acknowledgment = choices[0]
+        acknowledgment = "Entendi."
         if chat is not None:
             acknowledgment = _conversation_message(
                 message,

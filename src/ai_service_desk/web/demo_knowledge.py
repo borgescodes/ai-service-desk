@@ -12,7 +12,11 @@ class DemoKnowledgeEngine(KnowledgeEngine):
     """Keep synthetic similarity matches behind explicit user evidence."""
 
     def search_classified(self, text, classification) -> dict:
-        result = super().search_classified(text, classification)
+        retrieval_text = text
+        if classification.system == "CDM" and classification.intent == "PROBLEMA_ACESSO":
+            retrieval_text = f"{text} acesso CDM solicitar materiais revenda"
+
+        result = super().search_classified(retrieval_text, classification)
         if result["status"] != "KNOWLEDGE_FOUND":
             return result
 

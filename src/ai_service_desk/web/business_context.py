@@ -123,16 +123,24 @@ class BusinessVocabulary:
         )
         if matches:
             return matches
-        # A conjunção deve ocorrer na mesma oração; negação impede inferência.
+        # Inferências abaixo são contexto linguístico da demo, não autorização.
+        # Um sistema explicitamente mencionado sempre vence porque os matches acima retornam antes.
         for clause in re.split(r"[.!?;\n]", normalized):
             if re.search(r"\b(nao|nunca|sem)\b", clause):
                 continue
             if re.search(
-                r"\b(?:cadastrar|cadastro|cadastramento|criar|criacao)\b"
+                r"\b(?:cadastrar|cadastro|cadastramento|criar|criacao|solicitar|solicitacao|pedir)\b"
                 r"[^.!?;\n]{0,80}\b(?:material|materiais)\b"
-                r"[^.!?;\n]{0,40}\b(?:para|pra)\s+(?:a\s+)?revenda\b",
+                r"[^.!?;\n]{0,40}\b(?:para|pra|da|de)\s+(?:a\s+)?revenda\b",
                 clause,
             ):
+                return ("CDM",)
+            privileged = re.search(r"\b(?:admin|administrador|administradora|superadmin)\b", clause)
+            access_request = re.search(
+                r"\b(?:acesso|acessar|entrar|perfil|libera|liberar|preciso|quero)\b",
+                clause,
+            )
+            if privileged and access_request:
                 return ("CDM",)
         return ()
 

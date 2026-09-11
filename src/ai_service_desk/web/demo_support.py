@@ -179,6 +179,11 @@ class DemoSupportState:
         normalized = normalize_text(message)
         if _PASSWORD_EVIDENCE.search(normalized):
             return LinguisticSignal.PASSWORD_EVIDENCE
+        # O troubleshooting focado desta demo é de autenticação/senha.
+        # Teams genérico continua no fluxo de triagem existente, mesmo quando
+        # a mensagem também menciona Office 365.
+        if re.search(r"\bteams\b", normalized):
+            return LinguisticSignal.UNKNOWN
         if _M365_TERMS.search(normalized) and _LOGIN_PROBLEM.search(normalized):
             return LinguisticSignal.M365_LOGIN_PROBLEM
         return LinguisticSignal.UNKNOWN

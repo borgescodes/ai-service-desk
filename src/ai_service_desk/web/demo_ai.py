@@ -5,6 +5,18 @@ import unicodedata
 
 import numpy as np
 
+_CDM_SYSTEM = re.compile(r"\b(?:cdm|central de dados mestres)\b")
+_PRIVILEGED_ROLE = re.compile(r"\b(?:admin|administrador(?:a)?|superadmin)\b")
+_OTHER_EXPLICIT_SYSTEM = re.compile(
+    r"\b(?:sap|siagri|cigam|metadados|portal rh|office|microsoft 365|m365|"
+    r"outlook|teams|onedrive|one drive)\b"
+)
+_MATERIAL = re.compile(r"\bmateria(?:l|is)\b")
+_REVENDA = re.compile(r"\brevenda\b")
+_CDM_REQUEST_LANGUAGE = re.compile(
+    r"\b(?:preciso|quero|acesso|acessar|entrar|solicitar|pedir|libera|liberar|perfil|sou)\b"
+)
+
 
 class DemoClassifierClient:
     def chat(self, payload: dict) -> dict:
@@ -19,7 +31,7 @@ class DemoClassifierClient:
             raise ValueError("Mensagem de classificação inválida.")
 
         normalized = _normalize(text)
-        if "cdm" in normalized and _access_language(normalized):
+        if _focused_cdm_access(normalized):
             result = {
                 "intent": "PROBLEMA_ACESSO",
                 "system": "CDM",
@@ -56,11 +68,32 @@ def _access_language(text: str) -> bool:
         for term in (
             "acesso",
             "acessar",
+            "entrar",
             "senha",
             "permissao",
-            "permissões",
+            "permissoes",
+            "libera",
             "liberar",
         )
+    )
+
+
+def _focused_cdm_access(text: str) -> bool:
+    explicit_cdm = _CDM_SYSTEM.search(text) is not None
+    privileged = _PRIVILEGED_ROLE.search(text) is not None
+    if explicit_cdm and (_access_language(text) or privileged):
+        return True
+
+    if _OTHER_EXPLICIT_SYSTEM.search(text):
+        return False
+
+    if privileged and _CDM_REQUEST_LANGUAGE.search(text):
+        return True
+
+    return (
+        _MATERIAL.search(text) is not None
+        and _REVENDA.search(text) is not None
+        and _CDM_REQUEST_LANGUAGE.search(text) is not None
     )
 
 

@@ -96,7 +96,7 @@ def test_business_vocabulary_accepts_informal_pra_revenda():
 
 
 def test_natural_cdm_slot_preserves_prior_access_context(access_runtime):
-    original = "Preciso de acesso para solicitar materiais para a revenda."
+    original = "Preciso de acesso."
     first = access_runtime.send_message("pedro-miranda", original)
     second = access_runtime.send_message("pedro-miranda", "É no CDM")
 

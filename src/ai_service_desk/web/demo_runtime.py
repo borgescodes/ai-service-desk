@@ -1,3 +1,4 @@
+import re
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -61,6 +62,13 @@ from ai_service_desk.web.presentation import present_prevention, present_request
 DEMO_MODES = frozenset({"DETERMINISTIC", "LOCAL_AI"})
 DEFAULT_DEMO_MODE = "DETERMINISTIC"
 DEMO_KNOWLEDGE_THRESHOLD = 0.45
+_ADMIN_ROLE_ALIAS = re.compile(r"\badministrador(?:a)?\b", re.IGNORECASE)
+_ENTER_ACCESS_ALIAS = re.compile(r"\bentrar\b", re.IGNORECASE)
+
+
+def _canonicalize_access_request_language(text: str) -> str:
+    canonical = _ADMIN_ROLE_ALIAS.sub("admin", text)
+    return _ENTER_ACCESS_ALIAS.sub("acessar", canonical)
 
 
 class DemoRuntime:
@@ -302,11 +310,10 @@ class DemoRuntime:
             raise ValueError("Mensagem vazia.")
 
         if is_social_greeting(message):
-            chat = self._ollama_client.chat if self.mode == "LOCAL_AI" else None
             return {
                 "status": "SOCIAL",
                 "request_id": None,
-                "assistant_message": greeting_message(message, requester.name, chat),
+                "assistant_message": greeting_message(message, requester.name, None),
             }
 
         systems = self.business_vocabulary.systems(message)
@@ -352,8 +359,7 @@ class DemoRuntime:
             "system": state.system,
             "product": state.entities.get("product", ""),
         }
-        chat = self._ollama_client.chat if self.mode == "LOCAL_AI" else None
-        result["assistant_message"] = operational_message(result, message, chat)
+        result["assistant_message"] = operational_message(result, message, None)
         return result
 
     def _send_operational_message(self, identity_id: str, message: str, requester) -> dict:
@@ -409,7 +415,11 @@ class DemoRuntime:
         if step is None:
             return {"status": "PLAYBOOK_GUIDANCE", "request_id": None}
         descriptor = action_proposal_descriptor(knowledge["knowledge_id"], playbook, step)
-        preparation = prepare_access_request(requester, next_state, descriptor)
+        preparation_state = next_state
+        canonical_problem = _canonicalize_access_request_language(next_state.problem_text)
+        if canonical_problem != next_state.problem_text:
+            preparation_state = replace(next_state, problem_text=canonical_problem)
+        preparation = prepare_access_request(requester, preparation_state, descriptor)
         if preparation.status != "READY" or preparation.context is None:
             return {
                 "status": "NEEDS_CLARIFICATION",
@@ -417,7 +427,10 @@ class DemoRuntime:
                 "request_id": None,
             }
 
-        record = self.routed_requests.create_request(preparation.context)
+        request_context = preparation.context
+        if canonical_problem != next_state.problem_text:
+            request_context = replace(request_context, purpose=next_state.problem_text)
+        record = self.routed_requests.create_request(request_context)
         self.created_request_ids.append(record.request_id)
         self.request_metadata[record.request_id] = {
             "classification_confidence": next_state.confidence,
