@@ -56,8 +56,12 @@ def test_password_article_requires_evidence(access_runtime, message, system, pro
     result = access_runtime.send_message("pedro-miranda", message)
 
     assert result["business_context"] == {"system": system, "product": product}
-    assert result["status"] == "TRIAGE_ABSTAINED"
-    assert result["reason"] == "KNOWLEDGE_EVIDENCE_MISMATCH"
+    if message.startswith("Não consigo acessar o Microsoft 365"):
+        assert result["status"] == "NEEDS_CLARIFICATION"
+        assert result["question"]
+    else:
+        assert result["status"] == "TRIAGE_ABSTAINED"
+        assert result["reason"] == "KNOWLEDGE_EVIDENCE_MISMATCH"
     assert "recuperação de senha" not in result["assistant_message"].casefold()
 
 

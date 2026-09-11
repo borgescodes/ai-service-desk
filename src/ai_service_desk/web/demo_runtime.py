@@ -54,6 +54,7 @@ from ai_service_desk.web.demo_data import (
 )
 from ai_service_desk.web.demo_identity import DemoIdentityProvider, IdentityNotFoundError
 from ai_service_desk.web.demo_knowledge import DemoKnowledgeEngine
+from ai_service_desk.web.demo_support import DemoSupportState, SupportProcedure
 from ai_service_desk.web.errors import WebDemoError
 from ai_service_desk.web.presentation import present_prevention, present_request
 
@@ -160,6 +161,7 @@ class DemoRuntime:
         self._triage: dict[str, tuple[TriageEngine, object]] = {}
         self.created_request_ids: list[str] = []
         self.request_metadata: dict[str, dict] = {}
+        self.support_state = DemoSupportState()
 
         technician = self.identity_provider.technician_identity("tecnico-cdm")
         self.authorization_registry = TechnicianAuthorizationRegistry(
@@ -306,6 +308,40 @@ class DemoRuntime:
                 "request_id": None,
                 "assistant_message": greeting_message(message, requester.name, chat),
             }
+
+        systems = self.business_vocabulary.systems(message)
+        support_turn = self.support_state.handle(
+            identity_id,
+            message,
+            explicit_other_system=bool(systems and "OFFICE 365" not in systems),
+        )
+        if support_turn is not None and support_turn.status != "PASSWORD_EVIDENCE_COLLECTED":
+            result = support_turn.as_result()
+            result["business_context"] = {"system": "OFFICE 365", "product": ""}
+            result["assistant_message"] = operational_message(result, message, None)
+            return result
+
+        if support_turn is not None:
+            support = self.support_state.get(identity_id)
+            query = message
+            if "OFFICE 365" not in systems:
+                query = f"Microsoft 365. {support.original_symptom} {message}"
+            result = self._send_operational_message(identity_id, query, requester)
+            if result["status"] == "KNOWLEDGE_FOUND":
+                procedure = SupportProcedure(
+                    knowledge_id=result["knowledge_id"],
+                    answer=result["answer"],
+                    url="https://passwordreset.microsoftonline.com/",
+                )
+                self.support_state.record_guidance(identity_id, procedure)
+                result["procedure_url"] = procedure.url
+            state = self._triage[identity_id][1]
+            result["business_context"] = {
+                "system": state.system,
+                "product": state.entities.get("product", ""),
+            }
+            result["assistant_message"] = operational_message(result, message, None)
+            return result
 
         result = self._send_operational_message(identity_id, message, requester)
         state = self._triage[identity_id][1]
