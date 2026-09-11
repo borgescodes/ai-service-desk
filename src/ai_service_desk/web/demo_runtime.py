@@ -45,6 +45,7 @@ from ai_service_desk.integrations.cdm_fake_api import CDMFakeStore, build_cdm_se
 from ai_service_desk.web.business_context import BusinessVocabulary
 from ai_service_desk.web.conversation import (
     greeting_message,
+    is_outside_it_support_scope,
     is_social_greeting,
     operational_message,
 )
@@ -336,6 +337,16 @@ class DemoRuntime:
                 "request_id": None,
                 "assistant_message": greeting_message(message, requester.name, None),
             }
+
+        if is_outside_it_support_scope(message):
+            result = {
+                "status": "OUT_OF_SCOPE",
+                "request_id": None,
+                "support_handoff": None,
+                "business_context": {"system": "", "product": ""},
+            }
+            result["assistant_message"] = operational_message(result, message, None)
+            return result
 
         systems = self.business_vocabulary.systems(message)
         support_turn = self.support_state.handle(

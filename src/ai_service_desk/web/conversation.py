@@ -12,8 +12,21 @@ _GREETING = re.compile(
 )
 
 
+_OUTSIDE_IT_SCOPE = (
+    re.compile(r"\b(?:quanto foi|quem ganhou|qual foi o placar)\b.*\b(?:jogo|partida)\b"),
+    re.compile(r"\b(?:receita|ingredientes? para (?:um |uma )?receita|como (?:fazer|cozinhar))\b"),
+    re.compile(r"\bqual(?: e)? a capital (?:da|de|do)\b"),
+    re.compile(r"\b(?:escreve|escreva|cria|crie|faca)\b.*\b(?:poesia|poema)\b"),
+)
+
+
 def is_social_greeting(message: str) -> bool:
     return _GREETING.fullmatch(" ".join(message.casefold().split())) is not None
+
+
+def is_outside_it_support_scope(message: str) -> bool:
+    normalized = " ".join(message.casefold().split())
+    return any(pattern.search(normalized) is not None for pattern in _OUTSIDE_IT_SCOPE)
 
 
 def greeting_message(message: str, name: str, chat: Callable[[dict], dict] | None) -> str:
@@ -44,6 +57,12 @@ def greeting_message(message: str, name: str, chat: Callable[[dict], dict] | Non
 
 
 def operational_message(result: dict, message: str, chat: Callable[[dict], dict] | None) -> str:
+    if result["status"] == "OUT_OF_SCOPE":
+        return (
+            "Meu foco aqui é suporte de TI, como acesso a sistemas, Microsoft 365 "
+            "e solicitações no CDM. Para esse outro assunto, não vou responder por aqui."
+        )
+
     if result["status"] == "KNOWLEDGE_FOUND":
         return f"Encontrei uma orientação aprovada para esse caso:\n\n{result['answer']}"
 
