@@ -47,6 +47,18 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
     if result["status"] == "KNOWLEDGE_FOUND":
         return f"Encontrei uma orientação aprovada para esse caso:\n\n{result['answer']}"
 
+    if result["status"] == "SUPPORT_RESOLVED":
+        return "Ótimo, seu acesso voltou a funcionar. Vou considerar este atendimento resolvido."
+
+    if result["status"] == "SUPPORT_HANDOFF_PENDING":
+        return "Entendi. O procedimento não resolveu o acesso."
+
+    if result["status"] == "GUIDANCE_AWAITING_RESULT":
+        return (
+            "Se o acesso continuar indisponível depois do procedimento, me avise aqui "
+            "para eu continuar o atendimento."
+        )
+
     if result["request_id"] is not None:
         if result["state"] == "DENIED_POLICY" and result["policy"] == "DENY":
             return (

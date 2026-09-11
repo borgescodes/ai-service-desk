@@ -170,6 +170,7 @@ class DemoRuntime:
         self.created_request_ids: list[str] = []
         self.request_metadata: dict[str, dict] = {}
         self.support_state = DemoSupportState()
+        self._support_resolution_outcomes: dict[str, str] = {}
 
         technician = self.identity_provider.technician_identity("tecnico-cdm")
         self.authorization_registry = TechnicianAuthorizationRegistry(
@@ -323,6 +324,8 @@ class DemoRuntime:
             explicit_other_system=bool(systems and "OFFICE 365" not in systems),
         )
         if support_turn is not None and support_turn.status != "PASSWORD_EVIDENCE_COLLECTED":
+            if support_turn.status == "SUPPORT_RESOLVED":
+                self._record_support_resolution(identity_id, requester)
             result = support_turn.as_result()
             result["business_context"] = {"system": "OFFICE 365", "product": ""}
             result["assistant_message"] = operational_message(result, message, None)
@@ -362,6 +365,36 @@ class DemoRuntime:
         result["assistant_message"] = operational_message(result, message, None)
         return result
 
+    def _record_support_resolution(self, identity_id: str, requester) -> None:
+        if identity_id in self._support_resolution_outcomes:
+            return
+
+        support = self.support_state.get(identity_id)
+        if support.procedure is None:
+            raise WebDemoError(
+                "SUPPORT_STATE_INCONSISTENT",
+                "Resultado de suporte sem procedimento aprovado associado.",
+            )
+        current = self._triage.get(identity_id)
+        if current is None or current[1].status != "ANSWERED":
+            raise WebDemoError(
+                "SUPPORT_STATE_INCONSISTENT",
+                "Resultado de suporte sem evidência de knowledge respondida.",
+            )
+
+        interaction_id = f"DEMO-M365-RESOLUTION-{len(self.outcome_store.snapshot()) + 1:03d}"
+        record = OutcomeCollector.from_knowledge(
+            interaction_id,
+            current[1],
+            {
+                "status": "KNOWLEDGE_FOUND",
+                "knowledge": {"knowledge_id": support.procedure.knowledge_id},
+            },
+            area=requester.area,
+        )
+        self.outcome_store.ingest(record)
+        self._support_resolution_outcomes[identity_id] = interaction_id
+
     def _send_operational_message(self, identity_id: str, message: str, requester) -> dict:
         current = self._triage.get(identity_id)
         if current is None or current[1].status != "ACTIVE":
@@ -384,15 +417,16 @@ class DemoRuntime:
         knowledge = knowledge_result["knowledge"]
         playbook_result = self.playbook_engine.resolve(knowledge)
         if playbook_result["status"] == "KNOWLEDGE_ONLY":
-            interaction_id = f"DEMO-KNOWLEDGE-{len(self.outcome_store.snapshot()) + 1:03d}"
-            self.outcome_store.ingest(
-                OutcomeCollector.from_knowledge(
-                    interaction_id,
-                    next_state,
-                    knowledge_result,
-                    area=requester.area,
+            if knowledge["knowledge_id"] != "KB-SYN-M365-PASSWORD-001":
+                interaction_id = f"DEMO-KNOWLEDGE-{len(self.outcome_store.snapshot()) + 1:03d}"
+                self.outcome_store.ingest(
+                    OutcomeCollector.from_knowledge(
+                        interaction_id,
+                        next_state,
+                        knowledge_result,
+                        area=requester.area,
+                    )
                 )
-            )
             return {
                 "status": "KNOWLEDGE_FOUND",
                 "knowledge_id": knowledge["knowledge_id"],

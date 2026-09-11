@@ -22,6 +22,13 @@ _PASSWORD_EVIDENCE = re.compile(
     r"\b(?:senha(?: esta)? errada|senha incorreta|esqueci (?:a|minha) senha|"
     r"nao lembro (?:a|minha) senha|trocar (?:a|minha) senha|redefinir (?:a|minha) senha)\b"
 )
+_PROCEDURE_FAILURE = re.compile(
+    r"\b(?:nao resolveu|nao funcionou|continua igual|"
+    r"ainda nao consigo (?:entrar|acessar)|continua sem (?:acessar|acesso))\b"
+)
+_PROCEDURE_SUCCESS = re.compile(
+    r"\b(?:deu certo|funcionou|consegui entrar|agora foi|resolvido|entrou normalmente)\b"
+)
 
 
 class SupportStage(StrEnum):
@@ -35,6 +42,8 @@ class SupportStage(StrEnum):
 class LinguisticSignal(StrEnum):
     M365_LOGIN_PROBLEM = "M365_LOGIN_PROBLEM"
     PASSWORD_EVIDENCE = "PASSWORD_EVIDENCE"
+    PROCEDURE_SUCCEEDED = "PROCEDURE_SUCCEEDED"
+    PROCEDURE_FAILED = "PROCEDURE_FAILED"
     UNKNOWN = "UNKNOWN"
 
 
@@ -68,6 +77,8 @@ class SupportTurn:
     knowledge_id: str | None = None
     answer: str | None = None
     procedure_url: str | None = None
+    resolved: bool | None = None
+    resolved_by_guidance: bool | None = None
 
     def as_result(self) -> dict:
         result = {"status": self.status, "request_id": None}
@@ -79,6 +90,10 @@ class SupportTurn:
             result["answer"] = self.answer
         if self.procedure_url is not None:
             result["procedure_url"] = self.procedure_url
+        if self.resolved is not None:
+            result["resolved"] = self.resolved
+        if self.resolved_by_guidance is not None:
+            result["resolved_by_guidance"] = self.resolved_by_guidance
         return result
 
 
@@ -108,6 +123,13 @@ class DemoSupportState:
             return None
 
         current = self.get(identity_id)
+        if current.stage in {
+            SupportStage.GUIDANCE_DELIVERED,
+            SupportStage.RESOLVED,
+            SupportStage.HANDOFF,
+        }:
+            return self._handle_procedure_result(identity_id, current, message, interpreted_signal)
+
         signal = self._signal(message, interpreted_signal)
         starts_dialogue = signal in {
             LinguisticSignal.M365_LOGIN_PROBLEM,
@@ -155,6 +177,103 @@ class DemoSupportState:
             history=history + (SupportHistoryEntry("ASSISTANT", question),),
         )
         return SupportTurn(status="NEEDS_CLARIFICATION", question=question)
+
+    def _handle_procedure_result(
+        self,
+        identity_id: str,
+        current: SupportConversation,
+        message: str,
+        interpreted_signal: LinguisticSignal | str | None,
+    ) -> SupportTurn | None:
+        signal = self._procedure_result_signal(message, interpreted_signal)
+
+        if current.stage == SupportStage.RESOLVED:
+            if signal == LinguisticSignal.PROCEDURE_SUCCEEDED:
+                return SupportTurn(
+                    status="SUPPORT_RESOLVED",
+                    resolved=True,
+                    resolved_by_guidance=True,
+                )
+            return None
+
+        if current.stage == SupportStage.HANDOFF:
+            if signal == LinguisticSignal.PROCEDURE_FAILED:
+                return SupportTurn(status="SUPPORT_HANDOFF_PENDING")
+            return None
+
+        history = current.history + (SupportHistoryEntry("USER", message.strip()),)
+        if signal == LinguisticSignal.PROCEDURE_SUCCEEDED:
+            self._sessions[identity_id] = SupportConversation(
+                stage=SupportStage.RESOLVED,
+                original_symptom=current.original_symptom,
+                evidence=current.evidence,
+                questions_asked=current.questions_asked,
+                procedure=current.procedure,
+                history=history,
+            )
+            return SupportTurn(
+                status="SUPPORT_RESOLVED",
+                resolved=True,
+                resolved_by_guidance=True,
+            )
+
+        if signal == LinguisticSignal.PROCEDURE_FAILED:
+            self._sessions[identity_id] = SupportConversation(
+                stage=SupportStage.HANDOFF,
+                original_symptom=current.original_symptom,
+                evidence=current.evidence,
+                questions_asked=current.questions_asked,
+                procedure=current.procedure,
+                history=history,
+            )
+            return SupportTurn(status="SUPPORT_HANDOFF_PENDING")
+
+        if self._is_result_question(message):
+            self._sessions[identity_id] = SupportConversation(
+                stage=current.stage,
+                original_symptom=current.original_symptom,
+                evidence=current.evidence,
+                questions_asked=current.questions_asked,
+                procedure=current.procedure,
+                history=history,
+            )
+            return SupportTurn(status="GUIDANCE_AWAITING_RESULT")
+
+        return None
+
+    @staticmethod
+    def _procedure_result_signal(
+        message: str, interpreted_signal: LinguisticSignal | str | None
+    ) -> LinguisticSignal:
+        if interpreted_signal is not None:
+            try:
+                signal = LinguisticSignal(interpreted_signal)
+            except ValueError:
+                signal = LinguisticSignal.UNKNOWN
+            if signal in {
+                LinguisticSignal.PROCEDURE_SUCCEEDED,
+                LinguisticSignal.PROCEDURE_FAILED,
+            }:
+                return signal
+
+        if DemoSupportState._is_result_question(message):
+            return LinguisticSignal.UNKNOWN
+
+        normalized = normalize_text(message)
+        # Negação vem antes de termos positivos como "funcionou".
+        if _PROCEDURE_FAILURE.search(normalized):
+            return LinguisticSignal.PROCEDURE_FAILED
+        if _PROCEDURE_SUCCESS.search(normalized):
+            return LinguisticSignal.PROCEDURE_SUCCEEDED
+        return LinguisticSignal.UNKNOWN
+
+    @staticmethod
+    def _is_result_question(message: str) -> bool:
+        stripped = message.strip()
+        if stripped.endswith("?"):
+            return True
+        normalized = normalize_text(stripped)
+        return bool(re.match(r"^(?:e se|vai|sera que)\b", normalized))
 
     def record_guidance(self, identity_id: str, procedure: SupportProcedure) -> None:
         current = self.get(identity_id)

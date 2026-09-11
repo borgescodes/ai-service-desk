@@ -162,6 +162,56 @@ def test_procedure_success_resolves_without_request_or_handoff(runtime, message)
     assert runtime.fake_cdm_store.access_count == 0
 
 
+def test_guidance_waits_for_user_confirmation_before_resolved_outcome(runtime):
+    baseline = len(runtime.outcome_store.snapshot())
+
+    guidance = send(runtime, "Esqueci minha senha do Microsoft 365.")
+    assert guidance.get("knowledge_id") == "KB-SYN-M365-PASSWORD-001"
+    assert len(runtime.outcome_store.snapshot()) == baseline
+
+    result = send(runtime, "Funcionou.")
+    assert result.get("resolved") is True
+    records = runtime.outcome_store.snapshot()
+    assert len(records) == baseline + 1
+    outcome = records[-1]
+    assert outcome.outcome == "RESOLVED_BY_KNOWLEDGE"
+    assert outcome.knowledge_id == "KB-SYN-M365-PASSWORD-001"
+
+
+def test_success_confirmation_is_idempotent_and_questions_do_not_close_procedure(runtime):
+    baseline = len(runtime.outcome_store.snapshot())
+    send(runtime, "Esqueci minha senha do Microsoft 365.")
+
+    hypothetical = send(runtime, "E se não funcionar?")
+    assert not hypothetical.get("resolved")
+    assert not hypothetical.get("support_handoff")
+
+    first = send(runtime, "Funcionou.")
+    second = send(runtime, "Agora foi.")
+    assert first.get("resolved") is True
+    assert second.get("resolved") is True
+    assert len(runtime.outcome_store.snapshot()) == baseline + 1
+
+
+@pytest.mark.parametrize("message", ["Não resolveu.", "Fiz tudo e continua igual."])
+def test_failure_confirmation_marks_pending_handoff_without_false_resolution(runtime, message):
+    baseline = len(runtime.outcome_store.snapshot())
+    send(runtime, "Esqueci minha senha do Microsoft 365.")
+
+    result = send(runtime, message)
+    support = runtime.support_state.get("pedro-miranda")
+
+    assert support.stage.value == "HANDOFF"
+    assert support.procedure is not None
+    assert message in [entry.text for entry in support.history if entry.role == "USER"]
+    assert not result.get("resolved")
+    assert not result.get("answer")
+    assert not result.get("question")
+    assert not result.get("request_id")
+    assert not result.get("support_handoff")
+    assert len(runtime.outcome_store.snapshot()) == baseline
+
+
 @pytest.mark.parametrize(
     "message",
     [
