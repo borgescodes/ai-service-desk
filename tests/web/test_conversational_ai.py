@@ -25,45 +25,32 @@ class FakeOllamaClient:
 
     def chat(self, payload: dict) -> dict:
         properties = payload.get("format", {}).get("properties", {})
-        if "intent" in properties:
+        if "scenario" in properties:
             self.classifier_calls.append(payload)
             text = payload["messages"][-1]["content"].casefold()
-            if text.strip() == "cdm" or "cdm" in text:
-                result = {
-                    "intent": "PROBLEMA_ACESSO",
-                    "system": "CDM",
-                    "entities": {},
-                    "confidence": 0.94,
-                }
-            elif "microsoft 365" in text or "office 365" in text:
-                result = {
-                    "intent": "PROBLEMA_ACESSO",
-                    "system": "OFFICE 365",
-                    "entities": {},
-                    "confidence": 0.93,
-                }
-            elif "office" in text:
-                result = {
-                    "intent": "PROBLEMA_ACESSO",
-                    "system": "Office",
-                    "entities": {},
-                    "confidence": 0.87,
-                }
-            elif "material" in text or "revenda" in text:
-                result = {
-                    "intent": "PROBLEMA_ACESSO",
-                    "system": "",
-                    "entities": {},
-                    "confidence": 0.88,
-                }
+            if (
+                "cdm" in text
+                or "central de dados mestres" in text
+                or ("material" in text and "revenda" in text)
+            ):
+                signal = (
+                    "PRIVILEGED_ACCESS"
+                    if any(term in text for term in ("admin", "administrador", "superadmin"))
+                    else "ACCESS_REQUEST"
+                )
+                result = {"scenario": "CDM_ACCESS", "signal": signal}
+            elif any(term in text for term in ("microsoft 365", "office 365", "office", "outlook")):
+                signal = "PASSWORD_EVIDENCE" if "senha" in text else "LOGIN_PROBLEM"
+                result = {"scenario": "M365_SUPPORT", "signal": signal}
+            elif any(term in text for term in ("acesso", "acessar", "entrar")):
+                result = {"scenario": "OTHER_IT", "signal": "LOGIN_PROBLEM"}
             else:
-                result = {
-                    "intent": "OUTRO",
-                    "system": "",
-                    "entities": {},
-                    "confidence": 0.40,
-                }
-            return {"message": {"content": json.dumps(result)}}
+                result = {"scenario": "OTHER_IT", "signal": "UNKNOWN"}
+            return {
+                "message": {"content": json.dumps(result)},
+                "done": True,
+                "done_reason": "stop",
+            }
 
         self.conversation_calls.append(payload)
         message = payload["format"]["properties"]["assistant_message"]["enum"][0]
@@ -92,7 +79,7 @@ def test_greeting_is_social_and_does_not_enter_operational_triage(monkeypatch) -
 
         assert result["status"] == "SOCIAL"
         assert result["request_id"] is None
-        assert "Pedro" in result["assistant_message"]
+        assert "como posso ajudar" in result["assistant_message"].casefold()
         assert runtime._triage == {}
         assert runtime.created_request_ids == []
         assert client.classifier_calls == []

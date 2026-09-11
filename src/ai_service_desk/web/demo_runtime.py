@@ -3,6 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
+from time import perf_counter
 
 from ai_service_desk.engine.access_request import prepare_access_request
 from ai_service_desk.engine.approval import ApprovalService
@@ -49,7 +50,13 @@ from ai_service_desk.web.conversation import (
     is_social_greeting,
     operational_message,
 )
-from ai_service_desk.web.demo_ai import DemoClassifierClient, DemoEmbedder
+from ai_service_desk.web.demo_ai import (
+    DemoClassifierClient,
+    DemoEmbedder,
+    build_compact_interpretation_payload,
+    compact_interpretation_to_classification,
+    parse_compact_interpretation_response,
+)
 from ai_service_desk.web.demo_data import (
     demo_outcomes,
     write_demo_knowledge,
@@ -88,8 +95,14 @@ class DemoRuntime:
         if mode not in DEMO_MODES:
             raise ValueError(f"Modo de demo invalido: {mode!r}.")
         self._ollama_client = None
+        self._local_ai_startup_ms = 0.0
+        self._local_ai_total_calls = 0
+        self._local_ai_failed_calls = 0
+        self._local_ai_calls: list[dict] = []
+        self._local_ai_turns: list[dict] = []
         if mode == "LOCAL_AI":
             client = OllamaClient()
+            startup_started = perf_counter()
             try:
                 client.model_info("qwen3.5:4b")
             except OllamaError as exc:
@@ -98,6 +111,8 @@ class DemoRuntime:
                     "LOCAL_AI_UNAVAILABLE",
                     "Não foi possível validar o modelo local qwen3.5:4b no Ollama.",
                 ) from exc
+            finally:
+                self._local_ai_startup_ms = max(0.0, (perf_counter() - startup_started) * 1000)
             self._ollama_client = client
         self.mode = mode
         self.identity_provider = DemoIdentityProvider()
@@ -251,13 +266,11 @@ class DemoRuntime:
 
         def classifier(text):
             if self.mode == "LOCAL_AI":
-
-                def chat(payload):
-                    payload["messages"][0]["content"] += "\n" + self.business_vocabulary.prompt()
-                    return self._ollama_client.chat(payload)
+                classification = self._classify_local_ai(text)
             else:
-                chat = self.demo_classifier_client.chat
-            classification = classify_ticket(text, chat, resolver=self.business_vocabulary)
+                classification = classify_ticket(
+                    text, self.demo_classifier_client.chat, resolver=self.business_vocabulary
+                )
             normalized = " ".join(text.casefold().split())
             if classification.system.casefold() == "que" and "sistema que " in normalized:
                 return replace(classification, system="")
@@ -267,6 +280,49 @@ class DemoRuntime:
             session_id, self.knowledge_engine, classifier, resolver=self.business_vocabulary
         )
         return engine, engine.initial_state()
+
+    def _classify_local_ai(self, text: str):
+        if self._ollama_client is None:
+            raise WebDemoError(
+                "LOCAL_AI_UNAVAILABLE",
+                "Cliente LOCAL_AI não está disponível.",
+            )
+        payload = build_compact_interpretation_payload(text)
+        started = perf_counter()
+        self._local_ai_total_calls += 1
+        ok = False
+        try:
+            response = self._ollama_client.chat(payload)
+            scenario, signal = parse_compact_interpretation_response(response)
+            classification = compact_interpretation_to_classification(
+                text, scenario, signal, self.business_vocabulary
+            )
+            ok = True
+            return classification
+        except OllamaError as exc:
+            raise WebDemoError(
+                "LOCAL_AI_INFERENCE_FAILED",
+                "A inferência local falhou; nenhuma decisão foi substituída por fallback.",
+            ) from exc
+        except (TypeError, ValueError, KeyError) as exc:
+            raise WebDemoError(
+                "LOCAL_AI_RESPONSE_INVALID",
+                "O modelo local retornou uma resposta fora do contrato compacto.",
+            ) from exc
+        finally:
+            duration_ms = max(0.0, (perf_counter() - started) * 1000)
+            if not ok:
+                self._local_ai_failed_calls += 1
+            self._local_ai_calls.append({"duration_ms": duration_ms, "ok": ok})
+
+    def local_ai_metrics(self) -> dict:
+        return {
+            "startup_ms": self._local_ai_startup_ms,
+            "total_calls": self._local_ai_total_calls,
+            "failed_calls": self._local_ai_failed_calls,
+            "calls": [dict(item) for item in self._local_ai_calls],
+            "turns": [dict(item) for item in self._local_ai_turns],
+        }
 
     def _requester(self, identity_id: str):
         try:
@@ -327,6 +383,22 @@ class DemoRuntime:
         return OpportunityEngine().generate(patterns)
 
     def send_message(self, identity_id: str, message: str) -> dict:
+        if self.mode != "LOCAL_AI":
+            return self._send_message_impl(identity_id, message)
+
+        before_calls = self._local_ai_total_calls
+        started = perf_counter()
+        try:
+            return self._send_message_impl(identity_id, message)
+        finally:
+            self._local_ai_turns.append(
+                {
+                    "call_count": self._local_ai_total_calls - before_calls,
+                    "duration_ms": max(0.0, (perf_counter() - started) * 1000),
+                }
+            )
+
+    def _send_message_impl(self, identity_id: str, message: str) -> dict:
         requester = self._requester(identity_id)
         if not isinstance(message, str) or not message.strip():
             raise ValueError("Mensagem vazia.")

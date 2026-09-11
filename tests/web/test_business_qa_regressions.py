@@ -20,20 +20,29 @@ class AccessGateway:
 
     def chat(self, payload):
         properties = payload["format"]["properties"]
-        if "assistant_message" in properties:
-            schema = properties["assistant_message"]
-            choices = schema.get("enum") or ["Entendi seu relato."]
-            result = {"assistant_message": choices[0]}
-            content = json.dumps(result, ensure_ascii=False)
-            return {"message": {"content": content}}
-        result = {
-            "intent": "PROBLEMA_ACESSO",
-            "system": "",
-            "entities": {},
-            "confidence": 0.95,
-        }
-        content = json.dumps(result, ensure_ascii=False)
-        return {"message": {"content": content}}
+        if "scenario" in properties:
+            text = payload["messages"][-1]["content"].casefold()
+            if any(
+                term in text
+                for term in ("microsoft 365", "office", "outlook", "onedrive", "one drive")
+            ):
+                signal = "PASSWORD_EVIDENCE" if "senha" in text else "LOGIN_PROBLEM"
+                result = {"scenario": "M365_SUPPORT", "signal": signal}
+            elif "cdm" in text:
+                result = {"scenario": "CDM_ACCESS", "signal": "ACCESS_REQUEST"}
+            elif any(term in text for term in ("acesso", "acessar", "entrar")):
+                result = {"scenario": "OTHER_IT", "signal": "LOGIN_PROBLEM"}
+            else:
+                result = {"scenario": "OTHER_IT", "signal": "UNKNOWN"}
+            return {
+                "message": {"content": json.dumps(result, ensure_ascii=False)},
+                "done": True,
+                "done_reason": "stop",
+            }
+        schema = properties["assistant_message"]
+        choices = schema.get("enum") or ["Entendi seu relato."]
+        result = {"assistant_message": choices[0]}
+        return {"message": {"content": json.dumps(result, ensure_ascii=False)}}
 
 
 @pytest.fixture

@@ -18,8 +18,9 @@ class SemanticGateway:
 
     def chat(self, payload):
         self.payloads.append(payload)
-        if "intent" not in payload["format"]["properties"]:
-            options = payload["format"]["properties"]["assistant_message"].get("enum")
+        properties = payload["format"]["properties"]
+        if "scenario" not in properties:
+            options = properties["assistant_message"].get("enum")
             return {
                 "message": {
                     "content": json.dumps(
@@ -30,17 +31,30 @@ class SemanticGateway:
                 }
             }
         text = payload["messages"][-1]["content"].casefold()
-        return {
-            "message": {
-                "content": json.dumps(
-                    {
-                        "intent": "ORIENTACAO" if "cadastrar" in text else "PROBLEMA_ACESSO",
-                        "system": "",
-                        "entities": {"product": "INVENTADO"},
-                        "confidence": 0.95,
-                    }
+        if "cdm" in text or "central de dados mestres" in text:
+            result = {"scenario": "CDM_ACCESS", "signal": "ACCESS_REQUEST"}
+        elif any(
+            term in text
+            for term in ("office", "microsoft 365", "outlook", "teams", "one drive", "onedrive")
+        ):
+            signal = (
+                "PASSWORD_EVIDENCE"
+                if "senha" in text
+                else (
+                    "LOGIN_PROBLEM"
+                    if any(term in text for term in ("entra", "acesso", "acessar"))
+                    else "UNKNOWN"
                 )
-            }
+            )
+            result = {"scenario": "M365_SUPPORT", "signal": signal}
+        elif any(term in text for term in ("acesso", "acessar", "entrar")):
+            result = {"scenario": "OTHER_IT", "signal": "LOGIN_PROBLEM"}
+        else:
+            result = {"scenario": "OTHER_IT", "signal": "UNKNOWN"}
+        return {
+            "message": {"content": json.dumps(result)},
+            "done": True,
+            "done_reason": "stop",
         }
 
 
