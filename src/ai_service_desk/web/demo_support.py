@@ -3,8 +3,11 @@
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from threading import RLock
 from typing import Literal
 
+from ai_service_desk.engine.access_request import SessionIdentity
+from ai_service_desk.engine.technician_authorization import TechnicianIdentity
 from ai_service_desk.engine.validation import normalize_text
 
 MAX_DIAGNOSTIC_QUESTIONS = 3
@@ -95,6 +98,78 @@ class SupportTurn:
         if self.resolved_by_guidance is not None:
             result["resolved_by_guidance"] = self.resolved_by_guidance
         return result
+
+
+@dataclass(frozen=True)
+class SupportHandoff:
+    handoff_id: str
+    system: str
+    capability: str
+    technician: TechnicianIdentity
+    requester: SessionIdentity
+    technical_summary: str
+    source_conversation: SupportConversation
+
+    def as_result(self) -> dict:
+        return {
+            "handoff_id": self.handoff_id,
+            "system": self.system,
+            "capability": self.capability,
+            "technician": {
+                "technician_id": self.technician.technician_id,
+                "username": self.technician.username,
+                "name": self.technician.name,
+                "email": self.technician.email,
+            },
+            "requester": {
+                "username": self.requester.username,
+                "name": self.requester.name,
+                "email": self.requester.email,
+                "area": self.requester.area,
+            },
+            "technical_summary": self.technical_summary,
+            "source_conversation": [
+                {"role": item.role, "text": item.text} for item in self.source_conversation.history
+            ],
+        }
+
+
+class SupportHandoffStore:
+    def __init__(self) -> None:
+        self._lock = RLock()
+        self._records: dict[str, SupportHandoff] = {}
+
+    def put(self, handoff: SupportHandoff) -> SupportHandoff:
+        if (
+            type(handoff) is not SupportHandoff
+            or not handoff.handoff_id.strip()
+            or not handoff.system.strip()
+            or not handoff.capability.strip()
+            or type(handoff.technician) is not TechnicianIdentity
+            or type(handoff.requester) is not SessionIdentity
+            or not handoff.technical_summary.strip()
+            or type(handoff.source_conversation) is not SupportConversation
+        ):
+            raise ValueError("handoff inválido.")
+        with self._lock:
+            current = self._records.get(handoff.handoff_id)
+            if current is None:
+                self._records[handoff.handoff_id] = handoff
+                return handoff
+            if current == handoff:
+                return current
+            raise ValueError("handoff_id já possui conteúdo incompatível.")
+
+    def get(self, handoff_id: str) -> SupportHandoff:
+        with self._lock:
+            current = self._records.get(handoff_id)
+            if current is None:
+                raise KeyError(handoff_id)
+            return current
+
+    def snapshot(self) -> tuple[SupportHandoff, ...]:
+        with self._lock:
+            return tuple(self._records[key] for key in sorted(self._records))
 
 
 class DemoSupportState:

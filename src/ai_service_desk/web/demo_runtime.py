@@ -14,6 +14,7 @@ from ai_service_desk.engine.learning_prevention import (
     InMemoryOutcomeStore,
     OpportunityEngine,
     OutcomeCollector,
+    OutcomeRecord,
     PatternAggregator,
 )
 from ai_service_desk.engine.ollama import OllamaClient, OllamaError
@@ -55,7 +56,12 @@ from ai_service_desk.web.demo_data import (
 )
 from ai_service_desk.web.demo_identity import DemoIdentityProvider, IdentityNotFoundError
 from ai_service_desk.web.demo_knowledge import DemoKnowledgeEngine
-from ai_service_desk.web.demo_support import DemoSupportState, SupportProcedure
+from ai_service_desk.web.demo_support import (
+    DemoSupportState,
+    SupportHandoff,
+    SupportHandoffStore,
+    SupportProcedure,
+)
 from ai_service_desk.web.errors import WebDemoError
 from ai_service_desk.web.presentation import present_prevention, present_request
 
@@ -170,26 +176,40 @@ class DemoRuntime:
         self.created_request_ids: list[str] = []
         self.request_metadata: dict[str, dict] = {}
         self.support_state = DemoSupportState()
+        self.support_handoff_store = SupportHandoffStore()
         self._support_resolution_outcomes: dict[str, str] = {}
+        self._support_handoff_ids: dict[str, str] = {}
 
-        technician = self.identity_provider.technician_identity("tecnico-cdm")
+        cdm_technician = self.identity_provider.technician_identity("tecnico-cdm")
+        m365_technician = self.identity_provider.technician_identity("tecnico-m365")
         self.authorization_registry = TechnicianAuthorizationRegistry(
             [
                 TechnicianRegistryEntry(
-                    identity=technician,
+                    identity=cdm_technician,
                     capabilities=self.identity_provider.technician_capabilities("tecnico-cdm"),
-                )
+                ),
+                TechnicianRegistryEntry(
+                    identity=m365_technician,
+                    capabilities=self.identity_provider.technician_capabilities("tecnico-m365"),
+                ),
             ]
         )
-        routing_registry = RoutingRegistry(
-            [RoutingRule("CDM", "CDM_ACCESS_REQUEST", technician)],
+        self.routing_registry = RoutingRegistry(
+            [
+                RoutingRule("CDM", "CDM_ACCESS_REQUEST", cdm_technician),
+                RoutingRule(
+                    "MICROSOFT_365",
+                    "MICROSOFT_365_SUPPORT_REQUEST",
+                    m365_technician,
+                ),
+            ],
             self.authorization_registry,
         )
         self.policy_engine = PolicyEngine()
         self.lifecycle = RequestLifecycleService(self.request_repository, self.policy_engine)
         self.routed_requests = RoutedRequestService(
             self.lifecycle,
-            RoutingService(routing_registry, self.routing_store),
+            RoutingService(self.routing_registry, self.routing_store),
         )
         self.approval_queue = ApprovalQueue(self.request_repository, self.routing_store)
         self.approval_service = ApprovalService(
@@ -327,18 +347,17 @@ class DemoRuntime:
             if support_turn.status == "SUPPORT_RESOLVED":
                 self._record_support_resolution(identity_id, requester)
             result = support_turn.as_result()
+            if support_turn.status == "SUPPORT_HANDOFF_PENDING":
+                handoff = self._materialize_support_handoff(identity_id, requester)
+                result["support_handoff"] = handoff.as_result()
             result["business_context"] = {"system": "OFFICE 365", "product": ""}
             result["assistant_message"] = operational_message(result, message, None)
             return result
 
         if support_turn is not None:
-            support = self.support_state.get(identity_id)
             query = message
             if "OFFICE 365" not in systems:
-                parts = ["Microsoft 365.", support.original_symptom]
-                if message.strip() != support.original_symptom:
-                    parts.append(message.strip())
-                query = " ".join(part for part in parts if part)
+                query = f"Microsoft 365. {message.strip()}"
             result = self._send_operational_message(identity_id, query, requester)
             if result["status"] == "KNOWLEDGE_FOUND":
                 procedure = SupportProcedure(
@@ -394,6 +413,78 @@ class DemoRuntime:
         )
         self.outcome_store.ingest(record)
         self._support_resolution_outcomes[identity_id] = interaction_id
+
+    def _materialize_support_handoff(self, identity_id: str, requester) -> SupportHandoff:
+        existing_id = self._support_handoff_ids.get(identity_id)
+        if existing_id is not None:
+            return self.support_handoff_store.get(existing_id)
+
+        support = self.support_state.get(identity_id)
+        if support.procedure is None:
+            raise WebDemoError(
+                "SUPPORT_STATE_INCONSISTENT",
+                "Encaminhamento de suporte sem procedimento aprovado associado.",
+            )
+        technician = self.routing_registry.resolve("MICROSOFT_365", "MICROSOFT_365_SUPPORT_REQUEST")
+        handoff_id = f"DEMO-M365-HANDOFF-{len(self.support_handoff_store.snapshot()) + 1:03d}"
+        handoff = SupportHandoff(
+            handoff_id=handoff_id,
+            system="MICROSOFT_365",
+            capability="MICROSOFT_365_SUPPORT_REQUEST",
+            technician=technician,
+            requester=requester,
+            technical_summary=self._support_handoff_summary(support, requester, technician.name),
+            source_conversation=support,
+        )
+        stored = self.support_handoff_store.put(handoff)
+        self._support_handoff_ids[identity_id] = stored.handoff_id
+        self.outcome_store.ingest(
+            OutcomeRecord(
+                interaction_id=f"{stored.handoff_id}-OUTCOME",
+                system=stored.system,
+                intent="PROBLEMA_ACESSO",
+                capability=stored.capability,
+                area=requester.area,
+                knowledge_id=support.procedure.knowledge_id,
+                playbook_id="",
+                playbook_version=None,
+                step_id="",
+                outcome="ROUTED_TO_HUMAN",
+                reason_code="GUIDANCE_UNRESOLVED",
+            )
+        )
+        return stored
+
+    @staticmethod
+    def _support_handoff_summary(support, requester, technician_name: str) -> str:
+        lines = [
+            f"Solicitante: {requester.name}",
+            f"Área: {requester.area}",
+            "Sistema: Microsoft 365",
+            "Categoria: falha de autenticação",
+            f"Sintoma informado: {support.original_symptom}",
+        ]
+        validations = [
+            item
+            for item in support.evidence
+            if item.strip() and item.strip() != support.original_symptom.strip()
+        ]
+        if validations:
+            lines.append("Validações informadas: " + " | ".join(validations))
+        if support.procedure is not None:
+            lines.append(f"Procedimento aprovado entregue: {support.procedure.knowledge_id}")
+        result_text = next(
+            (
+                item.text
+                for item in reversed(support.history)
+                if item.role == "USER" and item.text.strip() != support.original_symptom.strip()
+            ),
+            "",
+        )
+        if result_text:
+            lines.append(f"Resultado informado: {result_text}")
+        lines.append(f"Encaminhamento: {technician_name}")
+        return "\n".join(lines)
 
     def _send_operational_message(self, identity_id: str, message: str, requester) -> dict:
         current = self._triage.get(identity_id)

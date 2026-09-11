@@ -195,7 +195,7 @@ def test_success_confirmation_is_idempotent_and_questions_do_not_close_procedure
 
 @pytest.mark.parametrize("message", ["Não resolveu.", "Fiz tudo e continua igual."])
 def test_failure_confirmation_marks_pending_handoff_without_false_resolution(runtime, message):
-    baseline = len(runtime.outcome_store.snapshot())
+    baseline_ids = {item.interaction_id for item in runtime.outcome_store.snapshot()}
     send(runtime, "Esqueci minha senha do Microsoft 365.")
 
     result = send(runtime, message)
@@ -208,8 +208,16 @@ def test_failure_confirmation_marks_pending_handoff_without_false_resolution(run
     assert not result.get("answer")
     assert not result.get("question")
     assert not result.get("request_id")
-    assert not result.get("support_handoff")
-    assert len(runtime.outcome_store.snapshot()) == baseline
+    handoff = result.get("support_handoff")
+    assert handoff
+    assert handoff["technician"]["technician_id"] == "TECH-M365"
+
+    new_outcomes = [
+        item for item in runtime.outcome_store.snapshot() if item.interaction_id not in baseline_ids
+    ]
+    assert len(new_outcomes) == 1
+    assert new_outcomes[0].outcome == "ROUTED_TO_HUMAN"
+    assert new_outcomes[0].capability == "MICROSOFT_365_SUPPORT_REQUEST"
 
 
 @pytest.mark.parametrize(

@@ -41,6 +41,16 @@ _IDENTITIES = (
         capabilities=frozenset({"CDM_ACCESS_REQUEST"}),
     ),
     DemoIdentity(
+        identity_id="tecnico-m365",
+        name="Técnico Microsoft 365",
+        username="tecnico.m365",
+        email="tecnico.m365@example.invalid",
+        area="Tecnologia da Informação",
+        role="TECHNICIAN",
+        technician_id="TECH-M365",
+        capabilities=frozenset({"MICROSOFT_365_SUPPORT_REQUEST"}),
+    ),
+    DemoIdentity(
         identity_id="tecnico-geral",
         name="Técnico Geral",
         username="tecnico.geral",

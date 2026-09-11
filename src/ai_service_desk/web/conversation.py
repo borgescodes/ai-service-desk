@@ -51,7 +51,13 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
         return "Ótimo, seu acesso voltou a funcionar. Vou considerar este atendimento resolvido."
 
     if result["status"] == "SUPPORT_HANDOFF_PENDING":
-        return "Entendi. O procedimento não resolveu o acesso."
+        handoff = result.get("support_handoff") or {}
+        technician = handoff.get("technician") or {}
+        technician_name = technician.get("name") or "o suporte do Microsoft 365"
+        return (
+            "Entendi. Como o procedimento não resolveu o acesso, "
+            f"encaminhei o atendimento para {technician_name}."
+        )
 
     if result["status"] == "GUIDANCE_AWAITING_RESULT":
         return (

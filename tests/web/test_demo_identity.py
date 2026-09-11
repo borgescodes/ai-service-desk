@@ -10,6 +10,7 @@ def test_provider_lists_only_predefined_public_identities() -> None:
     assert {item["identity_id"] for item in payloads} == {
         "pedro-miranda",
         "tecnico-cdm",
+        "tecnico-m365",
         "tecnico-geral",
     }
     assert all("capabilities" not in item for item in payloads)
