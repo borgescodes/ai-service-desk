@@ -71,7 +71,9 @@ def test_password_article_answers_with_password_evidence(access_runtime):
 
     assert result["status"] == "KNOWLEDGE_FOUND"
     assert result["business_context"]["system"] == "OFFICE 365"
-    assert "recuperação de senha" in result["assistant_message"].casefold()
+    assert result["knowledge_id"] == "KB-SYN-M365-PASSWORD-001"
+    assert result["answer"] in result["assistant_message"]
+    assert result["answer"].startswith("Vamos redefinir sua senha do Microsoft 365.")
 
 
 def test_product_follow_up_rejects_password_article(access_runtime):

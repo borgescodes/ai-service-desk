@@ -325,7 +325,10 @@ class DemoRuntime:
             support = self.support_state.get(identity_id)
             query = message
             if "OFFICE 365" not in systems:
-                query = f"Microsoft 365. {support.original_symptom} {message}"
+                parts = ["Microsoft 365.", support.original_symptom]
+                if message.strip() != support.original_symptom:
+                    parts.append(message.strip())
+                query = " ".join(part for part in parts if part)
             result = self._send_operational_message(identity_id, query, requester)
             if result["status"] == "KNOWLEDGE_FOUND":
                 procedure = SupportProcedure(

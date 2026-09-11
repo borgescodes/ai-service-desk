@@ -93,7 +93,11 @@ def test_message_m365_resolves_literal_knowledge_without_request() -> None:
         )
         assert result["status"] == "KNOWLEDGE_FOUND"
         assert result["knowledge_id"] == "KB-SYN-M365-PASSWORD-001"
-        assert result["answer"].startswith("Use a opção de recuperação de senha")
+        answer = result["answer"]
+        assert answer.startswith("Vamos redefinir sua senha do Microsoft 365.")
+        assert all(f"{number}. " in answer for number in range(1, 8))
+        assert "Microsoft Authenticator" in answer
+        assert answer.endswith("Faça esse procedimento e me diga se conseguiu acessar.")
         assert runtime.created_request_ids == []
     finally:
         runtime.close()

@@ -4,6 +4,7 @@ from pathlib import Path
 from ai_service_desk.engine.learning_prevention import OutcomeRecord
 
 _REVIEWED_AT = "2026-09-09T12:00:00-03:00"
+_M365_REVIEWED_AT = "2026-09-11T09:44:00-03:00"
 
 
 def _write_jsonl(path: str | Path, rows: list[dict]) -> Path:
@@ -41,8 +42,18 @@ def write_demo_knowledge(path: str | Path) -> Path:
                 "title": "Recuperar acesso ao Microsoft 365",
                 "question": "O que fazer quando não consigo acessar o Microsoft 365 por senha?",
                 "answer": (
-                    "Use a opção de recuperação de senha do Microsoft 365 e conclua a validação "
-                    "solicitada. Se o acesso continuar indisponível, procure o Service Desk."
+                    "Vamos redefinir sua senha do Microsoft 365.\n\n"
+                    "1. Acesse a página de redefinição de senha da Microsoft.\n"
+                    "2. Informe seu e-mail corporativo e conclua a verificação exibida na tela.\n"
+                    "3. Clique em Avançar.\n"
+                    "4. Escolha um dos métodos de confirmação de identidade disponíveis para "
+                    "sua conta, como Microsoft Authenticator, SMS, telefone ou outro método "
+                    "cadastrado.\n"
+                    "5. Confirme sua identidade usando o código ou a solicitação recebida.\n"
+                    "6. Crie uma nova senha seguindo os requisitos apresentados.\n"
+                    "7. Depois da alteração, tente entrar novamente no Outlook, Teams e demais "
+                    "aplicativos do Microsoft 365.\n\n"
+                    "Faça esse procedimento e me diga se conseguiu acessar."
                 ),
                 "system": "OFFICE 365",
                 "intent": "PROBLEMA_ACESSO",
@@ -50,8 +61,8 @@ def write_demo_knowledge(path: str | Path) -> Path:
                 "source": "SYNTHETIC_DEMO",
                 "status": "APPROVED",
                 "reviewed_by": "DEMO-REVIEWER",
-                "reviewed_at": _REVIEWED_AT,
-                "version": 1,
+                "reviewed_at": _M365_REVIEWED_AT,
+                "version": 2,
             },
         ],
     )
