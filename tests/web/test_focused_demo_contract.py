@@ -128,7 +128,10 @@ def test_password_evidence_ends_diagnosis_and_returns_literal_approved_article(r
     assert result["answer"] in result["assistant_message"]
     assert all(f"{number}. " in result["answer"] for number in range(1, 8))
     assert "Authenticator" in result["answer"]
-    assert result.get("procedure_url") == "https://passwordreset.microsoftonline.com/"
+    assert (
+        result.get("procedure_url")
+        == "https://mysignins.microsoft.com/security-info/password/change"
+    )
 
 
 @pytest.mark.parametrize(

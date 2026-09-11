@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 
 const root = new URL('../src/', import.meta.url);
+const allowedExternalUrls = new Set(['https://mysignins.microsoft.com/security-info/password/change']);
 const forbidden = [
   'RoutingRegistry',
   'ApprovalService',
@@ -33,9 +34,12 @@ for (const file of await files(root)) {
       failed = true;
     }
   }
-  if (/https?:\/\//.test(text)) {
-    console.error(`External URL is not allowed in ${file.pathname}`);
-    failed = true;
+  const externalUrls = text.match(/https?:\/\/[^\s'"`<>]+/g) ?? [];
+  for (const url of externalUrls) {
+    if (!allowedExternalUrls.has(url)) {
+      console.error(`External URL ${JSON.stringify(url)} is not allowed in ${file.pathname}`);
+      failed = true;
+    }
   }
 }
 if (failed) process.exit(1);

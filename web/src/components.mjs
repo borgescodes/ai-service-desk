@@ -6,6 +6,8 @@ import {
   renderStatus,
 } from './render.mjs';
 
+const APPROVED_PROCEDURE_URL = 'https://mysignins.microsoft.com/security-info/password/change';
+
 function initials(name = 'Jup') {
   return String(name)
     .split(/\s+/)
@@ -48,12 +50,74 @@ function renderMessageBody(text) {
     .join('');
 }
 
+function renderApprovedProcedure(message) {
+  const text = String(message.text ?? '');
+  if (message.role !== 'JUP' || message.procedure_url !== APPROVED_PROCEDURE_URL) {
+    return renderMessageBody(text);
+  }
+
+  const intro = [];
+  const steps = [];
+  const outro = [];
+  let section = 'intro';
+
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*\d+\.\s+(.+?)\s*$/);
+    if (match) {
+      steps.push(match[1]);
+      section = 'steps';
+      continue;
+    }
+    if (section === 'steps' && line.trim()) section = 'outro';
+    if (section === 'intro') intro.push(line);
+    else if (section === 'outro') outro.push(line);
+  }
+
+  if (!steps.length) return renderMessageBody(text);
+
+  const items = steps
+    .map((step, index) => {
+      const content =
+        index === 0
+          ? `<a href="${APPROVED_PROCEDURE_URL}" target="_blank" rel="noopener noreferrer">${escapeHtml(step)}</a>`
+          : escapeHtml(step);
+      return `<li>${content}</li>`;
+    })
+    .join('');
+
+  return `${renderMessageBody(intro.join('\n'))}<div class="approved-procedure"><ol class="procedure-steps">${items}</ol></div>${renderMessageBody(outro.join('\n'))}`;
+}
+
+function renderSupportHandoff(handoff) {
+  if (!handoff || typeof handoff !== 'object') return '';
+
+  const technicianName = handoff.technician?.name;
+  const requesterName = handoff.requester?.name;
+  const requesterArea = handoff.requester?.area;
+  const technicalSummary = handoff.technical_summary;
+  if (!technicianName && !requesterName && !requesterArea && !technicalSummary) return '';
+
+  const row = (label, value) =>
+    value ? `<div class="handoff-row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>` : '';
+
+  return `<section class="support-handoff" aria-label="Encaminhamento técnico">
+    <div class="support-handoff__heading"><span aria-hidden="true"></span><div><p>Continuidade do atendimento</p><h3>Encaminhamento técnico</h3></div></div>
+    <dl>
+      ${row('Especialista', technicianName)}
+      ${row('Solicitante', requesterName)}
+      ${row('Área', requesterArea)}
+    </dl>
+    ${technicalSummary ? `<p class="support-handoff__summary">${escapeHtml(technicalSummary)}</p>` : ''}
+  </section>`;
+}
+
 function renderMessage(message) {
   const role = message.role === 'USER' ? 'Você' : 'Jup';
   const klass = message.role === 'USER' ? 'conversation-message--user' : 'conversation-message--jup';
   return `<article class="conversation-message ${klass}">
     <div class="message-author">${message.role === 'JUP' ? renderJupAvatar({ compact: true }) : `<span class="user-avatar" aria-hidden="true">${escapeHtml(initials(role))}</span>`}<strong>${role}</strong></div>
-    ${renderMessageBody(message.text)}
+    ${message.role === 'JUP' ? renderApprovedProcedure(message) : renderMessageBody(message.text)}
+    ${message.role === 'JUP' ? renderSupportHandoff(message.support_handoff) : ''}
   </article>`;
 }
 

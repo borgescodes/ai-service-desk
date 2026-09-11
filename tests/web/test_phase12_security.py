@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -7,6 +8,7 @@ from ai_service_desk.web.demo_runtime import DemoRuntime
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WEB_SRC = _REPO_ROOT / "web" / "src"
+_ALLOWED_FRONTEND_HTTPS = {"https://mysignins.microsoft.com/security-info/password/change"}
 _FORBIDDEN_FRONTEND_TOKENS = (
     "RoutingRegistry",
     "ApprovalService",
@@ -53,7 +55,8 @@ def test_frontend_has_no_domain_decisions_direct_cdm_or_embedded_token() -> None
         for token in _FORBIDDEN_FRONTEND_TOKENS:
             assert token not in text, f"forbidden frontend token {token!r} in {path}"
         assert "http://" not in text
-        assert "https://" not in text
+        https_urls = re.findall(r"https://[^\s'\"`<>]+", text)
+        assert set(https_urls) <= _ALLOWED_FRONTEND_HTTPS
 
 
 def test_body_identity_cannot_override_controlled_header_identity() -> None:

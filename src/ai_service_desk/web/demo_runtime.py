@@ -446,7 +446,7 @@ class DemoRuntime:
                 procedure = SupportProcedure(
                     knowledge_id=result["knowledge_id"],
                     answer=result["answer"],
-                    url="https://passwordreset.microsoftonline.com/",
+                    url="https://mysignins.microsoft.com/security-info/password/change",
                 )
                 self.support_state.record_guidance(identity_id, procedure)
                 result["procedure_url"] = procedure.url

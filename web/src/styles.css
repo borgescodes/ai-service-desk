@@ -311,3 +311,78 @@ button:disabled { cursor: not-allowed; opacity: 0.62; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+.approved-procedure {
+  margin-top: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface-quiet);
+  border-left: 3px solid var(--brand-green);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.procedure-steps {
+  margin: 0;
+  padding-left: 24px;
+  display: grid;
+  gap: 10px;
+}
+.procedure-steps li {
+  padding-left: 4px;
+  line-height: 1.6;
+}
+.procedure-steps a {
+  color: var(--brand-green-strong);
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+.procedure-steps a:hover { text-decoration-thickness: 2px; }
+
+.support-handoff {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.support-handoff__heading {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  margin-bottom: var(--space-3);
+}
+.support-handoff__heading > span {
+  width: 3px;
+  flex: 0 0 3px;
+  border-radius: 3px;
+  background: var(--brand-yellow);
+}
+.support-handoff__heading p {
+  margin: 0 0 2px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+.support-handoff__heading h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.support-handoff dl { margin: 0; }
+.handoff-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.handoff-row dt { color: var(--ink-muted); font-size: 13px; }
+.handoff-row dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.support-handoff__summary {
+  margin: var(--space-3) 0 0 !important;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .approved-procedure { padding: var(--space-4); }
+  .handoff-row { grid-template-columns: 1fr; gap: 2px; }
+}

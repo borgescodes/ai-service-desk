@@ -191,6 +191,8 @@ async function submitMessage(form) {
       {
         role: 'JUP',
         text: result.assistant_message,
+        procedure_url: result.procedure_url,
+        support_handoff: result.support_handoff,
       },
     ];
   } catch (error) {
