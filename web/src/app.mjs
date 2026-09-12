@@ -1,3 +1,4 @@
+import { createFaqSearch, renderSolutionsHome, renderSolutionsResults } from './solutions.mjs';
 import { apiRequest, ApiError } from './api.mjs';
 import {
   renderAppHeader,
@@ -46,6 +47,8 @@ function renderRoute() {
   if (state.loading && !state.routeData.loaded) {
     return `<section class="state-panel" role="status" aria-live="polite"><div><strong>Carregando</strong><p>Buscando o estado atual no backend.</p></div></section>`;
   }
+
+  if (state.route === 'solutions') return renderSolutionsHome(faqOptions());
 
   if (state.route === 'jup') {
     return renderJupWorkspace({
@@ -123,11 +126,17 @@ function syncRouteIdentity() {
 }
 
 async function loadRoute() {
+  faqSearch.cancel();
+  state.faqSearching = false;
   state = { ...state, transientError: null, loading: true, routeData: {} };
   render();
   try {
     syncRouteIdentity();
-    if (state.route === 'requests') {
+    if (state.route === 'solutions') {
+      const payload = await apiRequest('/api/faq');
+      state.faqGroups = payload.groups ?? [];
+      state.routeData = { loaded: true };
+    } else if (state.route === 'requests') {
       state.routeData = { items: await apiRequest('/api/requests', { identityId: state.identityId }), loaded: true };
     } else if (state.route === 'approvals') {
       const items = await apiRequest('/api/operations/approvals', { identityId: state.identityId });
@@ -278,12 +287,41 @@ async function selectPrevention(opportunityId) {
   }
 }
 
-function bindInteractions() {
-  app.querySelectorAll('a[data-route], a[data-route-link]').forEach((link) => {
+function faqOptions() {
+  return { groups: state.faqGroups, searchQuery: state.faqSearchQuery,
+    searchResults: state.faqSearchResults, searching: state.faqSearching, error: state.faqSearchError };
+}
+
+const faqSearch = createFaqSearch({
+  request: apiRequest,
+  update({ searchResults, searching, error }) {
+    state.faqSearchResults = searchResults;
+    state.faqSearching = searching;
+    state.faqSearchError = error;
+    const results = app.querySelector('#faq-results');
+    if (!results || state.route !== 'solutions') return;
+    results.innerHTML = renderSolutionsResults(faqOptions());
+    results.setAttribute('aria-busy', String(searching));
+    bindRouteLinks(results);
+    results.querySelector('[data-action="retry-search"]')?.addEventListener('click', () => faqSearch.input(state.faqSearchQuery));
+  },
+});
+
+function bindRouteLinks(root) {
+  root.querySelectorAll('a[data-route], a[data-route-link], a[data-solution-link]').forEach((link) => {
     link.addEventListener('click', (event) => {
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
       event.preventDefault();
       void navigate(link.getAttribute('href'));
     });
+  });
+}
+
+function bindInteractions() {
+  bindRouteLinks(app);
+  app.querySelector('#faq-search')?.addEventListener('input', (event) => {
+    state.faqSearchQuery = event.target.value;
+    faqSearch.input(state.faqSearchQuery);
   });
 
   app.querySelector('#jup-form')?.addEventListener('submit', (event) => {
