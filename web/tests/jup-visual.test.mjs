@@ -33,3 +33,8 @@ test('six supplied visual assets render locally and warning has no face', () => 
   assert.doesNotMatch(warning, /eye-pill|mouth-line|open-face/);
   assert.match(renderJupVisual({ state: '<script>' }), /data-state="idle"/);
 });
+
+test('HTTP failure is a warning while pending still takes precedence', () => {
+  assert.equal(visualStateFromUi({ failed: true }), 'warning');
+  assert.equal(visualStateFromUi({ failed: true, pending: true }), 'thinking');
+});

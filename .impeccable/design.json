@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-12T20:50:09.370976+00:00",
+  "title": "Sistema visual Jup Resolve",
+  "extensions": {
+    "motion": [
+      {
+        "name": "controls",
+        "value": "180ms ease-out",
+        "purpose": "Feedback de controles"
+      },
+      {
+        "name": "jup-state",
+        "value": "400ms ease-out",
+        "purpose": "Troca de estado visual"
+      }
+    ],
+    "breakpoints": [],
+    "shadows": []
+  },
+  "components": [],
+  "narrative": {
+    "northStar": "Atendimento desktop claro, com busca e conversa dedicadas",
+    "rules": [
+      "Direção aprovada na spec da Fase 13",
+      "Fontes locais e paleta Juparanã",
+      "Revisão exclusivamente desktop"
+    ]
+  }
+}

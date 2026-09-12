@@ -60,3 +60,10 @@ test('Juparana brand tokens are exact', () => {
   assert.match(css, /--brand-yellow:\s*#eeb41e/i);
   assert.match(css, /--brand-gray:\s*#808285/i);
 });
+
+test('handoff keeps its technical summary behind a native disclosure', () => {
+  const html = renderJupWorkspace({ messages: [{ role: 'JUP', text: 'Encaminhado.', support_handoff: { technician: { name: 'Especialista' }, technical_summary: 'Detalhe aprovado para continuidade.' } }] });
+  assert.match(html, /<details[^>]*><summary>Resumo para o especialista<\/summary>/);
+  assert.doesNotMatch(html, /<details[^>]*open/);
+  assert.match(html, /Detalhe aprovado para continuidade/);
+});

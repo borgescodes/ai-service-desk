@@ -5,9 +5,10 @@ const STATUS_TO_VISUAL = Object.freeze({
   DENIED_POLICY: 'warning', LOCAL_AI_INFERENCE_FAILED: 'warning', LOCAL_AI_RESPONSE_INVALID: 'warning',
   SUPPORT_HANDOFF_PENDING: 'escalation',
 });
-const LABELS = Object.freeze({ idle: 'Jup disponível', listening: 'Jup ouvindo', thinking: 'Jup analisando', success: 'Atendimento resolvido', warning: 'Atenção no atendimento', escalation: 'Encaminhamento técnico' });
-export function visualStateFromUi({ pending = false, backendStatus = null, focused = false } = {}) {
+const LABELS = Object.freeze({ idle: 'Jup disponível', listening: 'Jup ouvindo', thinking: 'Jup analisando', success: 'Jup, resposta recebida', warning: 'Atenção no atendimento', escalation: 'Encaminhamento técnico' });
+export function visualStateFromUi({ pending = false, backendStatus = null, focused = false, failed = false } = {}) {
   if (pending) return 'thinking';
+  if (failed) return 'warning';
   if (Object.hasOwn(STATUS_TO_VISUAL, backendStatus)) return STATUS_TO_VISUAL[backendStatus];
   return focused ? 'listening' : 'idle';
 }

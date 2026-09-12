@@ -166,3 +166,7 @@ p { overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
+
+.handoff-summary summary { cursor: pointer; color: var(--green-text); font-size: 14px; }
+.handoff-summary[open] summary { margin-bottom: 16px; }
+.message-error { color: var(--danger); padding: 16px 0; }

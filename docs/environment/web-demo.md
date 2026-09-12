@@ -2,15 +2,15 @@
 
 ## Pré-requisitos
 
-A demonstração da Fase 12 é local, sintética e reproduzível. Ela exige:
+A demonstração da Fase 13 preserva o runtime homologado da Fase 12 e é local, sintética e reproduzível. Ela exige:
 
 - Python 3.14.x;
 - ambiente do projeto instalado com `python -m pip install -e ".[dev]"`;
 - Node 24 para lint, testes e build do frontend;
-- checkout na branch/candidate da Fase 12;
+- checkout na branch `phase-13-requester-experience`;
 - porta TCP local disponível, por padrão `8000`.
 
-Não é necessário executar `npm install`. O frontend não possui dependências npm de runtime e não usa CDN. Ollama também não participa do roteiro final da Fase 12.
+Não é necessário executar `npm install`. O frontend não possui dependências npm de runtime e não usa CDN. O roteiro conversacional usa `--mode LOCAL_AI`, com Ollama e `qwen3.5:4b`; o modo `DETERMINISTIC` mantém os smokes reproduzíveis.
 
 ## Arquitetura da demo
 
@@ -148,3 +148,12 @@ python -m pytest tests\web -q
 python -m ruff check .
 python -m ruff format --check .
 ```
+
+
+## Experiência do solicitante — Fase 13
+
+A home `/` abre Soluções/FAQ. `/jup` abre a conversa dedicada; `/solucoes/<knowledge_id>` abre um artigo APPROVED. `/requests` permanece como deep link. O header público contém somente Soluções e Falar com o Jup.
+
+Para apresentação técnica, use `/demo/operacao/cdm`, `/demo/operacao/m365` e `/demo/operacao/prevention`. Os aliases antigos continuam funcionando. A identidade demo é fixa por rota e validada pelo backend; não existe login real nem seletor público.
+
+O roteiro completo, as fontes de FAQ e a proveniência dos assets estão em [Roteiro Fase 13](../demo/phase-13-requester-experience.md).

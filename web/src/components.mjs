@@ -22,9 +22,9 @@ export function renderJupAvatar({ compact = false } = {}) {
   return renderJupVisual({ compact });
 }
 
-export function renderAppHeader({ activeRoute, operational = false }) {
+export function renderAppHeader({ activeRoute, operational = false, operationPath = '/demo/operacao/cdm' }) {
   const items = operational
-    ? [['solutions', '/', 'Soluções'], ['approvals', '/demo/operacao/cdm', 'Operação'], ['prevention', '/demo/operacao/prevention', 'Prevenção']]
+    ? [['solutions', '/', 'Soluções'], ['approvals', operationPath, 'Operação'], ['prevention', '/demo/operacao/prevention', 'Prevenção']]
     : [['solutions', '/', 'Soluções'], ['jup', '/jup', 'Falar com o Jup']];
   return `<header class="app-header app-header--${operational ? 'operational' : 'public'}">
     <a class="brand-lockup" href="/" data-route="solutions">Jup Resolve</a>
@@ -51,7 +51,7 @@ function renderSupportHandoff(handoff) {
       ${row('Solicitante', requesterName)}
       ${row('Área', requesterArea)}
     </dl>
-    ${technicalSummary ? `<p class="support-handoff__summary">${escapeHtml(technicalSummary)}</p>` : ''}
+    ${technicalSummary ? `<details class="handoff-summary"><summary>Resumo para o especialista</summary><p class="support-handoff__summary">${escapeHtml(technicalSummary)}</p></details>` : ''}
   </section>`;
 }
 
@@ -65,7 +65,7 @@ function renderMessage(message) {
   </article>`;
 }
 
-export function renderJupWorkspace({ messages = [], understood = null, loading = false, sourceContext = null, visualState = 'idle' }) {
+export function renderJupWorkspace({ messages = [], understood = null, loading = false, sourceContext = null, visualState = 'idle', messageError = null }) {
   const conversation = messages.length
     ? `<div class="conversation-visual">${renderJupVisual({ state: visualState, compact: true })}</div><div class="conversation-thread" role="log" aria-label="Conversa com Jup">${messages.map(renderMessage).join('')}${loading ? '<p class="thinking" role="status">Jup está analisando...</p>' : ''}</div>`
     : `<div class="jup-welcome">${renderJupVisual({ state: visualState })}<h1>Como posso ajudar?</h1></div>`;
@@ -75,6 +75,7 @@ export function renderJupWorkspace({ messages = [], understood = null, loading =
     ${sourceContext ? `<p class="faq-source-context">Você estava vendo: ${escapeHtml(sourceContext.title)}</p>` : ''}
     <div class="jup-conversation">${conversation}
       ${context ? `<p class="request-context">${context}</p>` : ''}
+      ${messageError ? `<p class="message-error" role="alert">${escapeHtml(messageError)}</p>` : ''}
       <form id="jup-form" class="composer" aria-label="Enviar mensagem ao Jup">
         <label class="sr-only" for="jup-message">Mensagem</label>
         <textarea id="jup-message" name="message" rows="2" maxlength="3000" placeholder="Descreva o que aconteceu..."></textarea>
