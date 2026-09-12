@@ -51,6 +51,9 @@ def test_frontend_has_no_domain_decisions_direct_cdm_or_embedded_token() -> None
     files = tuple(path for path in _WEB_SRC.rglob("*") if path.is_file())
     assert files
     for path in files:
+        if path.suffix == ".png":
+            assert path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+            continue
         text = path.read_text(encoding="utf-8")
         for token in _FORBIDDEN_FRONTEND_TOKENS:
             assert token not in text, f"forbidden frontend token {token!r} in {path}"

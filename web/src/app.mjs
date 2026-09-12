@@ -1,3 +1,4 @@
+import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
 import { createFaqSearch, renderSolutionDetail, renderSolutionsHome, renderSolutionsResults } from './solutions.mjs';
 import { apiRequest, ApiError } from './api.mjs';
 import {
@@ -16,6 +17,8 @@ const app = document.querySelector('#app');
 let state = {
   ...createInitialState(),
   route: resolveRoute(window.location.pathname),
+  composerFocused: false,
+  lastBackendStatus: null,
   messages: [],
   understood: null,
   loading: false,
@@ -55,6 +58,7 @@ function renderRoute() {
     return renderJupWorkspace({
       identity: selectedIdentity() ?? {},
       sourceContext: state.faqContext,
+      visualState: visualStateFromUi({ pending: state.pendingAction === 'message', backendStatus: state.lastBackendStatus, focused: state.composerFocused }),
       messages: state.messages,
       understood: state.understood,
       loading: state.pendingAction === 'message',
@@ -195,6 +199,8 @@ async function submitMessage(form) {
   if (!message || state.pendingAction) return;
 
   state.messages = [...state.messages, { role: 'USER', text: message }];
+  state.lastBackendStatus = null;
+  state.composerFocused = false;
   state.pendingAction = 'message';
   state.transientError = null;
   render();
@@ -205,6 +211,7 @@ async function submitMessage(form) {
       identityId: state.identityId,
       body: { message },
     });
+    state.lastBackendStatus = result.status;
     if (typeof result.assistant_message !== 'string' || !result.assistant_message.trim()) {
       throw new Error('Resposta conversacional ausente.');
     }
@@ -343,6 +350,16 @@ function bindInteractions() {
     event.preventDefault();
     void submitMessage(event.currentTarget);
   });
+  for (const eventName of ['focus', 'blur']) {
+    app.querySelector('#jup-message')?.addEventListener(eventName, () => {
+      state.composerFocused = eventName === 'focus';
+      const container = app.querySelector('.jup-welcome .jup-avatar, .conversation-visual .jup-avatar');
+      if (container) container.outerHTML = renderJupVisual({
+        state: visualStateFromUi({ pending: state.pendingAction === 'message', backendStatus: state.lastBackendStatus, focused: state.composerFocused }),
+        compact: state.messages.length > 0,
+      });
+    });
+  }
   app.querySelector('#jup-message')?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();

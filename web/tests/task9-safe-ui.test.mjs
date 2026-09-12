@@ -91,7 +91,7 @@ test('support handoff renders only safe backend fields and escapes the technical
   assert.match(html, /Revenda - Matriz/);
   assert.match(html, /Falha após procedimento/);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
-  assert.doesNotMatch(html, /<img/);
+  assert.doesNotMatch(html, /<img[^>]*onerror=/);
   assert.doesNotMatch(html, /href="https:\/\/evil\.invalid/);
 
   for (const forbidden of [

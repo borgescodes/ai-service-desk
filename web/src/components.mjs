@@ -1,3 +1,4 @@
+import { renderJupVisual } from './jup_visual.mjs';
 import { renderApprovedKnowledgeBody, renderMessageBody } from './knowledge_content.mjs';
 import {
   escapeHtml,
@@ -18,7 +19,7 @@ function initials(name = 'Jup') {
 }
 
 export function renderJupAvatar({ compact = false } = {}) {
-  return `<span class="jup-avatar${compact ? ' jup-avatar--compact' : ''}" aria-hidden="true"><span>J</span><i></i></span>`;
+  return renderJupVisual({ compact });
 }
 
 export function renderAppHeader({ activeRoute, operational = false }) {
@@ -64,10 +65,10 @@ function renderMessage(message) {
   </article>`;
 }
 
-export function renderJupWorkspace({ messages = [], understood = null, loading = false, sourceContext = null }) {
+export function renderJupWorkspace({ messages = [], understood = null, loading = false, sourceContext = null, visualState = 'idle' }) {
   const conversation = messages.length
-    ? `<div class="conversation-thread" role="log" aria-label="Conversa com Jup">${messages.map(renderMessage).join('')}${loading ? '<p class="thinking" role="status">Jup está analisando...</p>' : ''}</div>`
-    : `<div class="jup-welcome">${renderJupAvatar()}<h1>Como posso ajudar?</h1></div>`;
+    ? `<div class="conversation-visual">${renderJupVisual({ state: visualState, compact: true })}</div><div class="conversation-thread" role="log" aria-label="Conversa com Jup">${messages.map(renderMessage).join('')}${loading ? '<p class="thinking" role="status">Jup está analisando...</p>' : ''}</div>`
+    : `<div class="jup-welcome">${renderJupVisual({ state: visualState })}<h1>Como posso ajudar?</h1></div>`;
   const context = understood ? [understood.system, understood.next_step].filter(Boolean).map(escapeHtml).join(' · ') : '';
   return `<section class="jup-surface" aria-label="Atendimento com Jup">
     <a class="back-link" href="/" data-route="solutions">← Soluções</a>

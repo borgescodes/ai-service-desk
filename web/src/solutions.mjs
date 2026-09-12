@@ -1,3 +1,4 @@
+import { renderJupVisual } from './jup_visual.mjs';
 import { renderApprovedKnowledgeBody } from './knowledge_content.mjs';
 import { escapeHtml } from './render.mjs';
 
@@ -47,7 +48,7 @@ export function renderSolutionsHome(options = {}) {
     <h1 id="solutions-title">Como podemos ajudar?</h1>
     <div class="faq-search-control"><label class="sr-only" for="faq-search">Pesquisar soluções</label><input id="faq-search" type="search" autocomplete="off" maxlength="300" placeholder="Pesquise por um problema, sistema ou dúvida..." value="${escapeHtml(options.searchQuery)}" aria-controls="faq-results"></div>
     <div id="faq-results" aria-live="polite" aria-busy="${Boolean(options.searching)}">${renderSolutionsResults(options)}</div>
-    <aside class="jup-strip"><p>Não encontrou o que precisa?</p><a href="/jup" data-route="jup">Falar com o Jup <span aria-hidden="true">→</span></a></aside>
+    <aside class="jup-strip">${renderJupVisual({ compact: true })}<p>Não encontrou o que precisa?</p><a href="/jup" data-route="jup">Falar com o Jup <span aria-hidden="true">→</span></a></aside>
   </section>`;
 }
 
