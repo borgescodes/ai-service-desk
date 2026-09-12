@@ -1,3 +1,4 @@
+import { renderApprovedKnowledgeBody } from './knowledge_content.mjs';
 import { escapeHtml } from './render.mjs';
 
 export function faqSearchPath(query) {
@@ -48,4 +49,13 @@ export function renderSolutionsHome(options = {}) {
     <div id="faq-results" aria-live="polite" aria-busy="${Boolean(options.searching)}">${renderSolutionsResults(options)}</div>
     <aside class="jup-strip"><p>Não encontrou o que precisa?</p><a href="/jup" data-route="jup">Falar com o Jup <span aria-hidden="true">→</span></a></aside>
   </section>`;
+}
+
+export function renderSolutionDetail(detail) {
+  return `<article class="solution-detail">
+    <a class="back-link" href="/" data-route="solutions">← Todas as soluções</a>
+    <header><p class="solution-category">${escapeHtml(detail.category || detail.system)}</p><h1>${escapeHtml(detail.title)}</h1></header>
+    <div class="knowledge-body">${renderApprovedKnowledgeBody({ text: detail.answer, procedureUrl: detail.procedure_url })}</div>
+    <footer class="solution-outcome"><h2>Resolveu?</h2><div><a class="button button--secondary" href="/" data-route="solutions">Sim</a><a class="button button--primary" href="/jup?from=${encodeURIComponent(detail.knowledge_id)}" data-route="jup">Ainda preciso de ajuda →</a></div></footer>
+  </article>`;
 }

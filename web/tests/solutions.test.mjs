@@ -54,3 +54,22 @@ test('empty search result leads directly to Jup', () => {
 test('faq search path encodes the query', () => {
   assert.equal(faqSearchPath('cigam azul'), '/api/faq/search?q=cigam%20azul');
 });
+
+import { renderSolutionDetail } from '../src/solutions.mjs';
+
+test('solution detail uses literal approved answer and two outcome actions', () => {
+  const html = renderSolutionDetail({
+    knowledge_id: 'KB-CIGAM',
+    title: 'CIGAM não abre',
+    answer: 'Feche a sessão e tente novamente.',
+    system: 'CIGAM',
+    category: 'CIGAM',
+    procedure_url: null,
+  });
+  assert.match(html, /CIGAM não abre/);
+  assert.match(html, /Feche a sessão e tente novamente\./);
+  assert.match(html, /Resolveu\?/);
+  assert.match(html, />Sim</);
+  assert.match(html, /Ainda preciso de ajuda/);
+  assert.match(html, /\/jup\?from=KB-CIGAM/);
+});

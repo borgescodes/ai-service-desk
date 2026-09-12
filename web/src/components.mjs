@@ -1,3 +1,4 @@
+import { renderApprovedKnowledgeBody, renderMessageBody } from './knowledge_content.mjs';
 import {
   escapeHtml,
   renderConfidence,
@@ -6,7 +7,6 @@ import {
   renderStatus,
 } from './render.mjs';
 
-const APPROVED_PROCEDURE_URL = 'https://mysignins.microsoft.com/security-info/password/change';
 
 function initials(name = 'Jup') {
   return String(name)
@@ -41,53 +41,6 @@ export function renderAppHeader({ activeRoute, selectedIdentityId, identities = 
   </header>`;
 }
 
-function renderMessageBody(text) {
-  return String(text ?? '')
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean)
-    .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
-    .join('');
-}
-
-function renderApprovedProcedure(message) {
-  const text = String(message.text ?? '');
-  if (message.role !== 'JUP' || message.procedure_url !== APPROVED_PROCEDURE_URL) {
-    return renderMessageBody(text);
-  }
-
-  const intro = [];
-  const steps = [];
-  const outro = [];
-  let section = 'intro';
-
-  for (const line of text.split(/\r?\n/)) {
-    const match = line.match(/^\s*\d+\.\s+(.+?)\s*$/);
-    if (match) {
-      steps.push(match[1]);
-      section = 'steps';
-      continue;
-    }
-    if (section === 'steps' && line.trim()) section = 'outro';
-    if (section === 'intro') intro.push(line);
-    else if (section === 'outro') outro.push(line);
-  }
-
-  if (!steps.length) return renderMessageBody(text);
-
-  const items = steps
-    .map((step, index) => {
-      const content =
-        index === 0
-          ? `<a href="${APPROVED_PROCEDURE_URL}" target="_blank" rel="noopener noreferrer">${escapeHtml(step)}</a>`
-          : escapeHtml(step);
-      return `<li>${content}</li>`;
-    })
-    .join('');
-
-  return `${renderMessageBody(intro.join('\n'))}<div class="approved-procedure"><ol class="procedure-steps">${items}</ol></div>${renderMessageBody(outro.join('\n'))}`;
-}
-
 function renderSupportHandoff(handoff) {
   if (!handoff || typeof handoff !== 'object') return '';
 
@@ -116,7 +69,7 @@ function renderMessage(message) {
   const klass = message.role === 'USER' ? 'conversation-message--user' : 'conversation-message--jup';
   return `<article class="conversation-message ${klass}">
     <div class="message-author">${message.role === 'JUP' ? renderJupAvatar({ compact: true }) : `<span class="user-avatar" aria-hidden="true">${escapeHtml(initials(role))}</span>`}<strong>${role}</strong></div>
-    ${message.role === 'JUP' ? renderApprovedProcedure(message) : renderMessageBody(message.text)}
+    ${message.role === 'JUP' ? renderApprovedKnowledgeBody({ text: message.text, procedureUrl: message.procedure_url }) : renderMessageBody(message.text)}
     ${message.role === 'JUP' ? renderSupportHandoff(message.support_handoff) : ''}
   </article>`;
 }
@@ -126,7 +79,7 @@ function understoodValue(label, value) {
   return `<div class="understood-row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`;
 }
 
-export function renderJupWorkspace({ identity = {}, messages = [], understood = null, loading = false }) {
+export function renderJupWorkspace({ identity = {}, messages = [], understood = null, loading = false, sourceContext = null }) {
   const name = identity.name?.split(' ')[0] || 'você';
   const conversation = messages.length
     ? `<div class="conversation-thread">${messages.map(renderMessage).join('')}${loading ? '<div class="thinking" aria-live="polite"><span></span><span></span><span></span><em>Jup está analisando</em></div>' : ''}</div>`
@@ -153,7 +106,7 @@ export function renderJupWorkspace({ identity = {}, messages = [], understood = 
   }
 
   return `<section class="jup-surface">
-    <div class="jup-layout"><div class="jup-conversation">${conversation}
+    <div class="jup-layout"><div class="jup-conversation">${sourceContext ? `<p class="faq-source-context">Você estava vendo: ${escapeHtml(sourceContext.title)}</p>` : ''}${conversation}
       <form id="jup-form" class="composer" aria-label="Enviar mensagem ao Jup">
         <label class="sr-only" for="jup-message">Mensagem</label>
         <textarea id="jup-message" name="message" rows="2" maxlength="3000" placeholder="Ex.: Preciso de acesso ao CDM para solicitar materiais para uma revenda."></textarea>

@@ -1,4 +1,4 @@
-import { createFaqSearch, renderSolutionsHome, renderSolutionsResults } from './solutions.mjs';
+import { createFaqSearch, renderSolutionDetail, renderSolutionsHome, renderSolutionsResults } from './solutions.mjs';
 import { apiRequest, ApiError } from './api.mjs';
 import {
   renderAppHeader,
@@ -48,11 +48,13 @@ function renderRoute() {
     return `<section class="state-panel" role="status" aria-live="polite"><div><strong>Carregando</strong><p>Buscando o estado atual no backend.</p></div></section>`;
   }
 
+  if (state.route === 'solution') return renderSolutionDetail(state.routeData.detail);
   if (state.route === 'solutions') return renderSolutionsHome(faqOptions());
 
   if (state.route === 'jup') {
     return renderJupWorkspace({
       identity: selectedIdentity() ?? {},
+      sourceContext: state.faqContext,
       messages: state.messages,
       understood: state.understood,
       loading: state.pendingAction === 'message',
@@ -135,6 +137,20 @@ async function loadRoute() {
     if (state.route === 'solutions') {
       const payload = await apiRequest('/api/faq');
       state.faqGroups = payload.groups ?? [];
+      state.routeData = { loaded: true };
+    } else if (state.route === 'solution') {
+      const { knowledgeId } = routeParams(window.location.pathname);
+      const detail = await apiRequest(`/api/faq/${encodeURIComponent(knowledgeId)}`);
+      state.routeData = { loaded: true, detail };
+    } else if (state.route === 'jup') {
+      state.faqContext = null;
+      const sourceId = new URLSearchParams(window.location.search).get('from');
+      if (sourceId) {
+        try {
+          const detail = await apiRequest(`/api/faq/${encodeURIComponent(sourceId)}`);
+          state.faqContext = { knowledge_id: detail.knowledge_id, title: detail.title };
+        } catch { /* Context is optional; an unavailable article must not block chat. */ }
+      }
       state.routeData = { loaded: true };
     } else if (state.route === 'requests') {
       state.routeData = { items: await apiRequest('/api/requests', { identityId: state.identityId }), loaded: true };
