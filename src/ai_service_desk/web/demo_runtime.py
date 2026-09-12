@@ -62,6 +62,7 @@ from ai_service_desk.web.demo_data import (
     write_demo_knowledge,
     write_demo_playbooks,
 )
+from ai_service_desk.web.demo_faq import DemoFaqCatalog, FaqNotFoundError
 from ai_service_desk.web.demo_identity import DemoIdentityProvider, IdentityNotFoundError
 from ai_service_desk.web.demo_knowledge import DemoKnowledgeEngine
 from ai_service_desk.web.demo_support import (
@@ -162,11 +163,29 @@ class DemoRuntime:
             self._temp.cleanup()
             self._temp = None
 
+    def list_faq(self) -> dict:
+        groups = self.faq_catalog.featured_groups()
+        return {"groups": groups, "total": sum(len(group["items"]) for group in groups)}
+
+    def search_faq(self, query: str) -> dict:
+        items = self.faq_catalog.search(query)
+        return {"items": items, "total": len(items)}
+
+    def get_faq(self, knowledge_id: str) -> dict:
+        try:
+            return self.faq_catalog.detail(knowledge_id)
+        except FaqNotFoundError as exc:
+            raise WebDemoError("FAQ_NOT_FOUND", "Solução não encontrada.") from exc
+
     def reset(self) -> None:
         self._close_mutable_resources()
         self._temp = TemporaryDirectory(prefix="jup-resolve-demo-")
         root = Path(self._temp.name)
         knowledge_source = write_demo_knowledge(root / "knowledge.jsonl")
+        phase4_faq_source = (
+            Path(__file__).resolve().parents[3] / "knowledge" / "phase4_synthetic_faq.jsonl"
+        )
+        self.faq_catalog = DemoFaqCatalog.from_sources([phase4_faq_source, knowledge_source])
         playbook_source = write_demo_playbooks(root / "playbooks.jsonl")
         knowledge_index = root / "knowledge-index"
         playbook_catalog = root / "playbook-catalog"

@@ -167,3 +167,21 @@ def test_internal_errors_do_not_leak_traceback_class_names_or_tokens() -> None:
         assert response.json()["error"]["code"] == "INTERNAL_ERROR"
     finally:
         runtime.close()
+
+
+def test_faq_projects_safe_fields_without_private_review_or_credentials():
+    runtime = DemoRuntime.create()
+    try:
+        client = _client(runtime)
+        response = client.get("/api/faq/search")
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert items
+        for item in items:
+            assert set(item) == {"knowledge_id", "title", "question", "system", "category"}
+            detail = client.get(f"/api/faq/{item['knowledge_id']}").json()
+            assert set(detail) == set(item) | {"answer", "procedure_url"}
+            assert detail["procedure_url"] in {None, *_ALLOWED_FRONTEND_HTTPS}
+            assert "phase12-demo-service-token" not in str(detail)
+    finally:
+        runtime.close()
