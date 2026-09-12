@@ -8,7 +8,7 @@ import {
   renderRequestList,
 } from './components.mjs';
 import { escapeHtml, renderErrorState, renderUnauthorizedState } from './render.mjs';
-import { resolveRoute, routePath } from './router.mjs';
+import { demoIdentityForPath, resolveRoute, routeParams } from './router.mjs';
 import { createInitialState, selectIdentity } from './state.mjs';
 
 const app = document.querySelector('#app');
@@ -75,7 +75,6 @@ function renderRoute() {
 }
 
 function render() {
-  const identity = selectedIdentity();
   app.innerHTML = `${renderAppHeader({
     activeRoute: state.route,
     selectedIdentityId: state.identityId,
@@ -83,9 +82,6 @@ function render() {
   })}<main id="main-content" class="main-content" tabindex="-1">${renderRoute()}</main>`;
   app.setAttribute('aria-busy', String(state.loading));
   bindInteractions();
-  if (!identity && state.identities.length) {
-    app.querySelector('#demo-identity')?.focus();
-  }
 }
 
 function friendlyError(error) {
@@ -93,7 +89,7 @@ function friendlyError(error) {
     if (error.status === 401) {
       return {
         kind: 'unauthorized',
-        message: 'Selecione uma identidade de demonstração válida.',
+        message: 'Identidade de demonstração indisponível. Recarregue a página.',
       };
     }
     if (error.status === 403) {
@@ -116,10 +112,21 @@ function friendlyError(error) {
   };
 }
 
+function syncRouteIdentity() {
+  const desiredIdentityId = demoIdentityForPath(window.location.pathname);
+  if (!state.identities.some((item) => item.identity_id === desiredIdentityId)) {
+    throw new Error('Identidade de demonstração esperada não está disponível.');
+  }
+  if (state.identityId !== desiredIdentityId) {
+    state = { ...selectIdentity(state, desiredIdentityId), messages: [], understood: null };
+  }
+}
+
 async function loadRoute() {
   state = { ...state, transientError: null, loading: true, routeData: {} };
   render();
   try {
+    syncRouteIdentity();
     if (state.route === 'requests') {
       state.routeData = { items: await apiRequest('/api/requests', { identityId: state.identityId }), loaded: true };
     } else if (state.route === 'approvals') {
@@ -140,10 +147,9 @@ async function loadRoute() {
   }
 }
 
-async function navigate(route) {
-  state.route = route;
-  const path = routePath(route);
-  if (window.location.pathname !== path) window.history.pushState({}, '', path);
+async function navigate(path) {
+  if (window.location.pathname + window.location.search !== path) window.history.pushState({}, '', path);
+  state.route = resolveRoute(window.location.pathname);
   await loadRoute();
   document.querySelector('#main-content')?.focus({ preventScroll: true });
 }
@@ -273,24 +279,10 @@ async function selectPrevention(opportunityId) {
 }
 
 function bindInteractions() {
-  app.querySelector('#demo-identity')?.addEventListener('change', async (event) => {
-    state = {
-      ...selectIdentity(state, event.target.value),
-      route: state.route,
-      identities: state.identities,
-      messages: [],
-      understood: null,
-      selectedRequestId: null,
-      selectedOpportunityId: null,
-    };
-    window.localStorage.setItem('jup-demo-identity', state.identityId);
-    await loadRoute();
-  });
-
   app.querySelectorAll('a[data-route], a[data-route-link]').forEach((link) => {
     link.addEventListener('click', (event) => {
       event.preventDefault();
-      void navigate(link.dataset.routeLink ?? link.dataset.route);
+      void navigate(link.getAttribute('href'));
     });
   });
 
@@ -328,12 +320,7 @@ window.addEventListener('popstate', () => {
 async function bootstrap() {
   try {
     const identities = await apiRequest('/api/session/identities');
-    const stored = window.localStorage.getItem('jup-demo-identity');
-    const preferred = identities.some((item) => item.identity_id === stored)
-      ? stored
-      : (identities[0]?.identity_id ?? null);
     state.identities = identities;
-    state.identityId = preferred;
     await loadRoute();
   } catch (error) {
     state.transientError = friendlyError(error);
