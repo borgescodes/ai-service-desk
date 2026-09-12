@@ -3,7 +3,6 @@ import {
   escapeHtml,
   renderConfidence,
   renderEmptyState,
-  renderPrimaryNavigation,
   renderStatus,
 } from './render.mjs';
 
@@ -22,22 +21,13 @@ export function renderJupAvatar({ compact = false } = {}) {
   return `<span class="jup-avatar${compact ? ' jup-avatar--compact' : ''}" aria-hidden="true"><span>J</span><i></i></span>`;
 }
 
-export function renderAppHeader({ activeRoute, selectedIdentityId, identities = [] }) {
-  const identity = identities.find((item) => item.identity_id === selectedIdentityId) ?? identities[0] ?? {};
-  const options = identities
-    .map((item) => {
-      const selected = item.identity_id === selectedIdentityId ? ' selected' : '';
-      return `<option value="${escapeHtml(item.identity_id)}"${selected}>${escapeHtml(item.name)} · ${escapeHtml(item.area)}</option>`;
-    })
-    .join('');
-
-  return `<header class="app-header">
-    <div class="brand-lockup">
-      ${renderJupAvatar({ compact: true })}
-      <div><strong>Jup Resolve</strong><span>Assistente de IA da Juparanã</span></div>
-    </div>
-    ${renderPrimaryNavigation(activeRoute, identity)}
-    <label class="identity-switcher"><span>Identidade demo</span><select id="demo-identity" aria-label="Selecionar identidade de demonstração">${options}</select></label>
+export function renderAppHeader({ activeRoute, operational = false }) {
+  const items = operational
+    ? [['solutions', '/', 'Soluções'], ['approvals', '/demo/operacao/cdm', 'Operação'], ['prevention', '/demo/operacao/prevention', 'Prevenção']]
+    : [['solutions', '/', 'Soluções'], ['jup', '/jup', 'Falar com o Jup']];
+  return `<header class="app-header app-header--${operational ? 'operational' : 'public'}">
+    <a class="brand-lockup" href="/" data-route="solutions">Jup Resolve</a>
+    <nav class="primary-nav" aria-label="Navegação principal">${items.map(([route, href, label]) => `<a href="${href}" data-route="${route}"${activeRoute === route || (route === 'solutions' && activeRoute === 'solution') ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
   </header>`;
 }
 
@@ -74,45 +64,22 @@ function renderMessage(message) {
   </article>`;
 }
 
-function understoodValue(label, value) {
-  if (value == null || value === '') return '';
-  return `<div class="understood-row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`;
-}
-
-export function renderJupWorkspace({ identity = {}, messages = [], understood = null, loading = false, sourceContext = null }) {
-  const name = identity.name?.split(' ')[0] || 'você';
+export function renderJupWorkspace({ messages = [], understood = null, loading = false, sourceContext = null }) {
   const conversation = messages.length
-    ? `<div class="conversation-thread">${messages.map(renderMessage).join('')}${loading ? '<div class="thinking" aria-live="polite"><span></span><span></span><span></span><em>Jup está analisando</em></div>' : ''}</div>`
-    : `<div class="jup-welcome">
-        ${renderJupAvatar()}
-        <p class="welcome-kicker">Jup Resolve</p>
-        <h1>Olá, ${escapeHtml(name)}. O que você precisa resolver?</h1>
-        <p>Explique o que aconteceu ou o que você precisa acessar. Eu organizo o contexto e conduzo a próxima etapa.</p>
-      </div>`;
-
-  let understoodPanel = '';
-  if (understood) {
-    understoodPanel = `<aside class="understood-panel" aria-labelledby="understood-title">
-      <div class="understood-heading"><span class="context-spine" aria-hidden="true"></span><div><p>Contexto estruturado</p><h2 id="understood-title">O que entendi</h2></div></div>
-      <dl>
-        ${understoodValue('Sistema', understood.system)}
-        ${understoodValue('Solicitação', understood.request)}
-        ${understoodValue('Finalidade', understood.purpose)}
-        ${understood.confidence ? `<div class="understood-row"><dt>Confiança</dt><dd>${renderConfidence(understood.confidence)}</dd></div>` : ''}
-        ${understoodValue('Policy', understood.policy)}
-        ${understoodValue('Próxima etapa', understood.next_step)}
-      </dl>
-    </aside>`;
-  }
-
-  return `<section class="jup-surface">
-    <div class="jup-layout"><div class="jup-conversation">${sourceContext ? `<p class="faq-source-context">Você estava vendo: ${escapeHtml(sourceContext.title)}</p>` : ''}${conversation}
+    ? `<div class="conversation-thread" role="log" aria-label="Conversa com Jup">${messages.map(renderMessage).join('')}${loading ? '<p class="thinking" role="status">Jup está analisando...</p>' : ''}</div>`
+    : `<div class="jup-welcome">${renderJupAvatar()}<h1>Como posso ajudar?</h1></div>`;
+  const context = understood ? [understood.system, understood.next_step].filter(Boolean).map(escapeHtml).join(' · ') : '';
+  return `<section class="jup-surface" aria-label="Atendimento com Jup">
+    <a class="back-link" href="/" data-route="solutions">← Soluções</a>
+    ${sourceContext ? `<p class="faq-source-context">Você estava vendo: ${escapeHtml(sourceContext.title)}</p>` : ''}
+    <div class="jup-conversation">${conversation}
+      ${context ? `<p class="request-context">${context}</p>` : ''}
       <form id="jup-form" class="composer" aria-label="Enviar mensagem ao Jup">
         <label class="sr-only" for="jup-message">Mensagem</label>
-        <textarea id="jup-message" name="message" rows="2" maxlength="3000" placeholder="Ex.: Preciso de acesso ao CDM para solicitar materiais para uma revenda."></textarea>
+        <textarea id="jup-message" name="message" rows="2" maxlength="3000" placeholder="Descreva o que aconteceu..."></textarea>
         <div class="composer-actions"><span>Enter para enviar · Shift+Enter para nova linha</span><button class="button button--primary" type="submit"${loading ? ' disabled' : ''}>Enviar</button></div>
       </form>
-    </div>${understoodPanel}</div>
+    </div>
   </section>`;
 }
 

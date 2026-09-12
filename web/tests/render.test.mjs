@@ -38,7 +38,7 @@ test('error state gives a recovery action', () => {
 test('unauthorized state is explicit and points to identity recovery', () => {
   const html = renderUnauthorizedState('Esta identidade não tem acesso a esta operação.');
   assert.match(html, /Perfil sem acesso/);
-  assert.match(html, /identidade demo/i);
+  assert.match(html, /Soluções/);
   assert.doesNotMatch(html, /Tentar novamente/);
 });
 
@@ -63,7 +63,7 @@ import {
   renderRequestList,
 } from '../src/components.mjs';
 
-test('header shows product descriptor and controlled identity options', () => {
+test('header shows public product navigation without identity options', () => {
   const html = renderAppHeader({
     activeRoute: 'jup',
     selectedIdentityId: 'pedro-miranda',
@@ -72,12 +72,12 @@ test('header shows product descriptor and controlled identity options', () => {
     ],
   });
   assert.match(html, /Jup Resolve/);
-  assert.match(html, /Assistente de IA da Juparanã/);
-  assert.match(html, /value="pedro-miranda"/);
+  assert.match(html, /Falar com o Jup/);
+  assert.doesNotMatch(html, /<select/);
   assert.doesNotMatch(html, /email|username|capabilit/i);
 });
 
-test('Jup workspace renders conversation and O que entendi without inventing state', () => {
+test('Jup workspace renders conversation and compact backend state', () => {
   const html = renderJupWorkspace({
     identity: { name: 'Pedro Miranda' },
     messages: [
@@ -93,7 +93,7 @@ test('Jup workspace renders conversation and O que entendi without inventing sta
       next_step: 'Aguardar aprovação técnica',
     },
   });
-  assert.match(html, /O que entendi/);
+  assert.doesNotMatch(html, /O que entendi|Confiança|Policy/);
   assert.match(html, /CDM/);
   assert.match(html, /Aguardar aprovação técnica/);
   assert.doesNotMatch(html, /KPI|dashboard/i);

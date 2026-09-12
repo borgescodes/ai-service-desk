@@ -82,8 +82,7 @@ function renderRoute() {
 function render() {
   app.innerHTML = `${renderAppHeader({
     activeRoute: state.route,
-    selectedIdentityId: state.identityId,
-    identities: state.identities,
+    operational: ['approvals', 'prevention'].includes(state.route),
   })}<main id="main-content" class="main-content" tabindex="-1">${renderRoute()}</main>`;
   app.setAttribute('aria-busy', String(state.loading));
   bindInteractions();
