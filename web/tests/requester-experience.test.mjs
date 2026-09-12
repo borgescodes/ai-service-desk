@@ -46,3 +46,17 @@ test('structured request context is compact instead of a permanent side panel', 
   assert.doesNotMatch(html, /understood-panel/);
   assert.doesNotMatch(html, /Policy|Confiança/);
 });
+
+const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+test('desktop solutions use editorial columns and a readable article and chat measure', () => {
+  assert.match(css, /--content:\s*1220px/);
+  assert.match(css, /\.solution-groups\s*\{/);
+  assert.match(css, /\.solution-detail\s*\{/);
+  assert.match(css, /prefers-reduced-motion/);
+  assert.doesNotMatch(css, /linear-gradient|radial-gradient|backdrop-filter/);
+});
+test('Juparana brand tokens are exact', () => {
+  assert.match(css, /--brand-green:\s*#45813c/i);
+  assert.match(css, /--brand-yellow:\s*#eeb41e/i);
+  assert.match(css, /--brand-gray:\s*#808285/i);
+});
