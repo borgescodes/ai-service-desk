@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as solutions from '../src/solutions.mjs';
-import { renderJupWorkspace } from '../src/components.mjs';
+import { renderAppHeader, renderJupWorkspace } from '../src/components.mjs';
 import { renderApprovedKnowledgeBody } from '../src/knowledge_content.mjs';
 
 test('four functional topic filters preserve the query and combine request parameters', () => {
@@ -75,4 +75,57 @@ test('CDM link needs the exact tutorial identity and backend URL; arbitrary URLs
   for (const options of [{ procedureUrl: 'https://arbitrary.invalid/' }, { procedureUrl: 'https://cdm.juparana.com.br/', knowledgeId: 'OTHER' }]) {
     assert.doesNotMatch(renderApprovedKnowledgeBody({ text, ...options }), /<a /);
   }
+});
+
+test('solution groups use h3 under the guidance h2', () => {
+  const html = solutions.renderSolutionsHome({ groups: [{ key: 'acessos-rotinas', label: 'Acessos e rotinas', items: [] }] });
+  assert.match(html, /<div class="results-heading">[^]*?<h2>Orientações para sua rotina<\/h2>/);
+  assert.match(html, /<section class="solution-group"><h3>Acessos e rotinas<\/h3>/);
+  assert.doesNotMatch(html, /<section class="solution-group"><h2>/);
+});
+
+test('desktop showcase uses premium visual hierarchy with icon-led topics', () => {
+  const html = solutions.renderSolutionsHome({
+    groups: [{ key: 'acessos-rotinas', label: 'Acessos e rotinas', items: [{ knowledge_id: 'KB-ACCESS', title: 'Solicitar acesso', category: 'Acessos e rotinas' }] }],
+  });
+  assert.match(html, /class="help-kicker"/);
+  assert.match(html, /class="faq-topic-grid"/);
+  const topicCards = html.match(/class="faq-topic-card/g) ?? [];
+  assert.equal(topicCards.length, 4);
+  for (const icon of ['access', 'errors', 'apps', 'network']) assert.match(html, new RegExp(`data-topic-icon="${icon}"`));
+  assert.match(html, /class="jup-spotlight"/);
+  assert.match(html, /class="field-lines"/);
+});
+
+test('desktop article detail has reading surface metadata rail and resolution panel', () => {
+  const html = solutions.renderSolutionDetail({
+    knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001', title: 'Como solicitar acesso ao CDM', category: 'Acessos e rotinas', category_key: 'acessos-rotinas', system: 'CDM',
+    answer: 'Para solicitar seu acesso ao CDM:\n\n1. Acesse https://cdm.juparana.com.br/.\n2. Clique em Solicitar Acesso.', procedure_url: 'https://cdm.juparana.com.br/',
+    provenance: { source: 'SYNTHETIC_DEMO', status: 'APPROVED', version: 1 },
+  });
+  assert.match(html, /class="solution-detail-layout"/);
+  assert.match(html, /class="solution-article-card"/);
+  assert.match(html, /class="solution-detail-aside"/);
+  assert.match(html, /class="solution-meta-card"/);
+  assert.match(html, /Conteúdo aprovado/);
+  assert.match(html, /CDM/);
+  assert.match(html, /class="solution-outcome-card"/);
+});
+
+test('Jup desktop workspace has product frame status and elevated composer', () => {
+  const html = renderJupWorkspace({ messages: [{ role: 'USER', text: 'Preciso de acesso ao CDM' }, { role: 'JUP', text: 'Posso ajudar com isso.' }] });
+  assert.match(html, /class="jup-workspace-frame"/);
+  assert.match(html, /class="conversation-status"/);
+  assert.match(html, /class="conversation-stage"/);
+  assert.match(html, /class="composer-leading-icon"/);
+  assert.match(html, /class="composer-hint"/);
+});
+
+test('public header has a visual brand symbol without changing navigation authority', () => {
+  const html = renderAppHeader({ activeRoute: 'solutions' });
+  assert.match(html, /class="brand-symbol"/);
+  assert.match(html, /class="brand-wordmark"/);
+  assert.match(html, /<svg[^>]*aria-hidden="true"/);
+  assert.match(html, /href="\/" data-route="solutions"/);
+  assert.match(html, /href="\/jup" data-route="jup"/);
 });

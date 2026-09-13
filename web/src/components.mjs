@@ -7,9 +7,12 @@ import {
   renderStatus,
 } from './render.mjs';
 
-
 export function renderJupAvatar({ compact = false } = {}) {
   return renderJupVisual({ compact });
+}
+
+function renderBrandSymbol() {
+  return `<span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="M18 28V14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M18 17c-6 0-9.5-3.2-9.5-8.2 6 0 9.5 3.2 9.5 8.2Z" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M18 13c0-5 3.5-8.2 9.5-8.2 0 5-3.5 8.2-9.5 8.2Z" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M8.5 29h19" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="27.5" cy="26.5" r="2.2" fill="currentColor"/></svg></span>`;
 }
 
 export function renderAppHeader({ activeRoute, operational = false, operationPath = '/demo/operacao/cdm' }) {
@@ -17,8 +20,8 @@ export function renderAppHeader({ activeRoute, operational = false, operationPat
     ? [['solutions', '/', 'Soluções'], ['approvals', operationPath, 'Operação'], ['prevention', '/demo/operacao/prevention', 'Prevenção']]
     : [['solutions', '/', 'Soluções'], ['jup', '/jup', 'Falar com o Jup']];
   return `<header class="app-header app-header--${operational ? 'operational' : 'public'}">
-    <a class="brand-lockup" href="/" data-route="solutions">Jup Resolve</a>
-    <nav class="primary-nav" aria-label="Navegação principal">${items.map(([route, href, label]) => `<a href="${href}" data-route="${route}"${activeRoute === route || (route === 'solutions' && activeRoute === 'solution') ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
+    <a class="brand-lockup" href="/" data-route="solutions">${renderBrandSymbol()}<span class="brand-wordmark">Jup Resolve</span></a>
+    <nav class="primary-nav" aria-label="Navegação principal">${items.map(([route, href, label]) => `<a href="${href}" data-route="${route}"${activeRoute === route || (route === 'solutions' && activeRoute === 'solution') ? ' aria-current="page"' : ''}><span>${label}</span></a>`).join('')}</nav>
   </header>`;
 }
 
@@ -66,19 +69,20 @@ export function renderJupWorkspace({ messages = [], understood = null, loading =
     { fresh: index >= animateFrom, visualState: index === lastAssistant && !loading ? visualState : null },
   )).join('') : renderMessage({ role: 'JUP', text: 'Como posso ajudar?\n\nConte o que está acontecendo e em qual sistema. Vamos começar por aí.' }, { visualState: visualState || 'idle' });
   return `<section class="jup-surface" aria-label="Atendimento com Jup">
-    <header class="conversation-header"><div><h1>Falar com o Jup</h1><p>Ajuda para seguir com o trabalho.</p></div><a class="back-link" href="/" data-route="solutions">← Soluções</a></header>
-    ${sourceContext ? `<p class="faq-source-context">Você estava vendo: ${escapeHtml(sourceContext.title)}</p>` : ''}
-    <div class="jup-conversation"><div class="conversation-thread" role="log" aria-label="Conversa com Jup" aria-live="polite" tabindex="0">${conversation}
-      ${understood && lastAssistant < 0 ? renderMessage({ role: 'JUP', text: '', context: understood }) : ''}
-      ${loading ? renderMessage({ role: 'JUP', thinking: true }, { fresh: true }) : ''}
-      ${messageError ? renderMessage({ role: 'JUP', text: messageError, failed: true }, { fresh: true }) : ''}
-      <div class="conversation-end" aria-hidden="true"></div></div>
-      <button class="scroll-bottom" type="button" data-action="scroll-bottom" hidden aria-label="Voltar à última mensagem">Última mensagem ↓</button>
-      <form id="jup-form" class="composer" aria-label="Enviar mensagem ao Jup" aria-busy="${loading}">
-        <label class="sr-only" for="jup-message">Mensagem</label>
-        <textarea id="jup-message" name="message" rows="2" maxlength="3000" placeholder="Descreva o que aconteceu..."${loading ? ' disabled' : ''}>${escapeHtml(draft)}</textarea>
-        <div class="composer-actions"><span>Enter para enviar · Shift+Enter para nova linha</span><button class="button button--primary" type="submit"${loading ? ' disabled' : ''}>${loading ? 'Aguarde...' : 'Enviar ↑'}</button></div>
-      </form>
+    <div class="jup-workspace-frame">
+      <header class="conversation-header"><div class="conversation-header__copy"><span class="conversation-kicker">Atendimento com Jup</span><h1>Falar com o Jup</h1><p>Descreva o problema e siga a conversa até o próximo passo.</p></div><div class="conversation-header__actions"><div class="conversation-status" data-state="${loading ? 'thinking' : 'ready'}"><span aria-hidden="true"></span>${loading ? 'Analisando sua mensagem' : 'Jup disponível'}</div><a class="back-link" href="/" data-route="solutions">← Soluções</a></div></header>
+      ${sourceContext ? `<p class="faq-source-context">Você estava vendo: <strong>${escapeHtml(sourceContext.title)}</strong></p>` : ''}
+      <div class="conversation-stage"><div class="jup-conversation"><div class="conversation-thread" role="log" aria-label="Conversa com Jup" aria-live="polite" tabindex="0">${conversation}
+        ${understood && lastAssistant < 0 ? renderMessage({ role: 'JUP', text: '', context: understood }) : ''}
+        ${loading ? renderMessage({ role: 'JUP', thinking: true }, { fresh: true }) : ''}
+        ${messageError ? renderMessage({ role: 'JUP', text: messageError, failed: true }, { fresh: true }) : ''}
+        <div class="conversation-end" aria-hidden="true"></div></div>
+        <button class="scroll-bottom" type="button" data-action="scroll-bottom" hidden aria-label="Voltar à última mensagem">Última mensagem ↓</button>
+        <form id="jup-form" class="composer" aria-label="Enviar mensagem ao Jup" aria-busy="${loading}">
+          <div class="composer-input-row"><span class="composer-leading-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17.5V7.8A2.8 2.8 0 0 1 6.8 5h10.4A2.8 2.8 0 0 1 20 7.8v6.4a2.8 2.8 0 0 1-2.8 2.8H9l-5 3v-2.5Z"/><path d="M8 9.5h8M8 13h5"/></svg></span><label class="sr-only" for="jup-message">Mensagem</label><textarea id="jup-message" name="message" rows="2" maxlength="3000" placeholder="Descreva o que aconteceu..."${loading ? ' disabled' : ''}>${escapeHtml(draft)}</textarea></div>
+          <div class="composer-actions"><span class="composer-hint">Enter para enviar · Shift+Enter para nova linha</span><button class="button button--primary" type="submit"${loading ? ' disabled' : ''}>${loading ? 'Aguarde...' : 'Enviar ↑'}</button></div>
+        </form>
+      </div></div>
     </div>
   </section>`;
 }
