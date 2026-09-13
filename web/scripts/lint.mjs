@@ -3,6 +3,9 @@ import { readdir, readFile } from 'node:fs/promises';
 const root = new URL('../src/', import.meta.url);
 const allowedExternalUrls = new Set(['https://mysignins.microsoft.com/security-info/password/change']);
 const forbidden = [
+  'backdrop-filter',
+  'linear-gradient(',
+  'radial-gradient(',
   'RoutingRegistry',
   'ApprovalService',
   'ExecutionEngine',
@@ -27,6 +30,13 @@ async function files(dirUrl) {
 
 let failed = false;
 for (const file of await files(root)) {
+  if (file.pathname.endsWith('.png')) {
+    const bytes = await readFile(file);
+    if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+      console.error(`Invalid PNG asset in ${file.pathname}`); failed = true;
+    }
+    continue;
+  }
   const text = await readFile(file, 'utf8');
   for (const token of forbidden) {
     if (text.includes(token)) {

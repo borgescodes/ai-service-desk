@@ -1,3 +1,5 @@
+import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
+import { createFaqSearch, renderSolutionDetail, renderSolutionsHome, renderSolutionsResults } from './solutions.mjs';
 import { apiRequest, ApiError } from './api.mjs';
 import {
   renderAppHeader,
@@ -8,13 +10,17 @@ import {
   renderRequestList,
 } from './components.mjs';
 import { escapeHtml, renderErrorState, renderUnauthorizedState } from './render.mjs';
-import { resolveRoute, routePath } from './router.mjs';
+import { demoIdentityForPath, resolveRoute, routeParams } from './router.mjs';
 import { createInitialState, selectIdentity } from './state.mjs';
 
 const app = document.querySelector('#app');
+let identityRevision = 0;
 let state = {
   ...createInitialState(),
   route: resolveRoute(window.location.pathname),
+  composerFocused: false,
+  lastBackendStatus: null,
+  messageError: null,
   messages: [],
   understood: null,
   loading: false,
@@ -30,10 +36,14 @@ function pageHeading(title, description) {
   return `<div class="page-heading"><div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p></div></div>`;
 }
 
+function operationPath() {
+  return state.identityId === 'tecnico-m365' ? '/demo/operacao/m365' : '/demo/operacao/cdm';
+}
+
 function operationTabs() {
   return `<nav class="operations-tabs" aria-label="Operação">
-    <a href="/operations" data-route-link="approvals"${state.route === 'approvals' ? ' aria-current="page"' : ''}>Pendências</a>
-    <a href="/operations/prevention" data-route-link="prevention"${state.route === 'prevention' ? ' aria-current="page"' : ''}>Prevenção</a>
+    <a href="${operationPath()}" data-route-link="approvals"${state.route === 'approvals' ? ' aria-current="page"' : ''}>Pendências</a>
+    <a href="/demo/operacao/prevention" data-route-link="prevention"${state.route === 'prevention' ? ' aria-current="page"' : ''}>Prevenção</a>
   </nav>`;
 }
 
@@ -47,9 +57,15 @@ function renderRoute() {
     return `<section class="state-panel" role="status" aria-live="polite"><div><strong>Carregando</strong><p>Buscando o estado atual no backend.</p></div></section>`;
   }
 
+  if (state.route === 'solution') return renderSolutionDetail(state.routeData.detail);
+  if (state.route === 'solutions') return renderSolutionsHome(faqOptions());
+
   if (state.route === 'jup') {
     return renderJupWorkspace({
       identity: selectedIdentity() ?? {},
+      sourceContext: state.faqContext,
+      messageError: state.messageError,
+      visualState: visualStateFromUi({ pending: state.pendingAction === 'message', backendStatus: state.lastBackendStatus, focused: state.composerFocused, failed: Boolean(state.messageError) }),
       messages: state.messages,
       understood: state.understood,
       loading: state.pendingAction === 'message',
@@ -75,17 +91,13 @@ function renderRoute() {
 }
 
 function render() {
-  const identity = selectedIdentity();
   app.innerHTML = `${renderAppHeader({
     activeRoute: state.route,
-    selectedIdentityId: state.identityId,
-    identities: state.identities,
+    operational: ['approvals', 'prevention'].includes(state.route),
+    operationPath: operationPath(),
   })}<main id="main-content" class="main-content" tabindex="-1">${renderRoute()}</main>`;
   app.setAttribute('aria-busy', String(state.loading));
   bindInteractions();
-  if (!identity && state.identities.length) {
-    app.querySelector('#demo-identity')?.focus();
-  }
 }
 
 function friendlyError(error) {
@@ -93,7 +105,7 @@ function friendlyError(error) {
     if (error.status === 401) {
       return {
         kind: 'unauthorized',
-        message: 'Selecione uma identidade de demonstração válida.',
+        message: 'Identidade de demonstração indisponível. Recarregue a página.',
       };
     }
     if (error.status === 403) {
@@ -116,34 +128,71 @@ function friendlyError(error) {
   };
 }
 
-async function loadRoute() {
-  state = { ...state, transientError: null, loading: true, routeData: {} };
-  render();
-  try {
-    if (state.route === 'requests') {
-      state.routeData = { items: await apiRequest('/api/requests', { identityId: state.identityId }), loaded: true };
-    } else if (state.route === 'approvals') {
-      const items = await apiRequest('/api/operations/approvals', { identityId: state.identityId });
-      state.selectedRequestId = items[0]?.request_id ?? null;
-      state.routeData = { items, selected: items[0] ?? null, loaded: true };
-    } else if (state.route === 'prevention') {
-      const items = await apiRequest('/api/operations/prevention', { identityId: state.identityId });
-      state.routeData = { items, loaded: true };
-    } else {
-      state.routeData = { loaded: true };
-    }
-  } catch (error) {
-    state.transientError = friendlyError(error);
-  } finally {
-    state.loading = false;
-    render();
+function syncRouteIdentity() {
+  const desiredIdentityId = demoIdentityForPath(window.location.pathname);
+  if (!state.identities.some((item) => item.identity_id === desiredIdentityId)) {
+    throw new Error('Identidade de demonstração esperada não está disponível.');
+  }
+  if (state.identityId !== desiredIdentityId) {
+    identityRevision += 1;
+    Object.assign(state, selectIdentity(state, desiredIdentityId), {
+      messages: [], understood: null, lastBackendStatus: null, composerFocused: false, messageError: null,
+    });
   }
 }
 
-async function navigate(route) {
-  state.route = route;
-  const path = routePath(route);
-  if (window.location.pathname !== path) window.history.pushState({}, '', path);
+async function loadRoute() {
+  faqSearch.cancel();
+  state.faqSearching = false;
+  state = { ...state, transientError: null, loading: true, routeData: {} };
+  const routeState = state;
+  render();
+  try {
+    syncRouteIdentity();
+    if (routeState.route === 'solutions') {
+      const payload = await apiRequest('/api/faq');
+      routeState.faqGroups = payload.groups ?? [];
+      routeState.routeData = { loaded: true };
+    } else if (routeState.route === 'solution') {
+      const { knowledgeId } = routeParams(window.location.pathname);
+      const detail = await apiRequest(`/api/faq/${encodeURIComponent(knowledgeId)}`);
+      routeState.routeData = { loaded: true, detail };
+    } else if (routeState.route === 'jup') {
+      routeState.faqContext = null;
+      const sourceId = new URLSearchParams(window.location.search).get('from');
+      if (sourceId) {
+        try {
+          const detail = await apiRequest(`/api/faq/${encodeURIComponent(sourceId)}`);
+          routeState.faqContext = { knowledge_id: detail.knowledge_id, title: detail.title };
+        } catch { /* Context is optional; an unavailable article must not block chat. */ }
+      }
+      routeState.routeData = { loaded: true };
+    } else if (routeState.route === 'requests') {
+      routeState.routeData = { items: await apiRequest('/api/requests', { identityId: routeState.identityId }), loaded: true };
+    } else if (routeState.route === 'approvals') {
+      const items = await apiRequest('/api/operations/approvals', { identityId: routeState.identityId });
+      routeState.selectedRequestId = items[0]?.request_id ?? null;
+      routeState.routeData = { items, selected: items[0] ?? null, loaded: true };
+    } else if (routeState.route === 'prevention') {
+      const items = await apiRequest('/api/operations/prevention', { identityId: routeState.identityId });
+      routeState.routeData = { items, loaded: true };
+    } else {
+      routeState.routeData = { loaded: true };
+    }
+  } catch (error) {
+    routeState.transientError = friendlyError(error);
+  } finally {
+    routeState.loading = false;
+    if (routeState === state) {
+      render();
+      if (state.route === 'solutions' && state.faqSearchQuery.trim()) faqSearch.input(state.faqSearchQuery);
+    }
+  }
+}
+
+async function navigate(path) {
+  if (window.location.pathname + window.location.search !== path) window.history.pushState({}, '', path);
+  state.route = resolveRoute(window.location.pathname);
   await loadRoute();
   document.querySelector('#main-content')?.focus({ preventScroll: true });
 }
@@ -164,7 +213,12 @@ async function submitMessage(form) {
   const message = field?.value?.trim();
   if (!message || state.pendingAction) return;
 
+  const revision = identityRevision;
+  const identityId = state.identityId;
   state.messages = [...state.messages, { role: 'USER', text: message }];
+  state.lastBackendStatus = null;
+  state.messageError = null;
+  state.composerFocused = false;
   state.pendingAction = 'message';
   state.transientError = null;
   render();
@@ -172,16 +226,19 @@ async function submitMessage(form) {
   try {
     const result = await apiRequest('/api/jup/messages', {
       method: 'POST',
-      identityId: state.identityId,
+      identityId,
       body: { message },
     });
+    if (revision !== identityRevision) return;
+    state.lastBackendStatus = result.status;
     if (typeof result.assistant_message !== 'string' || !result.assistant_message.trim()) {
       throw new Error('Resposta conversacional ausente.');
     }
     if (result.request_id) {
       const detail = await apiRequest(`/api/requests/${encodeURIComponent(result.request_id)}`, {
-        identityId: state.identityId,
+        identityId,
       });
+      if (revision !== identityRevision) return;
       state.understood = understoodFromRequest(detail);
     } else {
       state.understood = null;
@@ -196,10 +253,13 @@ async function submitMessage(form) {
       },
     ];
   } catch (error) {
-    state.transientError = friendlyError(error);
+    if (revision !== identityRevision) return;
+    state.messageError = friendlyError(error).message;
   } finally {
-    state.pendingAction = null;
-    render();
+    if (revision === identityRevision) {
+      state.pendingAction = null;
+      render();
+    }
   }
 }
 
@@ -272,32 +332,57 @@ async function selectPrevention(opportunityId) {
   }
 }
 
-function bindInteractions() {
-  app.querySelector('#demo-identity')?.addEventListener('change', async (event) => {
-    state = {
-      ...selectIdentity(state, event.target.value),
-      route: state.route,
-      identities: state.identities,
-      messages: [],
-      understood: null,
-      selectedRequestId: null,
-      selectedOpportunityId: null,
-    };
-    window.localStorage.setItem('jup-demo-identity', state.identityId);
-    await loadRoute();
-  });
+function faqOptions() {
+  return { groups: state.faqGroups, searchQuery: state.faqSearchQuery,
+    searchResults: state.faqSearchResults, searching: state.faqSearching, error: state.faqSearchError };
+}
 
-  app.querySelectorAll('a[data-route], a[data-route-link]').forEach((link) => {
+const faqSearch = createFaqSearch({
+  request: apiRequest,
+  update({ searchResults, searching, error }) {
+    state.faqSearchResults = searchResults;
+    state.faqSearching = searching;
+    state.faqSearchError = error;
+    const results = app.querySelector('#faq-results');
+    if (!results || state.route !== 'solutions') return;
+    results.innerHTML = renderSolutionsResults(faqOptions());
+    results.setAttribute('aria-busy', String(searching));
+    bindRouteLinks(results);
+    results.querySelector('[data-action="retry-search"]')?.addEventListener('click', () => faqSearch.input(state.faqSearchQuery));
+  },
+});
+
+function bindRouteLinks(root) {
+  root.querySelectorAll('a[data-route], a[data-route-link], a[data-solution-link]').forEach((link) => {
     link.addEventListener('click', (event) => {
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
       event.preventDefault();
-      void navigate(link.dataset.routeLink ?? link.dataset.route);
+      void navigate(link.getAttribute('href'));
     });
+  });
+}
+
+function bindInteractions() {
+  bindRouteLinks(app);
+  app.querySelector('#faq-search')?.addEventListener('input', (event) => {
+    state.faqSearchQuery = event.target.value;
+    faqSearch.input(state.faqSearchQuery);
   });
 
   app.querySelector('#jup-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
     void submitMessage(event.currentTarget);
   });
+  for (const eventName of ['focus', 'blur']) {
+    app.querySelector('#jup-message')?.addEventListener(eventName, () => {
+      state.composerFocused = eventName === 'focus';
+      const container = app.querySelector('.jup-welcome .jup-avatar, .conversation-visual .jup-avatar');
+      if (container) container.outerHTML = renderJupVisual({
+        state: visualStateFromUi({ pending: state.pendingAction === 'message', backendStatus: state.lastBackendStatus, focused: state.composerFocused, failed: Boolean(state.messageError) }),
+        compact: state.messages.length > 0,
+      });
+    });
+  }
   app.querySelector('#jup-message')?.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -328,12 +413,7 @@ window.addEventListener('popstate', () => {
 async function bootstrap() {
   try {
     const identities = await apiRequest('/api/session/identities');
-    const stored = window.localStorage.getItem('jup-demo-identity');
-    const preferred = identities.some((item) => item.identity_id === stored)
-      ? stored
-      : (identities[0]?.identity_id ?? null);
     state.identities = identities;
-    state.identityId = preferred;
     await loadRoute();
   } catch (error) {
     state.transientError = friendlyError(error);

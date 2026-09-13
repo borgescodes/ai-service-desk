@@ -51,6 +51,9 @@ def test_frontend_has_no_domain_decisions_direct_cdm_or_embedded_token() -> None
     files = tuple(path for path in _WEB_SRC.rglob("*") if path.is_file())
     assert files
     for path in files:
+        if path.suffix == ".png":
+            assert path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+            continue
         text = path.read_text(encoding="utf-8")
         for token in _FORBIDDEN_FRONTEND_TOKENS:
             assert token not in text, f"forbidden frontend token {token!r} in {path}"
@@ -165,5 +168,23 @@ def test_internal_errors_do_not_leak_traceback_class_names_or_tokens() -> None:
         ):
             assert forbidden not in text
         assert response.json()["error"]["code"] == "INTERNAL_ERROR"
+    finally:
+        runtime.close()
+
+
+def test_faq_projects_safe_fields_without_private_review_or_credentials():
+    runtime = DemoRuntime.create()
+    try:
+        client = _client(runtime)
+        response = client.get("/api/faq/search")
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert items
+        for item in items:
+            assert set(item) == {"knowledge_id", "title", "question", "system", "category"}
+            detail = client.get(f"/api/faq/{item['knowledge_id']}").json()
+            assert set(detail) == set(item) | {"answer", "procedure_url"}
+            assert detail["procedure_url"] in {None, *_ALLOWED_FRONTEND_HTTPS}
+            assert "phase12-demo-service-token" not in str(detail)
     finally:
         runtime.close()

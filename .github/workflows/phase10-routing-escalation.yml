@@ -86,7 +86,8 @@ jobs:
               "src/ai_service_desk/engine/cdm_execution.py": "516e258f2349fee42dbd963a7371d2ca3937ca69",
               "src/ai_service_desk/engine/cdm_integration_smoke.py": "07a9416a1c4727b224176ab0840067c536ffc1b9",
               "src/ai_service_desk/integrations/cdm.py": "83cc0b23b27b1654912e4f9ba7162c0b0d5f7bfe",
-              "src/ai_service_desk/integrations/cdm_fake_api.py": "275b1833d5b27b09c0ffeae9f4484636d10afe63",
+              # F13: exceção de transporte Windows; domínio CDM preservado.
+              "src/ai_service_desk/integrations/cdm_fake_api.py": "790a3d3fb13bd3b617c0e8587811bf70e519e40c",
           }
           for path, wanted in expected.items():
               actual = subprocess.check_output(

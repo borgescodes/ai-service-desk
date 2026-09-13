@@ -85,7 +85,7 @@ def create_app(
     async def web_demo_error_handler(_request: Request, exc: WebDemoError):
         if exc.code == "IDENTITY_REQUIRED":
             status = 401
-        elif exc.code == "PREVENTION_NOT_FOUND":
+        elif exc.code in {"PREVENTION_NOT_FOUND", "FAQ_NOT_FOUND"}:
             status = 404
         elif exc.code == "ROUTING_INCONSISTENT":
             status = 409
@@ -140,6 +140,18 @@ def create_app(
     @app.get("/api/session/identities")
     def identities():
         return app.state.runtime.identity_provider.public_identities()
+
+    @app.get("/api/faq")
+    def faq():
+        return app.state.runtime.list_faq()
+
+    @app.get("/api/faq/search")
+    def faq_search(q: str = ""):
+        return app.state.runtime.search_faq(q)
+
+    @app.get("/api/faq/{knowledge_id}")
+    def faq_detail(knowledge_id: str):
+        return app.state.runtime.get_faq(knowledge_id)
 
     @app.post("/api/jup/messages")
     def send_message(body: MessageBody, x_demo_identity: str | None = Header(default=None)):

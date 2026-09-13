@@ -253,7 +253,9 @@ def test_web_demo_smoke_is_explicitly_deterministic() -> None:
 def test_browser_source_never_targets_ollama_or_fake_cdm() -> None:
     web_root = Path("web/src")
     source = "\n".join(
-        path.read_text(encoding="utf-8") for path in web_root.rglob("*") if path.is_file()
+        path.read_text(encoding="utf-8")
+        for path in web_root.rglob("*")
+        if path.is_file() and path.suffix != ".png"
     ).casefold()
 
     assert "ollama" not in source

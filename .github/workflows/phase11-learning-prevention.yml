@@ -96,6 +96,8 @@ jobs:
           }
           # Extensão neutra autorizada na F12; substitui somente estes blobs exatos.
           expected.update({
+              # F13: exceção de transporte Windows; domínio CDM preservado.
+              "src/ai_service_desk/integrations/cdm_fake_api.py": "790a3d3fb13bd3b617c0e8587811bf70e519e40c",
               "src/ai_service_desk/engine/knowledge_retrieval.py": "9f887e1a3e1fdc62cdd1cd694c91e48c2ed4fa59",
               "src/ai_service_desk/engine/triage.py": "a0fe911053b66faaddd6d02533e7fcc1c5688bce",
           })

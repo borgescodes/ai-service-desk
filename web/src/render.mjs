@@ -35,7 +35,7 @@ export function renderErrorState(message, retryLabel = 'Tentar novamente') {
 }
 
 export function renderUnauthorizedState(message) {
-  return `<section class="state-panel state-panel--unauthorized" role="alert"><span class="state-mark" aria-hidden="true">!</span><div><strong>Perfil sem acesso</strong><p>${escapeHtml(message)}</p><p>Use o seletor de identidade demo no cabeçalho para continuar com um perfil autorizado.</p></div></section>`;
+  return `<section class="state-panel state-panel--unauthorized" role="alert"><span class="state-mark" aria-hidden="true">!</span><div><strong>Perfil sem acesso</strong><p>${escapeHtml(message)}</p><p><a href="/" data-route="solutions">Voltar para Soluções</a></p></div></section>`;
 }
 
 export function renderEmptyState(title, message) {
