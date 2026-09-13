@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import * as solutions from '../src/solutions.mjs';
 import { renderAppHeader, renderJupWorkspace } from '../src/components.mjs';
 import { renderApprovedKnowledgeBody } from '../src/knowledge_content.mjs';
@@ -128,4 +129,57 @@ test('public header has a visual brand symbol without changing navigation author
   assert.match(html, /<svg[^>]*aria-hidden="true"/);
   assert.match(html, /href="\/" data-route="solutions"/);
   assert.match(html, /href="\/jup" data-route="jup"/);
+});
+
+test('desktop home exposes trust signals article counts and a live Jup presence', () => {
+  const html = solutions.renderSolutionsHome({
+    groups: [{
+      key: 'acessos-rotinas',
+      label: 'Acessos e rotinas',
+      items: [
+        { knowledge_id: 'KB-1', title: 'Acesso 1' },
+        { knowledge_id: 'KB-2', title: 'Acesso 2' },
+      ],
+    }],
+  });
+  assert.match(html, /class="help-trust-strip"/);
+  assert.match(html, /faq-topic-count">2 orientações/);
+  assert.match(html, /jup-spotlight__mark[^]*?class="jup-avatar/);
+  assert.match(html, /Disponível para conversar/);
+});
+
+test('article detail promotes the validated destination without changing approval authority', () => {
+  const html = solutions.renderSolutionDetail({
+    knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001',
+    title: 'Como solicitar acesso ao CDM',
+    category: 'Acessos e rotinas',
+    system: 'CDM',
+    answer: '1. Acesse https://cdm.juparana.com.br/.',
+    procedure_url: 'https://cdm.juparana.com.br/',
+    provenance: { source: 'SYNTHETIC_DEMO', status: 'APPROVED', version: 1 },
+  });
+  assert.match(html, /class="solution-reading-map"/);
+  assert.match(html, /Entenda[^]*Execute[^]*Confirme/);
+  assert.match(html, /class="solution-official-card"/);
+  assert.match(html, /class="solution-official-action"[^>]*href="https:\/\/cdm.juparana.com.br\/"/);
+  assert.match(html, /class="solution-trust-card"/);
+  assert.match(html, /não concede acesso nem altera permissões/);
+});
+
+test('Jup workspace uses a guided sidecar and safe editable conversation shortcuts', () => {
+  const html = renderJupWorkspace({ messages: [{ role: 'JUP', text: 'Como posso ajudar?' }] });
+  assert.match(html, /class="jup-workspace-body"/);
+  assert.match(html, /class="jup-sidecar"/);
+  assert.match(html, /class="jup-quick-prompts"/);
+  assert.match(html, /href="\/jup\?draft=Preciso%20de%20acesso%20ao%20CDM" data-route="jup"/);
+  assert.match(html, /Entender o contexto[^]*Consultar a base aprovada[^]*Resolver ou encaminhar/);
+  assert.match(html, /Não envie senhas ou códigos de verificação/);
+});
+
+test('desktop showcase stylesheet is explicitly loaded after the base visual layers', () => {
+  const html = readFileSync(new URL('../src/index.html', import.meta.url), 'utf8');
+  const avatarIndex = html.indexOf('/assets/jup/jup-avatar.css');
+  const showcaseIndex = html.indexOf('/showcase-desktop.css');
+  assert.ok(avatarIndex >= 0);
+  assert.ok(showcaseIndex > avatarIndex);
 });
