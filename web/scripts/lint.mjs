@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 
 const root = new URL('../src/', import.meta.url);
-const allowedExternalUrls = new Set(['https://mysignins.microsoft.com/security-info/password/change']);
+const allowedExternalUrls = new Set(['https://mysignins.microsoft.com/security-info/password/change', 'https://cdm.juparana.com.br/']);
 const forbidden = [
   'backdrop-filter',
   'linear-gradient(',

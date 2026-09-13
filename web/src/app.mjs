@@ -1,4 +1,5 @@
 import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
+import { captureConversationScroll, restoreConversationScroll } from './conversation.mjs';
 import { createFaqSearch, renderSolutionDetail, renderSolutionsHome, renderSolutionsResults } from './solutions.mjs';
 import { apiRequest, ApiError } from './api.mjs';
 import {
@@ -15,10 +16,13 @@ import { createInitialState, selectIdentity } from './state.mjs';
 
 const app = document.querySelector('#app');
 let identityRevision = 0;
+let renderedMessageCount = 0;
 let state = {
   ...createInitialState(),
   route: resolveRoute(window.location.pathname),
   composerFocused: false,
+  composerDraft: '',
+  faqCategory: '',
   lastBackendStatus: null,
   messageError: null,
   messages: [],
@@ -65,7 +69,9 @@ function renderRoute() {
       identity: selectedIdentity() ?? {},
       sourceContext: state.faqContext,
       messageError: state.messageError,
-      visualState: visualStateFromUi({ pending: state.pendingAction === 'message', backendStatus: state.lastBackendStatus, focused: state.composerFocused, failed: Boolean(state.messageError) }),
+      visualState: state.composerFocused && !state.pendingAction ? 'listening' : null,
+      draft: state.composerDraft,
+      animateFrom: renderedMessageCount,
       messages: state.messages,
       understood: state.understood,
       loading: state.pendingAction === 'message',
@@ -91,6 +97,8 @@ function renderRoute() {
 }
 
 function render() {
+  const scroll = captureConversationScroll(app.querySelector('.conversation-thread'));
+  const focused = document.activeElement?.id === 'jup-message';
   app.innerHTML = `${renderAppHeader({
     activeRoute: state.route,
     operational: ['approvals', 'prevention'].includes(state.route),
@@ -98,6 +106,9 @@ function render() {
   })}<main id="main-content" class="main-content" tabindex="-1">${renderRoute()}</main>`;
   app.setAttribute('aria-busy', String(state.loading));
   bindInteractions();
+  renderedMessageCount = state.messages.length;
+  restoreConversationScroll(app.querySelector('.conversation-thread'), app.querySelector('[data-action="scroll-bottom"]'), scroll, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
+  if (focused && !state.pendingAction) app.querySelector('#jup-message')?.focus?.({ preventScroll: true });
 }
 
 function friendlyError(error) {
@@ -136,7 +147,7 @@ function syncRouteIdentity() {
   if (state.identityId !== desiredIdentityId) {
     identityRevision += 1;
     Object.assign(state, selectIdentity(state, desiredIdentityId), {
-      messages: [], understood: null, lastBackendStatus: null, composerFocused: false, messageError: null,
+      messages: [], understood: null, lastBackendStatus: null, composerFocused: false, composerDraft: '', messageError: null,
     });
   }
 }
@@ -159,6 +170,8 @@ async function loadRoute() {
       routeState.routeData = { loaded: true, detail };
     } else if (routeState.route === 'jup') {
       routeState.faqContext = null;
+      const draft = new URLSearchParams(window.location.search).get('draft');
+      if (draft !== null) routeState.composerDraft = draft.slice(0, 3000);
       const sourceId = new URLSearchParams(window.location.search).get('from');
       if (sourceId) {
         try {
@@ -185,7 +198,7 @@ async function loadRoute() {
     routeState.loading = false;
     if (routeState === state) {
       render();
-      if (state.route === 'solutions' && state.faqSearchQuery.trim()) faqSearch.input(state.faqSearchQuery);
+      if (state.route === 'solutions' && (state.faqSearchQuery.trim() || state.faqCategory)) faqSearch.input(state.faqSearchQuery, state.faqCategory);
     }
   }
 }
@@ -208,6 +221,17 @@ function understoodFromRequest(detail) {
   };
 }
 
+function settleSuccessAvatar(message) {
+  if (!message || visualStateFromUi({ backendStatus: message.status }) !== 'success') return;
+  setTimeout(() => {
+    message.visual_state = 'idle';
+    if (state.route !== 'jup' || state.messages.at(-1) !== message || state.pendingAction || state.messageError) return;
+    const avatars = app.querySelectorAll('.conversation-message--jup > .jup-avatar');
+    const avatar = avatars[avatars.length - 1];
+    if (avatar) avatar.outerHTML = renderJupVisual({ state: state.composerFocused ? 'listening' : 'idle', compact: true });
+  }, 1200);
+}
+
 async function submitMessage(form) {
   const field = form.querySelector('#jup-message');
   const message = field?.value?.trim();
@@ -216,6 +240,7 @@ async function submitMessage(form) {
   const revision = identityRevision;
   const identityId = state.identityId;
   state.messages = [...state.messages, { role: 'USER', text: message }];
+  state.composerDraft = '';
   state.lastBackendStatus = null;
   state.messageError = null;
   state.composerFocused = false;
@@ -247,6 +272,9 @@ async function submitMessage(form) {
       ...state.messages,
       {
         role: 'JUP',
+        status: result.status,
+        context: state.understood,
+        knowledge_id: result.knowledge?.knowledge_id,
         text: result.assistant_message,
         procedure_url: result.procedure_url,
         support_handoff: result.support_handoff,
@@ -259,6 +287,10 @@ async function submitMessage(form) {
     if (revision === identityRevision) {
       state.pendingAction = null;
       render();
+      if (state.route === 'jup') {
+        app.querySelector('#jup-message')?.focus?.({ preventScroll: true });
+        settleSuccessAvatar(state.messages.at(-1));
+      }
     }
   }
 }
@@ -334,6 +366,7 @@ async function selectPrevention(opportunityId) {
 
 function faqOptions() {
   return { groups: state.faqGroups, searchQuery: state.faqSearchQuery,
+    category: state.faqCategory,
     searchResults: state.faqSearchResults, searching: state.faqSearching, error: state.faqSearchError };
 }
 
@@ -348,7 +381,7 @@ const faqSearch = createFaqSearch({
     results.innerHTML = renderSolutionsResults(faqOptions());
     results.setAttribute('aria-busy', String(searching));
     bindRouteLinks(results);
-    results.querySelector('[data-action="retry-search"]')?.addEventListener('click', () => faqSearch.input(state.faqSearchQuery));
+    results.querySelector('[data-action="retry-search"]')?.addEventListener('click', () => faqSearch.input(state.faqSearchQuery, state.faqCategory));
   },
 });
 
@@ -364,10 +397,18 @@ function bindRouteLinks(root) {
 
 function bindInteractions() {
   bindRouteLinks(app);
+  app.querySelectorAll('[data-category]').forEach(button => {
+    button.addEventListener('click', () => {
+      state.faqCategory = button.dataset.category;
+      app.querySelectorAll('[data-category]').forEach(topic => topic.setAttribute('aria-pressed', String(topic.dataset.category === state.faqCategory)));
+      faqSearch.input(state.faqSearchQuery, state.faqCategory);
+    });
+  });
   app.querySelector('#faq-search')?.addEventListener('input', (event) => {
     state.faqSearchQuery = event.target.value;
-    faqSearch.input(state.faqSearchQuery);
+    faqSearch.input(state.faqSearchQuery, state.faqCategory);
   });
+  app.querySelector('#jup-message')?.addEventListener('input', event => { state.composerDraft = event.target.value; });
 
   app.querySelector('#jup-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -376,15 +417,16 @@ function bindInteractions() {
   for (const eventName of ['focus', 'blur']) {
     app.querySelector('#jup-message')?.addEventListener(eventName, () => {
       state.composerFocused = eventName === 'focus';
-      const container = app.querySelector('.jup-welcome .jup-avatar, .conversation-visual .jup-avatar');
+      const avatars = app.querySelectorAll('.conversation-message--jup > .jup-avatar');
+      const container = avatars[avatars.length - 1];
       if (container) container.outerHTML = renderJupVisual({
-        state: visualStateFromUi({ pending: state.pendingAction === 'message', backendStatus: state.lastBackendStatus, focused: state.composerFocused, failed: Boolean(state.messageError) }),
-        compact: state.messages.length > 0,
+        state: visualStateFromUi({ pending: state.pendingAction === 'message', backendStatus: state.messages.at(-1)?.visual_state === 'idle' ? null : state.lastBackendStatus, focused: state.composerFocused, failed: Boolean(state.messageError) }),
+        compact: true,
       });
     });
   }
   app.querySelector('#jup-message')?.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
     }

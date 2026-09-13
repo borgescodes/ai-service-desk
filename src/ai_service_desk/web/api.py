@@ -146,8 +146,8 @@ def create_app(
         return app.state.runtime.list_faq()
 
     @app.get("/api/faq/search")
-    def faq_search(q: str = ""):
-        return app.state.runtime.search_faq(q)
+    def faq_search(q: str = "", category: str = ""):
+        return app.state.runtime.search_faq(q, category)
 
     @app.get("/api/faq/{knowledge_id}")
     def faq_detail(knowledge_id: str):

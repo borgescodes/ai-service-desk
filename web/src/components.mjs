@@ -1,4 +1,4 @@
-import { renderJupVisual } from './jup_visual.mjs';
+import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
 import { renderApprovedKnowledgeBody, renderMessageBody } from './knowledge_content.mjs';
 import {
   escapeHtml,
@@ -7,16 +7,6 @@ import {
   renderStatus,
 } from './render.mjs';
 
-
-function initials(name = 'Jup') {
-  return String(name)
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase();
-}
 
 export function renderJupAvatar({ compact = false } = {}) {
   return renderJupVisual({ compact });
@@ -55,31 +45,39 @@ function renderSupportHandoff(handoff) {
   </section>`;
 }
 
-function renderMessage(message) {
+function renderMessage(message, { fresh = false, visualState = null } = {}) {
   const role = message.role === 'USER' ? 'Você' : 'Jup';
   const klass = message.role === 'USER' ? 'conversation-message--user' : 'conversation-message--jup';
-  return `<article class="conversation-message ${klass}">
-    <div class="message-author">${message.role === 'JUP' ? renderJupAvatar({ compact: true }) : `<span class="user-avatar" aria-hidden="true">${escapeHtml(initials(role))}</span>`}<strong>${role}</strong></div>
-    ${message.role === 'JUP' ? renderApprovedKnowledgeBody({ text: message.text, procedureUrl: message.procedure_url }) : renderMessageBody(message.text)}
+  const emote = message.thinking ? 'thinking' : visualState ?? message.visual_state ?? visualStateFromUi({ backendStatus: message.status, failed: message.failed });
+  const context = message.context ? [message.context.system, message.context.next_step].filter(Boolean).map(escapeHtml).join(' · ') : '';
+  return `<article class="conversation-message ${klass}${message.thinking ? ' conversation-message--thinking' : ''}${fresh ? ' is-new' : ''}">
+    ${message.role === 'JUP' ? renderJupVisual({ state: emote, compact: true }) : ''}
+    <div class="message-content"><div class="message-author"><strong>${role}</strong></div>
+    ${message.thinking ? '<div class="thinking-dots" role="status" aria-label="Jup está pensando"><span aria-hidden="true">.</span><span aria-hidden="true">.</span><span aria-hidden="true">.</span></div>' : message.failed ? `<p class="message-error" role="alert">${escapeHtml(message.text)}</p>` : message.role === 'JUP' ? renderApprovedKnowledgeBody({ text: message.text, procedureUrl: message.procedure_url, knowledgeId: message.knowledge_id }) : renderMessageBody(message.text)}
     ${message.role === 'JUP' ? renderSupportHandoff(message.support_handoff) : ''}
+    ${context ? `<div class="request-context">${context}</div>` : ''}</div>
   </article>`;
 }
 
-export function renderJupWorkspace({ messages = [], understood = null, loading = false, sourceContext = null, visualState = 'idle', messageError = null }) {
-  const conversation = messages.length
-    ? `<div class="conversation-visual">${renderJupVisual({ state: visualState, compact: true })}</div><div class="conversation-thread" role="log" aria-label="Conversa com Jup">${messages.map(renderMessage).join('')}${loading ? '<p class="thinking" role="status">Jup está analisando...</p>' : ''}</div>`
-    : `<div class="jup-welcome">${renderJupVisual({ state: visualState })}<h1>Como posso ajudar?</h1></div>`;
-  const context = understood ? [understood.system, understood.next_step].filter(Boolean).map(escapeHtml).join(' · ') : '';
+export function renderJupWorkspace({ messages = [], understood = null, loading = false, sourceContext = null, visualState = null, messageError = null, draft = '', animateFrom = messages.length }) {
+  const lastAssistant = messages.findLastIndex(message => message.role === 'JUP');
+  const conversation = messages.length ? messages.map((message, index) => renderMessage(
+    message.role === 'JUP' && index === lastAssistant && !message.context && understood ? { ...message, context: understood } : message,
+    { fresh: index >= animateFrom, visualState: index === lastAssistant && !loading ? visualState : null },
+  )).join('') : renderMessage({ role: 'JUP', text: 'Como posso ajudar?\n\nConte o que está acontecendo e em qual sistema. Vamos começar por aí.' }, { visualState: visualState || 'idle' });
   return `<section class="jup-surface" aria-label="Atendimento com Jup">
-    <a class="back-link" href="/" data-route="solutions">← Soluções</a>
+    <header class="conversation-header"><div><h1>Falar com o Jup</h1><p>Ajuda para seguir com o trabalho.</p></div><a class="back-link" href="/" data-route="solutions">← Soluções</a></header>
     ${sourceContext ? `<p class="faq-source-context">Você estava vendo: ${escapeHtml(sourceContext.title)}</p>` : ''}
-    <div class="jup-conversation">${conversation}
-      ${context ? `<p class="request-context">${context}</p>` : ''}
-      ${messageError ? `<p class="message-error" role="alert">${escapeHtml(messageError)}</p>` : ''}
-      <form id="jup-form" class="composer" aria-label="Enviar mensagem ao Jup">
+    <div class="jup-conversation"><div class="conversation-thread" role="log" aria-label="Conversa com Jup" aria-live="polite" tabindex="0">${conversation}
+      ${understood && lastAssistant < 0 ? renderMessage({ role: 'JUP', text: '', context: understood }) : ''}
+      ${loading ? renderMessage({ role: 'JUP', thinking: true }, { fresh: true }) : ''}
+      ${messageError ? renderMessage({ role: 'JUP', text: messageError, failed: true }, { fresh: true }) : ''}
+      <div class="conversation-end" aria-hidden="true"></div></div>
+      <button class="scroll-bottom" type="button" data-action="scroll-bottom" hidden aria-label="Voltar à última mensagem">Última mensagem ↓</button>
+      <form id="jup-form" class="composer" aria-label="Enviar mensagem ao Jup" aria-busy="${loading}">
         <label class="sr-only" for="jup-message">Mensagem</label>
-        <textarea id="jup-message" name="message" rows="2" maxlength="3000" placeholder="Descreva o que aconteceu..."></textarea>
-        <div class="composer-actions"><span>Enter para enviar · Shift+Enter para nova linha</span><button class="button button--primary" type="submit"${loading ? ' disabled' : ''}>Enviar</button></div>
+        <textarea id="jup-message" name="message" rows="2" maxlength="3000" placeholder="Descreva o que aconteceu..."${loading ? ' disabled' : ''}>${escapeHtml(draft)}</textarea>
+        <div class="composer-actions"><span>Enter para enviar · Shift+Enter para nova linha</span><button class="button button--primary" type="submit"${loading ? ' disabled' : ''}>${loading ? 'Aguarde...' : 'Enviar ↑'}</button></div>
       </form>
     </div>
   </section>`;
