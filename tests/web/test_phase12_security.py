@@ -8,7 +8,10 @@ from ai_service_desk.web.demo_runtime import DemoRuntime
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WEB_SRC = _REPO_ROOT / "web" / "src"
-_ALLOWED_FRONTEND_HTTPS = {"https://mysignins.microsoft.com/security-info/password/change"}
+_ALLOWED_FRONTEND_HTTPS = {
+    "https://cdm.juparana.com.br/",
+    "https://mysignins.microsoft.com/security-info/password/change",
+}
 _FORBIDDEN_FRONTEND_TOKENS = (
     "RoutingRegistry",
     "ApprovalService",
@@ -181,9 +184,24 @@ def test_faq_projects_safe_fields_without_private_review_or_credentials():
         items = response.json()["items"]
         assert items
         for item in items:
-            assert set(item) == {"knowledge_id", "title", "question", "system", "category"}
+            assert set(item) == {
+                "knowledge_id",
+                "title",
+                "question",
+                "system",
+                "category",
+                "category_key",
+            }
             detail = client.get(f"/api/faq/{item['knowledge_id']}").json()
-            assert set(detail) == set(item) | {"answer", "procedure_url"}
+            assert set(detail) == set(item) | {
+                "answer",
+                "procedure_url",
+                "provenance",
+            }
+            assert set(detail["provenance"]) == {"source", "status", "version"}
+            assert detail["provenance"]["status"] == "APPROVED"
+            assert "reviewed_by" not in detail
+            assert "reviewed_at" not in detail
             assert detail["procedure_url"] in {None, *_ALLOWED_FRONTEND_HTTPS}
             assert "phase12-demo-service-token" not in str(detail)
     finally:
