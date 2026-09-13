@@ -8,13 +8,16 @@ version = "0.1.0"
 description = "Camada inteligente antes da abertura de chamados de TI."
 requires-python = ">=3.14,<3.15"
 dependencies = [
+    "fastapi==0.141.1",
     "numpy>=2.0,<3",
     "pandas>=2.2,<4",
     "requests>=2.32,<3",
+    "uvicorn==0.52.4",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "httpx>=0.28,<1",
     "pytest>=8",
     "ruff>=0.12",
 ]

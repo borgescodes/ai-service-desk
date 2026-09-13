@@ -94,6 +94,11 @@ jobs:
               "src/ai_service_desk/engine/routing.py": "5c29d443801c26fa54a305a6403949681bae076a",
               "src/ai_service_desk/engine/routing_escalation_smoke.py": "34cc749ac4abdc48a1d8200a2e32c2635773a42c",
           }
+          # Extensão neutra autorizada na F12; substitui somente estes blobs exatos.
+          expected.update({
+              "src/ai_service_desk/engine/knowledge_retrieval.py": "9f887e1a3e1fdc62cdd1cd694c91e48c2ed4fa59",
+              "src/ai_service_desk/engine/triage.py": "a0fe911053b66faaddd6d02533e7fcc1c5688bce",
+          })
           for path, wanted in expected.items():
               actual = subprocess.check_output(
                   ["git", "rev-parse", f"HEAD:{path}"], text=True

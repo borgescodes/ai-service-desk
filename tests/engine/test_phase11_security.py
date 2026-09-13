@@ -122,6 +122,21 @@ def _imports(path: Path) -> tuple[set[str], set[str]]:
 
 @pytest.mark.parametrize(("path", "expected_sha"), PROTECTED_BLOBS)
 def test_previous_phase_protected_blobs_are_exact(path: str, expected_sha: str) -> None:
+    # Preserva parâmetros/node IDs históricos; somente estas extensões foram autorizadas.
+    authorized_extensions = {
+        "src/ai_service_desk/engine/knowledge_retrieval.py": (
+            "cf559b66c9a9d150628eeb0d8db195f7a51a34e7",
+            "9f887e1a3e1fdc62cdd1cd694c91e48c2ed4fa59",
+        ),
+        "src/ai_service_desk/engine/triage.py": (
+            "c5ab48f7194fab561f9062c3ab5798c86ec0a8a0",
+            "a0fe911053b66faaddd6d02533e7fcc1c5688bce",
+        ),
+    }
+    if path in authorized_extensions:
+        historical, authorized = authorized_extensions[path]
+        assert expected_sha == historical
+        expected_sha = authorized
     actual = subprocess.run(
         ["git", "rev-parse", f"HEAD:{path}"],
         cwd=ROOT,

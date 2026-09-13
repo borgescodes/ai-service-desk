@@ -270,3 +270,35 @@ Detalhes: `docs/playbooks/phase-6.md`. Especificação: `docs/superpowers/specs/
 ## Fase 7: Policy Engine
 
 A Fase 7 decide policy e confidence de forma deterministica para o fluxo de acesso ao CDM. Ela nao cria solicitacao persistida, nao aprova acesso e nao executa acao externa. Detalhes operacionais: `docs/policy/phase-7.md`.
+
+## Fase 12: Jup Resolve web demo
+
+A Fase 12 expõe o domínio homologado das Fases 1 a 11 em uma aplicação web local chamada **Jup Resolve**. A camada visual é uma SPA em HTML semântico, CSS e ES Modules, servida pelo FastAPI no mesmo origin e sem dependências npm de runtime.
+
+O princípio de arquitetura permanece: **UI apresenta estado; backend decide estado.** O frontend não implementa Policy, Routing, Approval, Execution ou regras de Prevenção.
+
+Para executar no Windows:
+
+```powershell
+.\run-web-demo.cmd
+```
+
+Ou manualmente:
+
+```powershell
+node web\scripts\lint.mjs
+node --test web\tests\*.test.mjs
+node web\scripts\build.mjs
+python -m ai_service_desk web-demo --host 127.0.0.1 --port 8000
+```
+
+O smoke determinístico da demonstração é:
+
+```powershell
+python -m ai_service_desk web-demo-smoke
+```
+
+A saída esperada é `WEB DEMO SMOKE OK 10/10`.
+
+Documentação operacional: `docs/environment/web-demo.md`.
+Roteiro da apresentação: `docs/demo/phase-12-demo-script.md`.
