@@ -112,6 +112,17 @@ def _build_handler(service_token: str, store: CDMFakeStore, fail_request_ids: fr
         def _route_not_found(self) -> None:
             self._json(404, _error_body("CDM_ROUTE_NOT_FOUND", "Rota nao encontrada."))
 
+        def _discard_request_body(self) -> None:
+            try:
+                remaining = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                return
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+
         def do_GET(self) -> None:
             parsed = urlsplit(self.path)
             if parsed.path != "/api/v1/access":
@@ -150,6 +161,8 @@ def _build_handler(service_token: str, store: CDMFakeStore, fail_request_ids: fr
             expected = f"Bearer {service_token}"
             supplied = self.headers.get("Authorization", "")
             if not hmac.compare_digest(supplied, expected):
+                # Unread POST bytes can abort the connection before Windows receives the 401.
+                self._discard_request_body()
                 self._json(
                     401,
                     _error_body("CDM_SERVICE_UNAUTHORIZED", "Credencial de servico invalida."),

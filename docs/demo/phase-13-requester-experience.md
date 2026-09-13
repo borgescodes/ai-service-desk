@@ -73,8 +73,42 @@ Resultado local em 12/09/2026:
 | LOCAL_AI com Qwen local | 6/6 cenários conversacionais passaram |
 | Impeccable | Revisão inline desktop em 1280, 1440×900 e 1600; detector sem achados |
 
-**Gate pendente:** `tests/integrations/test_cdm_fake_api.py::test_post_requires_bearer` falhou com `WinError 10053` na execução completa. A repetição isolada dos dois módulos CDM passou (33 testes); isso não substitui o gate completo. O mesmo tipo de aborto de conexão já foi observado no baseline, em `test_create_maps_401_to_auth_error`. A inspeção mostra que o servidor fake responde 401 antes de consumir o corpo POST; essa é uma hipótese para a intermitência no Windows, não uma causa comprovada. `integrations/cdm_fake_api.py` está explicitamente protegido pela seção 19 da spec e permanece intacto. A aceitação integral da Fase 13 continua pendente desse gate. Não foram adicionados retries, skips ou mudanças de expectativa para mascarar a falha.
+**Bloqueio registrado em 12/09:** `tests/integrations/test_cdm_fake_api.py::test_post_requires_bearer` falhou com `WinError 10053` na execução completa. A repetição isolada dos dois módulos CDM passou (33 testes), sem substituir o gate completo. O mesmo tipo de aborto de conexão já havia sido observado no baseline, em `test_create_maps_401_to_auth_error`. A correção autorizada e sua nova verificação estão descritas abaixo.
 
 Superfícies conferidas no navegador: home nas três larguras, busca com resultado e vazia, solução Microsoft 365, chat vazio, contexto de artigo, procedimento real com sete passos e URL permitida, handoff com resumo recolhido/expansível e navegação operacional Microsoft 365. Contraste medido de texto branco sobre verde: 4,71:1.
 
 A implementação deve permanecer local até autorização explícita de push. Não houve alteração da branch Fase 12, do Draft PR #15, merge ou Ready for Review.
+
+## Correção de transporte Windows — 13/09/2026
+
+O handoff `phase-13-cdm-windows-fix-handoff-codex-inline.md`, fornecido para continuar a execução, autorizou uma exceção cirúrgica à seção 19 da spec. O único arquivo de produção alterado nesta correção é `src/ai_service_desk/integrations/cdm_fake_api.py`.
+
+O caminho de autenticação inválida enviava 401 antes de consumir o corpo POST. O experimento reportado no handoff fez 100 requisições por cenário: sem body, 100 respostas 401 e zero abortos; JSON pequeno, 91 respostas e 9 abortos; JSON grande, 92 respostas e 8 abortos. Nesta execução, um teste determinístico confirmou diretamente o diferencial: o handler real começava a resposta com os bytes do body ainda pendentes.
+
+A correção descarta o número de bytes declarado em `Content-Length`, em blocos de até 64 KiB, antes do 401. Não interpreta JSON no caminho não autorizado, não persiste dados e não inclui body ou credenciais na resposta. Comprimentos ausentes, inválidos ou não positivos não provocam leitura ilimitada; EOF encerra o descarte. O caminho autenticado e o adapter real permanecem intactos. Sem bearer ou com bearer errado, a resposta continua `401 / CDM_SERVICE_UNAUTHORIZED`.
+
+TDD inline: quatro casos novos falharam por consumo ausente antes da resposta (body não JSON e body grande, com bearer ausente ou errado). Após a mudança mínima, esses quatro casos e quatro guardas de comprimento passaram. O teste executa o handler HTTP real com uma conexão em memória observável; verifica consumo antes da primeira escrita e preservação de bytes posteriores ao body. Não depende de tentar a requisição repetidamente até reproduzir um reset. Não foram adicionados retries, skips, aumento de timeout ou tratamento que esconda `WinError 10053`.
+
+Blob anterior: `275b1833d5b27b09c0ffeae9f4484636d10afe63`. Blob autorizado: `790a3d3fb13bd3b617c0e8587811bf70e519e40c`. Os gates F10/F11 mantêm os parâmetros e node IDs históricos, aplicando somente a exceção exata do fake CDM. Para esse arquivo, validam também o conteúdo do worktree antes do commit; os workflows F10–F12 continuam verificando o blob exato de HEAD. Todos os demais blobs permanecem preservados.
+
+Os comandos Python foram executados com `PYTHONPATH` resolvido para `src` deste worktree. Ambiente: Python 3.14.7, Ruff 0.12.12 e Node 26.7.0. As evidências novas ficam em `artifacts/phase13-cdm-*`; o roteiro LOCAL_AI reutiliza `artifacts/phase13-local-ai-smoke.py` da execução anterior.
+
+Verificação final em 13/09/2026, após a correção:
+
+| Gate | Resultado |
+|---|---|
+| RED / GREEN determinístico | 4 falhas por body não consumido → 8 casos passaram |
+| Integrações | 55 passaram |
+| Engine CDM, segurança F10/F11 e workflow F12 | 64 passaram |
+| Workflows F10–F12 | 6 testes passaram; sintaxe dos 5 blocos Python embutidos válida |
+| Pytest completo | **1175 passaram, 3 skips existentes, zero falhas**, 128,32 s |
+| Ruff | Check e format check passaram; 162 arquivos formatados |
+| Frontend | 59 testes, lint e build passaram |
+| Routing / learning-prevention / web-demo | 8/8, 10/10 e 10/10 |
+| LOCAL_AI com Qwen local | 6/6 cenários passaram |
+| Histórico | 925 IDs preservados; 1178 candidatos; zero ausentes |
+| Blobs protegidos | 19 verificações passaram; somente a exceção exata do fake CDM |
+
+O primeiro full suite desta correção passou pelo transporte CDM e encontrou uma falha no guard histórico do workflow F11. O workflow foi ajustado para manter o hash histórico e aplicar o hash autorizado em `expected.update`, seguindo o padrão existente. A execução completa final acima passou. Os três skips são a QA explicitamente opt-in de contexto de negócio; o roteiro LOCAL_AI separado foi executado e passou. Nenhum teste foi removido, afrouxado ou pulado para fechar o gate.
+
+O bloqueio local da Fase 13 está encerrado. A homologação remota e qualquer push, merge ou Ready for Review continuam sujeitos à autorização explícita; nenhum desses passos foi executado.

@@ -106,6 +106,9 @@ jobs:
                 baseline_blob="a0fe911053b66faaddd6d02533e7fcc1c5688bce" ;;
               src/ai_service_desk/engine/knowledge_retrieval.py)
                 baseline_blob="9f887e1a3e1fdc62cdd1cd694c91e48c2ed4fa59" ;;
+              # F13: exceção de transporte Windows; domínio CDM preservado.
+              src/ai_service_desk/integrations/cdm_fake_api.py)
+                baseline_blob="790a3d3fb13bd3b617c0e8587811bf70e519e40c" ;;
             esac
             candidate_blob="$(git rev-parse "HEAD:$path")"
             printf 'protected_blob=%s:%s\n' "$path" "$candidate_blob"

@@ -124,6 +124,11 @@ def _imports(path: Path) -> tuple[set[str], set[str]]:
 def test_previous_phase_protected_blobs_are_exact(path: str, expected_sha: str) -> None:
     # Preserva parâmetros/node IDs históricos; somente estas extensões foram autorizadas.
     authorized_extensions = {
+        # F13: correção autorizada de transporte Windows, sem mudança de domínio.
+        "src/ai_service_desk/integrations/cdm_fake_api.py": (
+            "275b1833d5b27b09c0ffeae9f4484636d10afe63",
+            "790a3d3fb13bd3b617c0e8587811bf70e519e40c",
+        ),
         "src/ai_service_desk/engine/knowledge_retrieval.py": (
             "cf559b66c9a9d150628eeb0d8db195f7a51a34e7",
             "9f887e1a3e1fdc62cdd1cd694c91e48c2ed4fa59",
@@ -138,7 +143,9 @@ def test_previous_phase_protected_blobs_are_exact(path: str, expected_sha: str) 
         assert expected_sha == historical
         expected_sha = authorized
     actual = subprocess.run(
-        ["git", "rev-parse", f"HEAD:{path}"],
+        ["git", "hash-object", path]
+        if path == "src/ai_service_desk/integrations/cdm_fake_api.py"
+        else ["git", "rev-parse", f"HEAD:{path}"],
         cwd=ROOT,
         check=True,
         capture_output=True,

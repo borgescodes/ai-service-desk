@@ -1,3 +1,5 @@
+import io
+import json
 import threading
 
 import pytest
@@ -35,6 +37,56 @@ def payload(request_id="REQ-000001", **changes):
 
 def auth(token=TOKEN):
     return {"Authorization": f"Bearer {token}"}
+
+
+class MemoryConnection:
+    """Run the real HTTP handler with observable input/output stream boundaries."""
+
+    def __init__(self, request):
+        self.incoming = io.BytesIO(request)
+        self.outgoing = bytearray()
+        self.position_at_response = None
+
+    def makefile(self, mode, buffering):
+        assert mode == "rb"
+        return self.incoming
+
+    def sendall(self, data):
+        if self.position_at_response is None:
+            self.position_at_response = self.incoming.tell()
+        self.outgoing.extend(data)
+
+
+@pytest.mark.parametrize(
+    "authorization", ["", "Authorization: Bearer wrong\r\n"], ids=["missing", "wrong"]
+)
+@pytest.mark.parametrize("body", [b"not JSON", b"x" * 131073], ids=["invalid-json", "large"])
+def test_unauthorized_post_drains_exact_body_before_response(authorization, body):
+    headers = (f"POST {URL} HTTP/1.0\r\n{authorization}Content-Length: {len(body)}\r\n\r\n").encode(
+        "ascii"
+    )
+    connection = MemoryConnection(headers + body + b"next request must not be consumed")
+    with build_cdm_server("127.0.0.1", 0, TOKEN) as server:
+        server.RequestHandlerClass(connection, ("127.0.0.1", 0), server)
+        assert server.store.access_count == 0
+
+    assert connection.position_at_response == len(headers) + len(body)
+    status, response = bytes(connection.outgoing).split(b"\r\n\r\n", 1)
+    assert status.startswith(b"HTTP/1.0 401 ")
+    assert json.loads(response)["error_code"] == "CDM_SERVICE_UNAUTHORIZED"
+    assert body not in response
+
+
+@pytest.mark.parametrize("length", [None, "0", "-1", "invalid"])
+def test_unauthorized_post_without_valid_length_never_reads_to_eof(length):
+    length_header = "" if length is None else f"Content-Length: {length}\r\n"
+    headers = f"POST {URL} HTTP/1.0\r\n{length_header}\r\n".encode("ascii")
+    connection = MemoryConnection(headers + b"must not read an unbounded body")
+    with build_cdm_server("127.0.0.1", 0, TOKEN) as server:
+        server.RequestHandlerClass(connection, ("127.0.0.1", 0), server)
+
+    assert connection.position_at_response == len(headers)
+    assert bytes(connection.outgoing).startswith(b"HTTP/1.0 401 ")
 
 
 def test_get_missing_access_returns_exists_false(cdm_server):

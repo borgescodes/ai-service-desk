@@ -629,6 +629,8 @@ src/ai_service_desk/integrations/cdm_fake_api.py
 
 Também evitar alteração em core de Knowledge. A FAQ deve usar `load_knowledge()` e `approved_articles()` como contratos existentes, encapsulada na application layer web.
 
+**Exceção cirúrgica autorizada em 13/09/2026:** o handoff de correção Windows permite alterar somente o transporte de `integrations/cdm_fake_api.py` para consumir o corpo declarado de POST não autorizado antes do 401. O blob autorizado passa de `275b1833d5b27b09c0ffeae9f4484636d10afe63` para `790a3d3fb13bd3b617c0e8587811bf70e519e40c`. A exceção inclui o teste determinístico de regressão e a atualização exata dos gates desse blob; todos os demais arquivos protegidos permanecem preservados. Não muda autenticação, status/error_code, adapter real, policy, lifecycle ou execução. Evidências e resultados constam em `docs/demo/phase-13-requester-experience.md`.
+
 ## 20. Critérios de aceitação
 
 A fase só está aceita quando:
