@@ -12,13 +12,13 @@ test('FAQ has two global destinations and no sidebar or global request link', ()
   assert.match(html, />Falar com o Jup</);
 });
 
-test('chat navigation reuses reset, requests and help within the contextual sidebar', () => {
+test('chat navigation keeps reset and request tracking in the contextual sidebar', () => {
   const html = renderAppHeader({ activeRoute: 'jup' });
   const global = html.split('</header>')[0];
   assert.doesNotMatch(global, /href="\/requests"/);
   assert.match(html, /data-action="new-chat"[^>]*>[^]*?Nova conversa/);
   assert.match(html, /href="\/requests"[^>]*>[^]*?Acompanhar chamado/);
-  assert.match(html, /Artigos de ajuda/);
+  assert.doesNotMatch(html, /Artigos de ajuda/);
 });
 
 test('FAQ restores visual categories while only the backend CDM article is linked', () => {
