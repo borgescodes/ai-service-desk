@@ -15,7 +15,7 @@ export function renderAppHeader({ activeRoute, operational = false, operationPat
   const globalItems = operational ? [] : [['solutions', '/', 'Soluções'], ['jup', '/jup', 'Falar com o Jup']];
   const sidebarItems = operational
     ? [['approvals', operationPath, 'Solicitações recebidas']]
-    : [['requests', '/requests', 'Acompanhar chamado'], ['solutions', '/', 'Artigos de ajuda']];
+    : [['requests', '/requests', 'Acompanhar chamado']];
   const initials = (identity.name || 'Jup').split(' ').slice(0, 2).map(word => word[0]).join('');
   const links = items => items.map(([route, href, label]) => `<a href="${href}" data-route="${route}"${activeRoute === route || (route === 'solutions' && activeRoute === 'solution') ? ' aria-current="page"' : ''}>${navIcon(route)}<span>${label}</span></a>`).join('');
   const showSidebar = !['solutions', 'solution'].includes(activeRoute);
@@ -86,11 +86,15 @@ function renderMessage(message, { fresh = false, visualState = null, initials = 
   </article>`;
 }
 
-function renderChatWelcome(leaving) {
-  return `<div class="chat-welcome${leaving ? ' chat-welcome--leaving' : ''}"${leaving ? ' aria-hidden="true"' : ''}>
-    ${renderJupVisual({ state: 'idle' })}
+function renderChatWelcome(leaving, draft = '') {
+  const listening = Boolean(String(draft).trim());
+  return `<div class="chat-welcome${leaving ? ' chat-welcome--leaving' : ''}" data-listening="${listening}"${leaving ? ' aria-hidden="true"' : ''}>
+    <div class="chat-welcome-avatar-stack" aria-live="polite">
+      <div class="chat-welcome-avatar-state chat-welcome-avatar-state--idle" data-welcome-state="idle" aria-hidden="${listening}">${renderJupVisual({ state: 'idle' })}</div>
+      <div class="chat-welcome-avatar-state chat-welcome-avatar-state--listening" data-welcome-state="listening" aria-hidden="${!listening}">${renderJupVisual({ state: 'listening' })}</div>
+    </div>
     <h1>Olá, eu sou o <strong>Jup</strong></h1>
-    <p>Seu assistente virtual, sempre pronto para ajudar</p>
+    <p class="chat-welcome-tagline">Seu assistente virtual, sempre pronto para ajudar</p>
   </div>`;
 }
 
@@ -122,7 +126,7 @@ export function renderJupWorkspace({ identity = {}, messages = [], understood = 
       ${sourceContext ? `<p class="faq-source-context">Você estava vendo: <strong>${escapeHtml(sourceContext.title)}</strong></p>` : ''}
       <div class="jup-workspace-body">
 
-        <div class="conversation-stage"><div class="jup-conversation"><div class="conversation-thread${entering ? ' conversation-thread--entering' : ''}" role="log" aria-label="Conversa com Jup" aria-live="polite" tabindex="0">${welcome ? renderChatWelcome(entering) : ''}${conversation}
+        <div class="conversation-stage"><div class="jup-conversation"><div class="conversation-thread${entering ? ' conversation-thread--entering' : ''}" role="log" aria-label="Conversa com Jup" aria-live="polite" tabindex="0">${welcome ? renderChatWelcome(entering, draft) : ''}${conversation}
           ${understood && lastAssistant < 0 ? renderMessage({ role: 'JUP', text: '', context: understood }) : ''}
           ${loading ? renderMessage({ role: 'JUP', thinking: true, activity: processingActivity(messages) }, { fresh: true }) : ''}
           ${messageError ? renderMessage({ role: 'JUP', text: messageError, failed: true }, { fresh: true }) : ''}

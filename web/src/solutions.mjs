@@ -63,7 +63,7 @@ function visualArticle(title, availableCdm) {
   if (title === 'Como solicitar acesso ao CDM' && availableCdm) {
     return `<a class="faq-item faq-item--available" href="/solucoes/${CDM_FAQ_ID}" data-solution-link data-knowledge-id="${CDM_FAQ_ID}"><span class="faq-item-icon"><img src="/assets/brand/cdm-simbol.svg" alt="" width="24" height="24"></span><strong>${escapeHtml(title)}</strong><span class="solution-arrow" aria-hidden="true">→</span></a>`;
   }
-  return `<div class="faq-item faq-item--example" aria-disabled="true"><span class="faq-item-icon">${navIcon('solutions')}</span><span>${escapeHtml(title)}</span><small>Exemplo visual</small></div>`;
+  return `<div class="faq-item faq-item--catalog" role="link" aria-disabled="true"><span class="faq-item-icon">${navIcon('solutions')}</span><span>${escapeHtml(title)}</span><span class="solution-arrow" aria-hidden="true">→</span></div>`;
 }
 
 export function renderSolutionsResults({ groups = [], searchQuery = '', category = '', searchResults = null, searching = false, error = null }) {
@@ -77,7 +77,7 @@ export function renderSolutionsResults({ groups = [], searchQuery = '', category
     .filter(([, , , titles]) => titles.length);
   const count = categories.reduce((sum, [, , , titles]) => sum + titles.length, 0);
   if (!count) return `<div class="faq-empty"><h2>Nenhuma solução encontrada.</h2><p>Tente outras palavras ou conte sua dúvida ao Jup.</p><a class="button button--primary" href="${draftPath(searchQuery)}" data-route="jup">Falar com o Jup →</a></div>`;
-  return `<p class="directory-count">${query && availableCdm ? '1 solução encontrada · ' : ''}${count} ${count === 1 ? 'artigo' : 'artigos'}</p><div class="faq-directory">${categories.map(([key, label, icon, titles]) => `<details class="faq-category"${query || category ? ' open' : ''}><summary><span class="faq-category-icon">${navIcon(icon)}</span><strong>${label}</strong><small>${titles.length} artigos</small>${navIcon('chevron')}</summary><div class="faq-category-items">${titles.map(title => visualArticle(title, availableCdm)).join('')}</div></details>`).join('')}<aside class="faq-help-strip">${renderJupVisual({ state: 'idle' })}<h2>Ainda não encontrou a resposta?</h2><a class="button button--primary" href="/jup" data-route="jup">${navIcon('jup')}Falar com o Jup</a></aside></div>`;
+  return `<p class="directory-count">${query && availableCdm ? '1 solução encontrada · ' : ''}${count} ${count === 1 ? 'artigo' : 'artigos'}</p><div class="faq-directory">${categories.map(([key, label, icon, titles], index) => `<details class="faq-category" name="support-faq"${index === 0 ? ' open' : ''}><summary><span class="faq-category-icon">${navIcon(icon)}</span><strong>${label}</strong><small>${titles.length} artigos</small>${navIcon('chevron')}</summary><div class="faq-category-panel"><div class="faq-category-items">${titles.map(title => visualArticle(title, availableCdm)).join('')}</div></div></details>`).join('')}<aside class="faq-help-strip">${renderJupVisual({ state: 'idle' })}<h2>Ainda não encontrou a resposta?</h2><a class="button button--primary" href="/jup" data-route="jup">${navIcon('jup')}Falar com o Jup</a></aside></div>`;
 }
 
 export function renderSolutionsHome(options = {}) {

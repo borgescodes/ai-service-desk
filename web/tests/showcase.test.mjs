@@ -83,6 +83,8 @@ test('one visual foundation is loaded together with the original animated avatar
   const html = readFileSync(new URL('../src/index.html', import.meta.url), 'utf8');
   assert.match(html, /href="\/tokens.css"/);
   assert.match(html, /href="\/styles.css"/);
+  assert.match(html, /href="\/desktop-responsive.css"/);
+  assert.match(html, /src="\/ui-polish.mjs"/);
   assert.match(html, /href="\/assets\/jup\/jup-avatar.css"/);
   assert.doesNotMatch(html, /premium.css|showcase-desktop.css/);
 });
@@ -111,12 +113,16 @@ test('welcome tagline is typewriter-ready and draft content switches the welcome
   const idle = renderJupWorkspace({ draft: '' });
   const listening = renderJupWorkspace({ draft: 'oi' });
   assert.match(idle, /class="chat-welcome-tagline"/);
+  assert.match(idle, /data-listening="false"/);
   assert.match(idle, /chat-welcome[^]*?data-state="idle"/);
+  assert.match(listening, /data-listening="true"/);
   assert.match(listening, /chat-welcome[^]*?data-state="listening"/);
 });
 
 test('desktop shell prevents FAQ page overflow and gives conversation a branded minimal scrollbar', () => {
-  const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  const baseCss = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  const responsiveCss = readFileSync(new URL('../src/desktop-responsive.css', import.meta.url), 'utf8');
+  const css = `${baseCss}\n${responsiveCss}`;
   assert.match(css, /scrollbar-gutter:\s*stable/);
   assert.match(css, /body:has\(\.solutions-home\)[^}]*overflow:\s*hidden/);
   assert.match(css, /\.conversation-thread[^}]*scrollbar-color:/);
