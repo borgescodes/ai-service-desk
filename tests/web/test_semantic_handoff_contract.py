@@ -1,6 +1,26 @@
 import pytest
 
 from ai_service_desk.web.demo_runtime import DemoRuntime
+from ai_service_desk.web.demo_support import DemoSupportState, LinguisticSignal
+
+
+def test_m365_strong_password_evidence_overrides_broader_semantic_signal() -> None:
+    support = DemoSupportState()
+    first = support.handle(
+        "requester",
+        "meu office nao entra",
+        interpreted_signal=LinguisticSignal.M365_LOGIN_PROBLEM,
+    )
+    assert first is not None
+    assert first.status == "NEEDS_CLARIFICATION"
+
+    second = support.handle(
+        "requester",
+        "diz q a senha esta errada",
+        interpreted_signal=LinguisticSignal.M365_LOGIN_PROBLEM,
+    )
+    assert second is not None
+    assert second.status == "PASSWORD_EVIDENCE_COLLECTED"
 
 
 @pytest.mark.parametrize("failure_text", ["deu errado", "não rolou", "continua sem entrar"])
@@ -77,6 +97,8 @@ def test_material_registration_never_becomes_cdm_access_request() -> None:
     try:
         result = runtime.send_message("pedro-miranda", "Preciso cadastrar um material para revenda")
 
+        assert result["status"] == "SUPPORT_HANDOFF_PENDING"
+        assert result["support_handoff"]["technician"]["technician_id"] == "TECH-GENERAL"
         assert result.get("state") != "PENDING_APPROVAL"
         assert result.get("policy") != "REQUIRE_APPROVAL"
         assert runtime.created_request_ids == []
