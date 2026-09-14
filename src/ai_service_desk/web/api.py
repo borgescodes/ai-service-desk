@@ -158,6 +158,12 @@ def create_app(
         identity_id = identity(x_demo_identity)
         return app.state.runtime.send_message(identity_id, body.message)
 
+    @app.post("/api/jup/conversation/reset")
+    def reset_conversation(x_demo_identity: str | None = Header(default=None)):
+        identity_id = identity(x_demo_identity)
+        app.state.runtime.reset_conversation(identity_id)
+        return {"status": "RESET"}
+
     @app.get("/api/requests")
     def list_requests(x_demo_identity: str | None = Header(default=None)):
         identity_id = identity(x_demo_identity)
@@ -172,6 +178,11 @@ def create_app(
     def approvals(x_demo_identity: str | None = Header(default=None)):
         identity_id = identity(x_demo_identity)
         return app.state.runtime.list_approvals(identity_id)
+
+    @app.get("/api/operations/handoffs")
+    def handoffs(x_demo_identity: str | None = Header(default=None)):
+        identity_id = identity(x_demo_identity)
+        return app.state.runtime.list_handoffs(identity_id)
 
     @app.get("/api/operations/approvals/{request_id}")
     def operational_detail(request_id: str, x_demo_identity: str | None = Header(default=None)):

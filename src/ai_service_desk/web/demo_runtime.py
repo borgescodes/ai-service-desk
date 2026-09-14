@@ -211,6 +211,7 @@ class DemoRuntime:
         self.request_repository = InMemoryRequestRepository()
         self.routing_store = InMemoryRoutingAssignmentStore()
         self.conversations: dict[str, list[dict]] = {}
+        self._conversation_generations: dict[str, int] = {}
         self._triage: dict[str, tuple[TriageEngine, object]] = {}
         self.created_request_ids: list[str] = []
         self.request_metadata: dict[str, dict] = {}
@@ -285,7 +286,10 @@ class DemoRuntime:
         )
 
     def _new_triage(self, identity_id: str) -> tuple[TriageEngine, object]:
-        session_id = f"demo-{identity_id}-{len(self.conversations.get(identity_id, [])) + 1}"
+        generation = self._conversation_generations.get(identity_id, 0)
+        session_id = (
+            f"demo-{identity_id}-{generation}-{len(self.conversations.get(identity_id, [])) + 1}"
+        )
 
         def classifier(text):
             if self.mode == "LOCAL_AI":
@@ -404,6 +408,17 @@ class DemoRuntime:
     def _prevention_opportunities(self):
         patterns = PatternAggregator.aggregate(self.outcome_store.snapshot())
         return OpportunityEngine().generate(patterns)
+
+    def reset_conversation(self, identity_id: str) -> None:
+        self._requester(identity_id)
+        self._triage.pop(identity_id, None)
+        self.conversations.pop(identity_id, None)
+        self.support_state.clear(identity_id)
+        self._support_resolution_outcomes.pop(identity_id, None)
+        self._support_handoff_ids.pop(identity_id, None)
+        self._conversation_generations[identity_id] = (
+            self._conversation_generations.get(identity_id, 0) + 1
+        )
 
     def send_message(self, identity_id: str, message: str) -> dict:
         if self.mode != "LOCAL_AI":
@@ -699,6 +714,14 @@ class DemoRuntime:
         return [
             self._present(item.request, assignment=item.assignment, include_internal=True)
             for item in self.approval_queue.pending(technician_id=technician.technician_id)
+        ]
+
+    def list_handoffs(self, identity_id: str) -> list[dict]:
+        technician = self._technician(identity_id)
+        return [
+            handoff.as_result()
+            for handoff in self.support_handoff_store.snapshot()
+            if handoff.technician.technician_id == technician.technician_id
         ]
 
     def get_operational_request(self, identity_id: str, request_id: str) -> dict:
