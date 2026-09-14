@@ -146,7 +146,7 @@ def test_prompt_context_does_not_replace_user_text_or_expand_approved_systems(ru
     runtime.send_message("pedro-miranda", message)
     payload = runtime._ollama_client.payloads[0]
     assert payload["messages"][-1]["content"] == message
-    assert "BUSINESS_CONTEXT_CURRENT" in payload["messages"][0]["content"]
+    assert "contexto vem do backend" in payload["messages"][0]["content"].casefold()
     assert runtime.knowledge_engine.available_systems("PROBLEMA_ACESSO") == ("CDM", "OFFICE 365")
     assert runtime._triage["pedro-miranda"][1].system == ""
 
