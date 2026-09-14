@@ -20,7 +20,8 @@ _CDM_REQUEST_LANGUAGE = re.compile(
     r"\b(?:preciso|quero|acesso|acessar|entrar|solicitar|pedir|libera|liberar|perfil|sou)\b"
 )
 _ACCESS_EVIDENCE = re.compile(
-    r"\b(?:acesso|acessar|entrar|senha|permissao|permissoes|libera|liberar|perfil)\b"
+    r"\b(?:acesso|acess(?:ar|a|am)|entr(?:ar|a|am)|senha|permissao|permissoes|"
+    r"libera|liberar|perfil)\b"
 )
 
 
@@ -116,16 +117,16 @@ COMPACT_SIGNALS = [
 
 _COMPACT_SYSTEM_PROMPT = "\n".join(
     (
-        "Jup: classifique a mensagem para suporte de TI. Só interprete; "
-        "o backend decide e executa.",
-        "scenario: CDM_ACCESS=pedido/problema de acesso ou permissão no CDM/Central de Dados Mestres; "
-        "M365_SUPPORT=login/senha no Microsoft 365/Office/Outlook; OTHER_IT=outro TI; "
-        "UNKNOWN=incerto. Cadastrar/operar materiais sem pedido de acesso não é CDM_ACCESS.",
+        "Jup: classifique suporte de TI. Só interprete; backend decide e executa.",
+        "scenario: CDM_ACCESS=acesso/permissão no CDM/Central de Dados Mestres; "
+        "M365_SUPPORT=login/senha no Microsoft 365/Office/Outlook; "
+        "OTHER_IT=outro TI; UNKNOWN=incerto. "
+        "Cadastro de material sem pedido de acesso não é CDM_ACCESS.",
         "signal: ACCESS_REQUEST=acesso normal; PRIVILEGED_ACCESS=admin/superadmin; "
-        "LOGIN_PROBLEM=falha de acesso; PASSWORD_EVIDENCE=senha errada/esquecida; "
+        "LOGIN_PROBLEM=falha de acesso; PASSWORD_EVIDENCE=senha; "
         "SUCCESS=funcionou; FAILURE=não resolveu; UNKNOWN=demais.",
-        "BUSINESS_CONTEXT_CURRENT vem do backend; não amplie sistemas. Não invente identidade, "
-        "autorização, policy, aprovação, IDs, routing ou resultado. Retorne só o JSON do schema.",
+        "BUSINESS_CONTEXT_CURRENT vem do backend; não amplie sistemas nem invente identidade, "
+        "autorização, policy, aprovação, IDs, routing ou resultado. Só JSON do schema.",
     )
 )
 
@@ -179,7 +180,9 @@ def parse_compact_interpretation_response(payload: dict) -> tuple[str, str]:
 def _compact_intent(text: str, scenario: str, signal: str, has_system: bool) -> str:
     normalized = normalize_text(text)
     textual_access = _ACCESS_EVIDENCE.search(normalized) is not None
-    privileged_access = signal == "PRIVILEGED_ACCESS" and _PRIVILEGED_ROLE.search(normalized) is not None
+    privileged_access = (
+        signal == "PRIVILEGED_ACCESS" and _PRIVILEGED_ROLE.search(normalized) is not None
+    )
     if signal in {
         "ACCESS_REQUEST",
         "LOGIN_PROBLEM",
