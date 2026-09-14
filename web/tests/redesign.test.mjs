@@ -33,7 +33,7 @@ test('header exposes backend persona choices and a real new-chat control', () =>
   assert.match(html, /Pedro Miranda/);
   assert.match(html, /data-persona="tecnico-cdm"/);
   assert.match(html, /data-action="new-chat"/);
-  assert.match(html, /Minhas solicitações/);
+  assert.match(html, /Acompanhar chamado/);
 });
 
 test('central presents only the available CDM tutorial, including search results', () => {
@@ -51,7 +51,7 @@ test('messages show presentation time and honest processing status', () => {
   const html = renderJupWorkspace({ messages: [{ role: 'USER', text: 'Oi', sentAt: '2026-09-14T13:42:00Z' }], loading: true });
   assert.match(html, /<time datetime="2026-09-14T13:42:00Z"/);
   assert.match(html, /Pensando/);
-  assert.match(html, /Processando sua mensagem/);
+  assert.match(html, /Buscando contexto/);
   assert.doesNotMatch(html, /Verificando política|Conferindo responsável/);
 });
 

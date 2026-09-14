@@ -70,10 +70,10 @@ test('CDM link needs the exact tutorial identity and backend URL; arbitrary URLs
   }
 });
 
-test('Jup desktop workspace has product frame status and elevated composer', () => {
+test('Jup desktop workspace has product frame and composer without permanent hero', () => {
   const html = renderJupWorkspace({ messages: [{ role: 'USER', text: 'Preciso de acesso ao CDM' }, { role: 'JUP', text: 'Posso ajudar com isso.' }] });
   assert.match(html, /class="jup-workspace-frame"/);
-  assert.match(html, /class="conversation-status"/);
+  assert.doesNotMatch(html, /class="conversation-status"/);
   assert.match(html, /class="conversation-stage"/);
   assert.match(html, /class="composer-leading-icon"/);
   assert.match(html, /class="composer-hint"/);

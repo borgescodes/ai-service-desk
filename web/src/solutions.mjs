@@ -1,3 +1,4 @@
+import { navIcon } from './components.mjs';
 import { renderApprovedKnowledgeBody } from './knowledge_content.mjs';
 import { renderJupVisual } from './jup_visual.mjs';
 import { escapeHtml } from './render.mjs';
@@ -51,26 +52,41 @@ export function createFaqSearch({ request, update }) {
 
 const CDM_FAQ_ID = 'KB-SYN-FAQ-CDM-REQUEST-001';
 
-function solutionLink(item) {
-  return `<a class="cdm-result" href="/solucoes/${encodeURIComponent(item.knowledge_id)}" data-solution-link data-knowledge-id="${escapeHtml(item.knowledge_id)}"><span class="cdm-result-symbol"><img src="/assets/brand/cdm-simbol.svg" alt="" width="54" height="54"></span><span><small>Acessos e rotinas · CDM</small><strong>${escapeHtml(item.title)}</strong><span>Consulte o passo a passo para solicitar seu acesso.</span></span><span class="solution-arrow" aria-hidden="true">→</span></a>`;
+const VISUAL_EXAMPLES = Object.freeze([
+  ['acessos-rotinas', 'Acessos e rotinas', 'key', ['Como solicitar acesso ao CDM', 'Como entrar no CDM depois da aprovação', 'Como acompanhar uma solicitação feita pelo Jup', 'Como pedir acesso a um sistema corporativo']],
+  ['erros-sistemas', 'Erros em sistemas', 'errors', ['Sistema não abre ou fecha sozinho', 'O CIGAM apresenta erro ao iniciar', 'Sistema web fica em tela branca', 'O que informar ao suporte quando uma tela apresenta erro', 'O sistema apresentou erro ao salvar uma operação']],
+  ['impressao-office-aplicativos', 'Impressão, Office e aplicativos', 'printer', ['Impressora aparece offline', 'Outlook não envia ou recebe mensagens', 'Teams está sem áudio ou microfone', 'Aplicativo do Office pede autenticação repetidamente']],
+  ['rede-internet', 'Rede e internet', 'wifi', ['Estou conectado ao Wi-Fi, mas sem internet', 'Computador conectado por cabo está sem rede', 'Apenas um site ou sistema não abre', 'Como identificar se o problema está na internet ou no sistema']],
+]);
+
+function visualArticle(title, availableCdm) {
+  if (title === 'Como solicitar acesso ao CDM' && availableCdm) {
+    return `<a class="faq-item faq-item--available" href="/solucoes/${CDM_FAQ_ID}" data-solution-link data-knowledge-id="${CDM_FAQ_ID}"><span class="faq-item-icon"><img src="/assets/brand/cdm-simbol.svg" alt="" width="24" height="24"></span><strong>${escapeHtml(title)}</strong><span class="solution-arrow" aria-hidden="true">→</span></a>`;
+  }
+  return `<div class="faq-item faq-item--example" aria-disabled="true"><span class="faq-item-icon">${navIcon('solutions')}</span><span>${escapeHtml(title)}</span><small>Exemplo visual</small></div>`;
 }
 
 export function renderSolutionsResults({ groups = [], searchQuery = '', category = '', searchResults = null, searching = false, error = null }) {
   if (error) return `<p role="alert">${escapeHtml(error)}</p><button class="button button--secondary" data-action="retry-search">Tentar novamente</button>`;
   if (searching) return '<div class="search-loading" role="status"><p class="search-status">Buscando soluções...</p></div>';
-  const searchingQuery = Boolean(searchQuery.trim() || category);
-  const items = (searchingQuery ? searchResults ?? [] : groups.flatMap(group => group.items ?? [])).filter(item => item.knowledge_id === CDM_FAQ_ID);
-  if (!items.length) return `<div class="faq-empty"><h2>Nenhuma solução encontrada.</h2><p>Tente buscar por CDM ou conte sua dúvida ao Jup.</p><a class="button button--primary" href="${draftPath(searchQuery)}" data-route="jup">Falar com o Jup →</a></div>`;
-  return `${searchingQuery ? '<p class="search-status">1 solução encontrada</p>' : ''}<div class="solution-results">${items.map(solutionLink).join('')}</div>`;
+  const query = searchQuery.trim();
+  const normalize = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+  const availableCdm = (query ? searchResults ?? [] : groups.flatMap(group => group.items ?? [])).some(item => item.knowledge_id === CDM_FAQ_ID);
+  const categories = VISUAL_EXAMPLES.filter(([key]) => !category || category === key)
+    .map(([key, label, icon, titles]) => [key, label, icon, titles.filter(title => !query || normalize(title).includes(normalize(query)))])
+    .filter(([, , , titles]) => titles.length);
+  const count = categories.reduce((sum, [, , , titles]) => sum + titles.length, 0);
+  if (!count) return `<div class="faq-empty"><h2>Nenhuma solução encontrada.</h2><p>Tente outras palavras ou conte sua dúvida ao Jup.</p><a class="button button--primary" href="${draftPath(searchQuery)}" data-route="jup">Falar com o Jup →</a></div>`;
+  return `<p class="directory-count">${query && availableCdm ? '1 solução encontrada · ' : ''}${count} ${count === 1 ? 'artigo' : 'artigos'}</p><div class="faq-directory">${categories.map(([key, label, icon, titles]) => `<details class="faq-category"${query || category ? ' open' : ''}><summary><span class="faq-category-icon">${navIcon(icon)}</span><strong>${label}</strong><small>${titles.length} artigos</small>${navIcon('chevron')}</summary><div class="faq-category-items">${titles.map(title => visualArticle(title, availableCdm)).join('')}</div></details>`).join('')}<aside class="faq-help-strip">${renderJupVisual({ state: 'idle' })}<h2>Ainda não encontrou a resposta?</h2><a class="button button--primary" href="/jup" data-route="jup">${navIcon('jup')}Falar com o Jup</a></aside></div>`;
 }
 
 export function renderSolutionsHome(options = {}) {
   return `<section class="solutions-home" aria-labelledby="solutions-title">
-    <div class="faq-hero"><h1 id="solutions-title">Central de <span>Suporte</span></h1><p>Encontre a orientação que precisa para seguir com o seu trabalho.</p>
-      <form id="faq-search-form" class="faq-search-control"><label class="sr-only" for="faq-search">O que você precisa resolver?</label><div class="search-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg><input id="faq-search" type="search" autocomplete="off" maxlength="300" placeholder="Busque uma dúvida ou sistema, como CDM" value="${escapeHtml(options.searchQuery || '')}" aria-controls="faq-results"><button class="search-shortcut" type="submit">Buscar</button></div></form>
+    <div class="faq-hero"><h1 id="solutions-title">Central de Suporte<span>.</span></h1>
+      <form id="faq-search-form" class="faq-search-control"><label class="sr-only" for="faq-search">O que você precisa resolver?</label><div class="search-field">${navIcon('search')}<input id="faq-search" type="search" autocomplete="off" maxlength="300" placeholder="Busque por sistema, erro ou assunto" value="${escapeHtml(options.searchQuery || '')}" aria-controls="faq-results"><button class="search-shortcut" type="submit">Buscar <span aria-hidden="true">→</span></button></div></form>
+      <nav class="faq-category-pills" aria-label="Categorias de ajuda">${[['', 'Todos'], ...FAQ_TOPICS].map(([key, label]) => `<button type="button" data-category="${key}" aria-pressed="${(options.category || '') === key}" aria-controls="faq-results">${label}</button>`).join('')}</nav>
     </div>
-    <section class="help-articles" aria-label="Orientações disponíveis"><div class="results-heading"><h2>Orientações para sua rotina</h2><span>Acessos e rotinas</span></div><div id="faq-results" aria-live="polite" aria-busy="${Boolean(options.searching)}">${renderSolutionsResults(options)}</div></section>
-    <aside class="jup-spotlight">${renderJupVisual({ state: 'idle' })}<div><h2>Precisa de uma mão?</h2><p>Fale com o Jup. Vamos encontrar o próximo passo juntos.</p></div><a class="button button--primary" href="/jup" data-route="jup">Falar com o Jup <span aria-hidden="true">→</span></a></aside>
+    <section class="help-articles" aria-label="Artigos por categoria"><div id="faq-results" aria-live="polite" aria-busy="${Boolean(options.searching)}">${renderSolutionsResults(options)}</div></section>
   </section>`;
 }
 

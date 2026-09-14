@@ -20,10 +20,10 @@ const groups = [
 
 test('solutions home is task-first and does not contain marketing copy', () => {
   const html = renderSolutionsHome({ groups, searchQuery: '', searchResults: null, searching: false });
-  assert.match(html, /Central de <span>Suporte/);
-  assert.match(html, /Busque uma dúvida ou sistema/);
+  assert.match(html, /Central de Suporte/);
+  assert.match(html, /Busque por sistema, erro ou assunto/);
   assert.match(html, /Como solicitar acesso ao CDM/);
-  assert.match(html, /Precisa de uma mão\?/);
+  assert.match(html, /Ainda não encontrou a resposta\?/);
   assert.match(html, /Falar com o Jup/);
   assert.doesNotMatch(html, /Assistente de IA|Inteligência para|transforme|revolucione/i);
 });
@@ -31,7 +31,7 @@ test('solutions home is task-first and does not contain marketing copy', () => {
 test('solutions home renders result mode without category card grid', () => {
   const html = renderSolutionsHome({
     groups,
-    searchQuery: 'cigam',
+    searchQuery: 'CDM',
     searchResults: groups[0].items,
     searching: false,
   });
@@ -48,7 +48,7 @@ test('empty search result leads directly to Jup', () => {
     searching: false,
   });
   assert.match(html, /Nenhuma solução encontrada/);
-  assert.match(html, /href="\/jup"/);
+  assert.match(html, /href="\/jup\?draft=xyz"/);
 });
 
 test('faq search path encodes the query', () => {

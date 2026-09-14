@@ -14,7 +14,7 @@ import { renderAppHeader, renderJupWorkspace } from '../src/components.mjs';
 test('public header contains only requester navigation', () => {
   const html = renderAppHeader({ activeRoute: 'solutions', operational: false });
   assert.match(html, /Jup Resolve/);
-  assert.match(html, />Central de Suporte</);
+  assert.match(html, />Soluções</);
   assert.match(html, />Falar com o Jup</);
   assert.doesNotMatch(html, /Identidade demo|Operação|Prevenção|Assistente de IA|Inteligência para/i);
   assert.doesNotMatch(html, /<select/);
@@ -28,8 +28,8 @@ test('empty Jup workspace is concise and task-first', () => {
     loading: false,
     sourceContext: null,
   });
-  assert.match(html, /Como posso ajudar\?/);
-  assert.match(html, /Descreva o que aconteceu/);
+  assert.match(html, /Olá, eu sou o/);
+  assert.match(html, /Digite sua mensagem aqui/);
   assert.doesNotMatch(html, /Eu organizo o contexto|O que entendi|Contexto estruturado/i);
 });
 

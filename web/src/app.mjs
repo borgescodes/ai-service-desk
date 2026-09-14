@@ -105,7 +105,7 @@ function render() {
     identities: state.identities, identity: selectedIdentity() ?? {}, pending: Boolean(state.pendingAction),
     operational: ['approvals', 'prevention'].includes(state.route),
     operationPath: operationPath(),
-  })}<main id="main-content" class="main-content" tabindex="-1">${renderRoute()}</main>`;
+  })}<main id="main-content" class="main-content main-content--${['solutions', 'solution'].includes(state.route) ? 'public' : 'workspace'}" tabindex="-1">${renderRoute()}</main>`;
   app.setAttribute('aria-busy', String(state.loading));
   bindInteractions();
   renderedMessageCount = state.messages.length;
