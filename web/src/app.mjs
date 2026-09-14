@@ -8,7 +8,6 @@ import {
   renderHandoffs,
   renderJupWorkspace,
   renderOperationDetail,
-  renderPreventionList,
   renderRequestList,
 } from './components.mjs';
 import { escapeHtml, renderErrorState, renderUnauthorizedState } from './render.mjs';
@@ -18,6 +17,23 @@ import { createInitialState, selectIdentity, resetConversation, personaPath } fr
 const app = document.querySelector('#app');
 let identityRevision = 0;
 let renderedMessageCount = 0;
+// IDs only, scoped to the current page session and technician. Details are always reauthorized.
+const knownOperationalRequests = new Map();
+async function loadOperationalItems(identityId) {
+  const pending = await apiRequest('/api/operations/approvals', { identityId });
+  const known = knownOperationalRequests.get(identityId) || new Set();
+  pending.forEach(item => known.add(item.request_id));
+  knownOperationalRequests.set(identityId, known);
+  const currentIds = new Set(pending.map(item => item.request_id));
+  const previous = await Promise.all([...known].filter(id => !currentIds.has(id)).map(async id => {
+    try { return await apiRequest(`/api/operations/approvals/${encodeURIComponent(id)}`, { identityId }); }
+    catch (error) {
+      if (error instanceof ApiError && [403, 404].includes(error.status)) { known.delete(id); return null; }
+      throw error;
+    }
+  }));
+  return [...pending, ...previous.filter(Boolean)];
+}
 let state = {
   ...createInitialState(),
   route: resolveRoute(window.location.pathname),
@@ -43,13 +59,6 @@ function pageHeading(title, description) {
 
 function operationPath() {
   return state.identityId === 'tecnico-m365' ? '/demo/operacao/m365' : '/demo/operacao/cdm';
-}
-
-function operationTabs() {
-  return `<nav class="operations-tabs" aria-label="Operação">
-    <a href="${operationPath()}" data-route-link="approvals"${state.route === 'approvals' ? ' aria-current="page"' : ''}>Pendências</a>
-    <a href="/demo/operacao/prevention" data-route-link="prevention"${state.route === 'prevention' ? ' aria-current="page"' : ''}>Prevenção</a>
-  </nav>`;
 }
 
 function renderRoute() {
@@ -80,21 +89,16 @@ function renderRoute() {
   }
 
   if (state.route === 'requests') {
-    return `${pageHeading('Minhas solicitações', 'Acompanhe o andamento dos seus atendimentos.')}${renderRequestList(state.routeData.items ?? [])}`;
+    return `${pageHeading('Acompanhar chamados', 'Acompanhe o andamento dos seus atendimentos.')}${renderRequestList(state.routeData.items ?? [], state.selectedRequestId)}`;
   }
 
   if (state.route === 'approvals') {
     const items = state.routeData.items ?? [];
     const selected = state.routeData.selected ?? items.find((item) => item.request_id === state.selectedRequestId) ?? items[0] ?? null;
-    return `${pageHeading('Solicitações recebidas', 'Revise o contexto e dê continuidade ao atendimento.')}${operationTabs()}<div class="operation-split"><section aria-label="Fila de pendências">${renderApprovalQueue(items)}</section><section aria-label="Detalhe da pendência">${renderOperationDetail(selected, state)}</section></div>${renderHandoffs(state.routeData.handoffs ?? [])}`;
+    return `${pageHeading('Solicitações recebidas', 'Revise o contexto e dê continuidade ao atendimento.')}<div class="tracking-workspace"><section class="tracking-list" aria-label="Fila de solicitações"><header class="tracking-list-header"><h2>Fila de atendimento</h2><span>${items.length}</span></header>${renderApprovalQueue(items, selected?.request_id)}</section><section aria-label="Detalhe da pendência">${renderOperationDetail(selected, state)}</section></div>${renderHandoffs(state.routeData.handoffs ?? [])}`;
   }
 
-  const prevention = state.routeData.items ?? [];
-  const selected = state.routeData.selected ?? prevention.find((item) => item.opportunity_id === state.selectedOpportunityId) ?? null;
-  const detail = selected
-    ? `<aside class="operation-detail prevention-detail"><header class="operation-detail-header"><div><p>${escapeHtml(selected.opportunity_id)}</p><h2>${escapeHtml(selected.category_label)}</h2></div></header><div class="evidence-grid"><section><span>Sistema</span><strong>${escapeHtml(selected.system)}</strong></section><section><span>Intent</span><strong>${escapeHtml(selected.intent)}</strong></section><section><span>Área</span><strong>${escapeHtml(selected.area || 'Não informada')}</strong></section><section><span>Ocorrências</span><strong>${escapeHtml(selected.occurrence_count)}</strong></section></div><p>${escapeHtml(selected.explanation)}</p>${selected.reason_codes?.length ? `<p><strong>Evidências:</strong> ${selected.reason_codes.map(escapeHtml).join(', ')}</p>` : ''}</aside>`
-    : '';
-  return `${pageHeading('Prevenção', 'Acompanhe situações recorrentes e oportunidades de melhoria.')}${operationTabs()}${renderPreventionList(prevention)}${detail}`;
+  return '<section class="tracking-empty"><strong>Área não disponível nesta demonstração</strong><p>Use o menu de usuários para acessar uma fila de atendimento.</p></section>';
 }
 
 function render() {
@@ -185,7 +189,7 @@ async function loadRoute() {
     } else if (routeState.route === 'requests') {
       routeState.routeData = { items: await apiRequest('/api/requests', { identityId: routeState.identityId }), loaded: true };
     } else if (routeState.route === 'approvals') {
-      const items = await apiRequest('/api/operations/approvals', { identityId: routeState.identityId });
+      const items = await loadOperationalItems(routeState.identityId);
       routeState.selectedRequestId = items[0]?.request_id ?? null;
       const handoffs = await apiRequest('/api/operations/handoffs', { identityId: routeState.identityId });
       routeState.routeData = { items, handoffs, selected: items[0] ?? null, loaded: true };
@@ -311,7 +315,7 @@ async function selectApproval(requestId) {
     );
     if (state !== requestState) return;
     state.selectedRequestId = requestId;
-    state.routeData = { ...state.routeData, selected };
+    state.routeData = { ...state.routeData, items: (state.routeData.items || []).map(item => item.request_id === selected.request_id ? selected : item), selected };
     render();
   } catch (error) {
     if (state !== requestState) return;
@@ -349,11 +353,9 @@ async function decide(action) {
       },
     );
     if (state !== requestState) return;
-    const items = await apiRequest('/api/operations/approvals', {
-      identityId,
-    });
+    const items = await loadOperationalItems(identityId);
     if (state !== requestState) return;
-    state.routeData = { ...state.routeData, items, selected: final, loaded: true };
+    state.routeData = { ...state.routeData, items: [...items.filter(item => item.request_id !== final.request_id), final], selected: final, loaded: true };
     state.selectedRequestId = final.request_id;
   } catch (error) {
     if (state !== requestState) return;
@@ -486,6 +488,9 @@ function bindInteractions() {
     }
   });
 
+  app.querySelectorAll('[data-request-select]').forEach(button => {
+    button.addEventListener('click', () => { state.selectedRequestId = button.dataset.requestSelect; render(); });
+  });
   app.querySelectorAll('.queue-row[data-request-id]').forEach((button) => {
     button.addEventListener('click', () => void selectApproval(button.dataset.requestId));
   });

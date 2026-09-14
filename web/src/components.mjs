@@ -1,10 +1,9 @@
+import { renderTrackingQueue, renderTrackingDetail, renderTrackingWorkspace } from './tracking.mjs';
 import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
 import { renderApprovedKnowledgeBody, renderMessageBody } from './knowledge_content.mjs';
 import {
   escapeHtml,
-  renderConfidence,
   renderEmptyState,
-  renderStatus,
 } from './render.mjs';
 
 
@@ -13,17 +12,17 @@ export function renderJupAvatar({ compact = false } = {}) {
 }
 
 export function renderAppHeader({ activeRoute, operational = false, operationPath = '/demo/operacao/cdm', identities = [], identity = {}, pending = false }) {
-  const globalItems = [['solutions', '/', 'Soluções'], ['jup', '/jup', 'Falar com o Jup']];
+  const globalItems = operational ? [] : [['solutions', '/', 'Soluções'], ['jup', '/jup', 'Falar com o Jup']];
   const sidebarItems = operational
-    ? [['approvals', operationPath, 'Solicitações recebidas'], ['prevention', '/demo/operacao/prevention', 'Prevenção']]
+    ? [['approvals', operationPath, 'Solicitações recebidas']]
     : [['requests', '/requests', 'Acompanhar chamado'], ['solutions', '/', 'Artigos de ajuda']];
   const initials = (identity.name || 'Jup').split(' ').slice(0, 2).map(word => word[0]).join('');
   const links = items => items.map(([route, href, label]) => `<a href="${href}" data-route="${route}"${activeRoute === route || (route === 'solutions' && activeRoute === 'solution') ? ' aria-current="page"' : ''}>${navIcon(route)}<span>${label}</span></a>`).join('');
   const showSidebar = !['solutions', 'solution'].includes(activeRoute);
   return `<header class="app-header app-header--${operational ? 'operational' : 'public'}">
     <a class="brand-lockup" href="/" data-route="solutions"><img src="/assets/brand/jup-resolve-logo.svg" width="168" height="42" alt="Jup Resolve"></a>
-    <nav class="primary-nav" aria-label="Navegação principal">${links(globalItems)}</nav>
-    <div class="header-actions"><a class="header-search" href="/" data-route="solutions" aria-label="Buscar artigos">${navIcon('search')}</a><details class="persona-menu"><summary><span class="user-avatar">${escapeHtml(initials)}</span><span class="user-copy"><strong>${escapeHtml(identity.name || 'Carregando')}</strong><small>${escapeHtml(identity.area || 'Juparanã')}</small></span>${navIcon('chevron')}</summary><div class="persona-options"><p>Trocar usuário</p>${identities.map(item => `<button type="button" data-persona="${escapeHtml(item.identity_id)}"${pending ? ' disabled' : ''} aria-pressed="${item.identity_id === identity.identity_id}"><strong>${escapeHtml(item.name || item.identity_id)}</strong><small>${escapeHtml(item.area || '')}</small></button>`).join('')}</div></details></div>
+    ${operational ? '<div></div>' : `<nav class="primary-nav" aria-label="Navegação principal">${links(globalItems)}</nav>`}
+    <div class="header-actions"><a class="header-search" href="/" data-route="solutions" aria-label="Buscar artigos">${navIcon('search')}</a><details class="persona-menu"><summary><span class="user-avatar">${escapeHtml(initials)}</span><span class="user-copy"><strong>${escapeHtml(identity.name || 'Carregando')}</strong><small>${escapeHtml(identity.area || 'Juparanã')}</small></span>${navIcon('chevron')}</summary><div class="persona-options"><p>Trocar usuário</p>${identities.filter(item => item.identity_id !== 'tecnico-geral').map(item => `<button type="button" data-persona="${escapeHtml(item.identity_id)}"${pending ? ' disabled' : ''} aria-pressed="${item.identity_id === identity.identity_id}"><strong>${escapeHtml(item.name || item.identity_id)}</strong><small>${escapeHtml(item.area || '')}</small></button>`).join('')}</div></details></div>
   </header>${showSidebar ? `<aside class="app-sidebar" aria-label="Menu contextual"><nav>
   ${operational ? '<p class="sidebar-label">Painel operacional</p>' : `<button class="sidebar-new" type="button" data-action="new-chat"${pending ? ' disabled' : ''}>${navIcon('plus')}Nova conversa</button>`}
   ${links(sidebarItems)}</nav></aside>` : ''}`;
@@ -140,54 +139,16 @@ export function renderJupWorkspace({ identity = {}, messages = [], understood = 
   </section>`;
 }
 
-function timeline(events = []) {
-  if (!events.length) return '';
-  return `<ol class="timeline">${events
-    .map((event) => `<li><span aria-hidden="true"></span><div><strong>${escapeHtml(event.label)}</strong>${event.occurred_at ? `<small>${escapeHtml(event.occurred_at)}</small>` : ''}</div></li>`)
-    .join('')}</ol>`;
-}
-
-export function renderRequestList(items = []) {
-  if (!items.length) {
-    return renderEmptyState('Nenhuma solicitação ainda', 'Converse com o Jup para iniciar uma solicitação quando houver uma ação necessária.');
-  }
-  return `<div class="request-list">${items
-    .map((item) => `<article class="request-row" data-request-id="${escapeHtml(item.request_id)}">
-      <div class="request-row-main"><span class="system-mark">${escapeHtml(item.system)}</span><div><h3>${escapeHtml(item.purpose || item.requested_role || 'Solicitação')}</h3><p>${escapeHtml(item.request_id)}</p></div></div>
-      <div class="request-row-status">${renderStatus(item)}</div>
-      <details class="request-timeline"><summary>Ver detalhes da solicitação</summary><p>${escapeHtml(item.purpose)}</p>${item.routing?.technician_name ? `<p>Responsável: ${escapeHtml(item.routing.technician_name)}</p>` : ''}${timeline(item.timeline)}</details>
-    </article>`)
-    .join('')}</div>`;
+export function renderRequestList(items = [], selectedId = null) {
+  return renderTrackingWorkspace(items, selectedId);
 }
 
 export function renderOperationDetail(item, uiState = {}) {
-  if (!item) return renderEmptyState('Selecione uma pendência', 'Abra uma solicitação da fila para revisar contexto, policy e routing.');
-  const approving = uiState.pendingAction === 'approve';
-  const rejecting = uiState.pendingAction === 'reject';
-  const actionDisabled = approving || rejecting || item.state !== 'PENDING_APPROVAL';
-  const policyReason = item.policy?.reason || item.policy?.decision || 'Sem detalhe adicional.';
-  return `<article class="operation-detail">
-    <header class="operation-detail-header"><div><p>${escapeHtml(item.request_id)}</p><h2>${escapeHtml(item.system)} · ${escapeHtml(item.purpose || item.requested_role)}</h2></div>${renderStatus(item)}</header>
-    <div class="evidence-grid">
-      <section><span>Solicitante</span><strong>${escapeHtml(item.requester?.name)}</strong><p>${escapeHtml(item.requester?.area)}</p></section>
-      <section><span>Confiança da classificação</span>${renderConfidence(item.confidence)}</section>
-      <section><span>Policy</span><strong>${escapeHtml(item.policy?.decision)}</strong><p>${escapeHtml(policyReason)}</p></section>
-      <section><span>Routing</span><strong>${escapeHtml(item.routing?.technician_name || 'Não atribuído')}</strong><p>${escapeHtml(item.routing?.capability)}</p></section>
-    </div>
-    <section class="technical-context"><h3>Contexto da solicitação</h3><p>${escapeHtml(item.purpose)}</p><dl><dt>Perfil solicitado</dt><dd>${escapeHtml(item.requested_role)}</dd><dt>Orientação de origem</dt><dd>${escapeHtml(item.knowledge_id)}</dd></dl></section>
-    ${timeline(item.timeline)}
-    <div class="decision-bar">
-      <button class="button button--secondary button--danger" data-action="reject" type="button"${actionDisabled ? ' disabled' : ''}>${rejecting ? 'Rejeitando...' : 'Rejeitar'}</button>
-      <button class="button button--primary" data-action="approve" data-version="${escapeHtml(item.version)}" type="button"${actionDisabled ? ' disabled' : ''}>${approving ? 'Aprovando solicitação...' : 'Aprovar solicitação'}</button>
-    </div>
-  </article>`;
+  return renderTrackingDetail(item, { operational: true, pendingAction: uiState.pendingAction });
 }
 
-export function renderApprovalQueue(items = []) {
-  if (!items.length) return renderEmptyState('Nenhuma pendência para você', 'Quando uma solicitação exigir sua aprovação e for roteada para você, ela aparecerá aqui.');
-  return `<div class="approval-queue">${items
-    .map((item) => `<button type="button" class="queue-row" data-request-id="${escapeHtml(item.request_id)}"><div><span>${escapeHtml(item.system)}</span><strong>${escapeHtml(item.requester?.name)}</strong><small>${escapeHtml(item.request_id)}</small></div>${renderStatus(item)}</button>`)
-    .join('')}</div>`;
+export function renderApprovalQueue(items = [], selectedId = null) {
+  return renderTrackingQueue(items, selectedId || items[0]?.request_id, true);
 }
 
 export function renderPreventionList(items = []) {

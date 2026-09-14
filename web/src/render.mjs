@@ -25,7 +25,7 @@ const STATUS_ICONS = {
 
 export function renderStatus(item = {}) {
   const state = escapeHtml(item.state ?? 'UNKNOWN');
-  const label = escapeHtml(item.state_label ?? item.state ?? 'Estado desconhecido');
+  const label = escapeHtml(item.state_label ?? ({ PENDING_APPROVAL: 'Aguardando aprovação', APPROVED: 'Aprovada', REJECTED: 'Rejeitada', DENIED_POLICY: 'Não autorizada', EXECUTING: 'Em andamento', COMPLETED: 'Concluída', FAILED: 'Não concluída' })[item.state] ?? 'Estado indisponível');
   const icon = escapeHtml(STATUS_ICONS[item.state] ?? '•');
   return `<span class="status-badge" data-state="${state}"><span aria-hidden="true">${icon}</span><span>${label}</span></span>`;
 }
@@ -54,4 +54,15 @@ export function renderPrimaryNavigation(activeRoute, identity = {}) {
       return `<a href="${href}" data-route="${route}"${current ? ' aria-current="page"' : ''}>${label}</a>`;
     })
     .join('')}</nav>`;
+}
+
+// Fixed timezone and month names avoid host locale and clock dependencies.
+export function formatTimestamp(value) {
+  if (!value) return 'Data indisponível';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return 'Data indisponível';
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
+  const get = name => parts.find(part => part.type === name)?.value;
+  const months = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  return `${get('day')} ${months[Number(get('month')) - 1]} · ${get('hour')}:${get('minute')}`;
 }

@@ -8,10 +8,11 @@ async function boot(path, respond) {
   const events = {};
   const newChat = { addEventListener(name, handler) { events.newChat = handler; } };
   const queueRow = { dataset: { requestId: 'R-1' }, addEventListener(name, handler) { events.selectApproval = handler; } };
+  const approve = { addEventListener(name, handler) { events.approve = handler; } };
   const persona = { dataset: { persona: 'tecnico-cdm' }, addEventListener(name, handler) { events.persona = handler; } };
   const field = { value: '', addEventListener() {} };
   const form = { addEventListener(name, handler) { events[name] = handler; }, querySelector() { return field; } };
-  const root = { innerHTML: '', setAttribute() {}, querySelectorAll(selector) { return selector === '.queue-row[data-request-id]' ? [queueRow] : selector === '[data-persona]' ? [persona] : []; }, querySelector(selector) { return selector === '[data-action="new-chat"]' ? newChat : selector === '#jup-form' ? form : selector === '#jup-message' ? field : null; } };
+  const root = { innerHTML: '', setAttribute() {}, querySelectorAll(selector) { return selector === '.queue-row[data-request-id]' ? [queueRow] : selector === '[data-persona]' ? [persona] : []; }, querySelector(selector) { return selector === '[data-action="approve"]' ? approve : selector === '[data-action="new-chat"]' ? newChat : selector === '#jup-form' ? form : selector === '#jup-message' ? field : null; } };
   const win = { location: new URL(`http://demo${path}`), addEventListener(name, fn) { events[name] = fn; } };
   win.history = { pushState(_a, _b, path) { win.location = new URL(path, win.location); } };
   globalThis.document = { querySelector(selector) { return selector === '#app' ? root : null; } };
@@ -23,7 +24,7 @@ async function boot(path, respond) {
     return new Response(JSON.stringify(payload), { status: 200 });
   };
   await import(`../src/app.mjs?test=${++serial}`); await tick();
-  return { root, field, async selectApproval() { events.selectApproval(); await tick(); }, async reset() { await events.newChat?.(); await tick(); }, async switchPersona() { await events.persona?.(); await tick(); }, async go(path) { win.location = new URL(`http://demo${path}`); events.popstate(); await tick(); }, async send(text) { field.value = text; events.submit({ preventDefault() {}, currentTarget: form }); await tick(); } };
+  return { root, field, async approve() { await events.approve(); await tick(); }, async selectApproval() { events.selectApproval(); await tick(); }, async reset() { await events.newChat?.(); await tick(); }, async switchPersona() { await events.persona?.(); await tick(); }, async go(path) { win.location = new URL(`http://demo${path}`); events.popstate(); await tick(); }, async send(text) { field.value = text; events.submit({ preventDefault() {}, currentTarget: form }); await tick(); } };
 }
 
 test('late FAQ response cannot replace an article after navigation', async () => {
@@ -35,9 +36,9 @@ test('late FAQ response cannot replace an article after navigation', async () =>
   assert.match(ui.root.innerHTML, /Artigo atual/);
 });
 
-test('operational tabs preserve the Microsoft technician route', async () => {
+test('operational sidebar preserves the Microsoft technician route', async () => {
   const ui = await boot('/demo/operacao/m365', () => []);
-  assert.match(ui.root.innerHTML, /href="\/demo\/operacao\/m365" data-route-link="approvals"/);
+  assert.match(ui.root.innerHTML, /href="\/demo\/operacao\/m365" data-route="approvals"/);
 });
 
 test('late chat result is not shown under a different route identity', async () => {
@@ -99,4 +100,33 @@ test('late operational detail cannot leak into another persona', async () => {
   finish({ request_id: 'R-1', purpose: 'Contexto privado CDM', state: 'PENDING_APPROVAL' });
   await tick();
   assert.doesNotMatch(ui.root.innerHTML, /Contexto privado CDM/);
+});
+
+
+test('completed server result remains selectable after leaving and reopening the queue', async () => {
+  const pending = { request_id: 'R-1', state: 'PENDING_APPROVAL', purpose: 'Materiais', version: 1 };
+  const final = { ...pending, state: 'COMPLETED', version: 3 };
+  let completed = false;
+  const ui = await boot('/demo/operacao/cdm', url => {
+    if (url === '/api/requests/R-1/approve') { completed = true; return final; }
+    if (url === '/api/operations/approvals/R-1') return completed ? final : pending;
+    if (url === '/api/operations/approvals') return completed ? [] : [pending];
+    return [];
+  });
+  await ui.approve();
+  assert.match(ui.root.innerHTML, /class="queue-row"[^>]*data-request-id="R-1"/);
+  assert.doesNotMatch(ui.root.innerHTML, /data-action="approve"/);
+  await ui.go('/'); await ui.go('/demo/operacao/cdm');
+  assert.match(ui.root.innerHTML, /class="queue-row"[^>]*data-request-id="R-1"/);
+  assert.match(ui.root.innerHTML, /Concluída/);
+});
+
+
+test('selecting an externally completed request updates both its row and detail', async () => {
+  const item = { request_id: 'R-1', state: 'PENDING_APPROVAL', purpose: 'Materiais' };
+  const ui = await boot('/demo/operacao/cdm', url => url === '/api/operations/approvals/R-1' ? { ...item, state: 'COMPLETED' } : url === '/api/operations/approvals' ? [item] : []);
+  await ui.selectApproval();
+  const row = ui.root.innerHTML.match(/class="queue-row"[^]*?<\/button>/)?.[0];
+  assert.match(row, /Concluída/);
+  assert.doesNotMatch(ui.root.innerHTML, /data-action="approve"/);
 });
