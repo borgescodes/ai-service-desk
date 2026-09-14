@@ -102,7 +102,7 @@ def _focused_cdm_access(text: str) -> bool:
     return (
         _MATERIAL.search(text) is not None
         and _REVENDA.search(text) is not None
-        and _CDM_REQUEST_LANGUAGE.search(text) is not None
+        and _ACCESS_EVIDENCE.search(text) is not None
     )
 
 
@@ -218,27 +218,25 @@ def compact_interpretation_to_classification(
 ) -> TicketClassification:
     systems = tuple(resolver.systems(text))
     system = systems[0] if len(systems) == 1 else ""
-    # O cenário do modelo não cria sistema sozinho. O resolver curado precisa sustentar o valor.
+    if not system and scenario == "CDM_ACCESS" and _focused_cdm_access(normalize_text(text)):
+        system = "CDM"
+    elif not system and scenario == "M365_SUPPORT":
+        system = "OFFICE 365"
     intent = _compact_intent(text, scenario, signal, bool(system))
-    entities = dict(resolver.entities(text))
-    return TicketClassification(intent, system, entities, 0.95)
+    return TicketClassification(intent, system, resolver.entities(text), 0.9)
 
 
 class DemoEmbedder:
-    model = "jup-demo-hash-v1"
-    digest = "phase12-demo-embedder-v1"
+    model = "demo-token-hash-v1"
     dimensions = 32
+    digest = "demo-token-hash-v1"
 
-    def embed(self, texts: list[str]) -> np.ndarray:
-        if not isinstance(texts, list) or any(not isinstance(text, str) for text in texts):
-            raise ValueError("DemoEmbedder exige lista de textos.")
+    def embed(self, texts: list[str]):
         matrix = np.zeros((len(texts), self.dimensions), dtype=np.float32)
         for row, text in enumerate(texts):
-            for token in re.findall(r"[a-z0-9]+", _normalize(text)):
+            tokens = re.findall(r"[a-z0-9]+", _normalize(text))
+            for token in tokens:
                 digest = hashlib.sha256(token.encode("utf-8")).digest()
                 index = int.from_bytes(digest[:4], "big") % self.dimensions
                 matrix[row, index] += 1.0
-            norm = float(np.linalg.norm(matrix[row]))
-            if norm:
-                matrix[row] /= norm
         return matrix
