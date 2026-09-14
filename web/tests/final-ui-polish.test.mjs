@@ -17,7 +17,7 @@ test('FAQ catalog and shell use the shared Lucide icon registry', () => {
   const faq = renderSolutionsHome({ groups, searchQuery: '', searchResults: null, searching: false });
   const header = renderAppHeader({ activeRoute: 'jup', identity: { name: 'Pedro Miranda' } });
   assert.match(faq, /data-lucide="search"/);
-  assert.match(faq, /data-lucide="key-round"/);
+  assert.match(faq, /data-lucide="chevron-down"/);
   assert.match(faq, /data-lucide="arrow-right"/);
   assert.match(header, /data-lucide="search"/);
   assert.match(header, /data-lucide="clipboard-list"/);
@@ -47,4 +47,16 @@ test('FAQ layout grows naturally with a separate CTA, and subtle motion', () => 
   assert.match(css, /\.faq-category-panel[^}]*transition:/);
   assert.match(css, /\.faq-category\[open\][^{]*>\s*summary/);
   assert.match(css, /prefers-reduced-motion/);
+});
+
+
+test('FAQ category headings omit decorative icons and keep expansion chevrons', () => {
+  const html = renderSolutionsHome({ groups });
+  const headings = [...html.matchAll(/<summary>(.*?)<\/summary>/gs)].map(match => match[1]);
+  assert.equal(headings.length, 4);
+  for (const heading of headings) {
+    assert.doesNotMatch(heading, /faq-category-icon|key-round|circle-alert|printer|wifi/);
+    assert.equal((heading.match(/data-lucide=/g) || []).length, 1);
+    assert.match(heading, /chevron-down/);
+  }
 });

@@ -17,7 +17,8 @@ function scrollOpenFaqIntoView(current) {
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   setTimeout(() => {
     if (!current.open || !current.isConnected) return;
-    const target = pageScrollTarget(current.getBoundingClientRect(), window.innerHeight, window.scrollY);
+    const footerHeight = document.querySelector('.faq-help-strip')?.getBoundingClientRect().height || 0;
+    const target = pageScrollTarget(current.getBoundingClientRect(), window.innerHeight - footerHeight, window.scrollY);
     if (target !== null) window.scrollTo({ top: target, behavior: reducedMotion ? 'auto' : 'smooth' });
   }, reducedMotion ? 0 : 240);
 }

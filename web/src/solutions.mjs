@@ -96,7 +96,7 @@ export function renderSolutionsResults({ groups = [], searchQuery = '', category
     return renderFaqDirectory(`<div class="faq-empty"><h2>Nenhuma solução encontrada.</h2><p>Tente outras palavras ou conte sua dúvida ao Jup.</p><a class="button button--primary" href="${draftPath(searchQuery)}" data-route="jup">${navIcon('message-circle')}Falar com o Jup</a></div>`);
   }
   const countLabel = `${query && availableCdm ? '1 solução encontrada · ' : ''}${count} ${count === 1 ? 'artigo' : 'artigos'}`;
-  const details = categories.map(([key, label, icon, titles], index) => `<details class="faq-category"${index === 0 ? ' open' : ''}><summary><span class="faq-category-icon">${navIcon(icon)}</span><strong>${label}</strong><small>${titles.length} artigos</small>${navIcon('chevron-down')}</summary><div class="faq-category-panel"><div class="faq-category-items">${titles.map(title => visualArticle(title, availableCdm)).join('')}</div></div></details>`).join('');
+  const details = categories.map(([key, label, icon, titles], index) => `<details class="faq-category"${index === 0 ? ' open' : ''}><summary><strong>${label}</strong><small>${titles.length} artigos</small>${navIcon('chevron-down')}</summary><div class="faq-category-panel"><div class="faq-category-items">${titles.map(title => visualArticle(title, availableCdm)).join('')}</div></div></details>`).join('');
   return renderFaqDirectory(details, countLabel);
 }
 
@@ -113,7 +113,7 @@ export function renderSolutionsHome(options = {}) {
 export function renderSolutionDetail(detail) {
   const officialUrl = detail.knowledge_id === CDM_FAQ_ID && detail.procedure_url === 'https://cdm.juparana.com.br/' ? detail.procedure_url : null;
   return `<article class="solution-detail">
-    <nav class="breadcrumb" aria-label="Localização"><a href="/" data-route="solutions">Central de Suporte</a><span aria-hidden="true">/</span><span>CDM</span></nav>
+    <nav class="breadcrumb" aria-label="Localização"><a href="/" data-route="solutions">Central de Suporte</a><span aria-hidden="true">/</span><span>Acessos e rotinas</span><span aria-hidden="true">/</span><span>CDM</span></nav>
     <header class="solution-article-header"><img class="article-symbol" src="/assets/brand/cdm-simbol.svg" width="64" height="64" alt="CDM"><p class="solution-category">Acessos e rotinas · ${escapeHtml(detail.system || 'CDM')}</p><h1>${escapeHtml(detail.title)}</h1><p>Siga as orientações abaixo para solicitar seu acesso.</p>${officialUrl ? `<a class="button button--primary" href="${officialUrl}" target="_blank" rel="noopener noreferrer">Abrir o CDM ↗</a>` : ''}</header>
     <div class="knowledge-body">${renderApprovedKnowledgeBody({ text: detail.answer, procedureUrl: detail.procedure_url, knowledgeId: detail.knowledge_id })}</div>
     <aside class="security-note"><strong>Cuide da sua segurança</strong><p>Não compartilhe senhas ou códigos de verificação. Use sempre o endereço oficial do sistema.</p></aside>

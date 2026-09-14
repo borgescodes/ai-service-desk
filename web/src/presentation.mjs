@@ -1,3 +1,11 @@
+export function createWelcomeEntry() {
+  let wasVisible = false;
+  return {
+    update(visible) { const entering = visible && !wasVisible; wasVisible = visible; return entering; },
+    reset() { wasVisible = false; },
+  };
+}
+
 export function pageScrollTarget(rect, height, scrollY) {
   if (rect.top >= 96 && rect.bottom <= height - 24) return null;
   return Math.max(0, scrollY + rect.top - 116);

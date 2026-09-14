@@ -1,4 +1,4 @@
-import { presentChat, dismissThinking } from './presentation.mjs';
+import { presentChat, dismissThinking, createWelcomeEntry } from './presentation.mjs';
 import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
 import { captureConversationScroll, restoreConversationScroll } from './conversation.mjs';
 import { createFaqSearch, renderSolutionDetail, renderSolutionsHome, renderSolutionsResults } from './solutions.mjs';
@@ -19,7 +19,7 @@ const app = document.querySelector('#app');
 let identityRevision = 0;
 let renderedMessageCount = 0;
 let finishPresentation = () => {};
-let welcomePresented = false;
+const welcomeEntry = createWelcomeEntry();
 // IDs only, scoped to the current page session and technician. Details are always reauthorized.
 const knownOperationalRequests = new Map();
 async function loadOperationalItems(identityId) {
@@ -117,8 +117,7 @@ function render() {
   app.setAttribute('aria-busy', String(state.loading));
   bindInteractions();
   const hasWelcome = Boolean(app.querySelector('.chat-welcome:not(.chat-welcome--leaving)'));
-  finishPresentation = presentChat(app, { welcome: hasWelcome && !welcomePresented, followConversation: scroll?.atEnd ?? true, reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false });
-  if (hasWelcome) welcomePresented = true;
+  finishPresentation = presentChat(app, { welcome: welcomeEntry.update(hasWelcome), followConversation: scroll?.atEnd ?? true, reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false });
   renderedMessageCount = state.messages.length;
   restoreConversationScroll(app.querySelector('.conversation-thread'), app.querySelector('[data-action="scroll-bottom"]'), scroll, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
   if (focused && !state.pendingAction) app.querySelector('#jup-message')?.focus?.({ preventScroll: true });
@@ -437,7 +436,7 @@ async function newChat() {
     identityRevision += 1;
     state = resetConversation(state);
     renderedMessageCount = 0;
-    welcomePresented = false;
+    welcomeEntry.reset();
     await navigate('/jup');
   } catch (error) {
     if (revision !== identityRevision) return;
