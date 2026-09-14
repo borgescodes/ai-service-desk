@@ -1,11 +1,13 @@
 import { renderTrackingQueue, renderTrackingDetail, renderTrackingWorkspace } from './tracking.mjs';
 import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
 import { renderApprovedKnowledgeBody, renderMessageBody } from './knowledge_content.mjs';
+import { navIcon } from './icons.mjs';
 import {
   escapeHtml,
   renderEmptyState,
 } from './render.mjs';
 
+export { navIcon };
 
 export function renderJupAvatar({ compact = false } = {}) {
   return renderJupVisual({ compact });
@@ -26,26 +28,6 @@ export function renderAppHeader({ activeRoute, operational = false, operationPat
   </header>${showSidebar ? `<aside class="app-sidebar" aria-label="Menu contextual"><nav>
   ${operational ? '<p class="sidebar-label">Painel operacional</p>' : `<button class="sidebar-new" type="button" data-action="new-chat"${pending ? ' disabled' : ''}>${navIcon('plus')}Nova conversa</button>`}
   ${links(sidebarItems)}</nav></aside>` : ''}`;
-}
-
-export function navIcon(name) {
-  const paths = {
-    search: '<circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/>',
-    key: '<circle cx="15" cy="8" r="5"/><path d="m11 12-8 8v-4l3-3h3M16 7h.01"/>',
-    errors: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 17h.01"/>',
-    printer: '<path d="M7 8V3h10v5M7 17H3V8h18v9h-4M7 14h10v7H7zM17 11h.01"/>',
-    wifi: '<path d="M2 8a16 16 0 0 1 20 0M5 12a11 11 0 0 1 14 0M8 16a6 6 0 0 1 8 0M12 20h.01"/>',
-    support: '<path d="M4 14V10a8 8 0 0 1 16 0v7q0 4-6 4M4 11h4v7H4zM16 11h4v7h-4z"/>',
-    send: '<path d="m3 3 18 7-8 3-3 8-7-18ZM3 3l10 10"/>',
-    plus: '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',
-    solutions: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
-    jup: '<path d="M21 11a9 9 0 0 1-9 9H4l-2 2v-11a9 9 0 0 1 19 0Z"/><path d="M7 11h10M7 15h6"/>',
-    requests: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3h6v4H9zM9 11h6M9 15h6"/>',
-    approvals: '<path d="M3 5h18v15H3zM3 10h18M9 10v10"/>',
-    prevention: '<path d="M3 18h18M5 14l4-4 4 3 6-8"/>',
-    chevron: '<path d="m7 10 5 5 5-5"/>',
-  };
-  return `<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.solutions}</svg>`;
 }
 
 function renderSupportHandoff(handoff) {

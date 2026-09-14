@@ -11,12 +11,23 @@ document.addEventListener('input', event => {
   if (event.target?.id === 'jup-message') syncWelcomeListening(event.target.value);
 });
 
-// The `name` attribute provides native exclusivity in current browsers; this keeps
-// the same one-open contract in engines that do not implement grouped details yet.
+function scrollOpenFaqIntoView(current) {
+  const viewport = current.closest('.faq-directory-scroll');
+  if (!viewport || !current.open) return;
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  requestAnimationFrame(() => {
+    const viewportRect = viewport.getBoundingClientRect();
+    const categoryRect = current.getBoundingClientRect();
+    const targetTop = viewport.scrollTop + categoryRect.top - viewportRect.top - 8;
+    viewport.scrollTo({
+      top: Math.max(0, targetTop),
+      behavior: reducedMotion ? 'auto' : 'smooth',
+    });
+  });
+}
+
 document.addEventListener('toggle', event => {
   const current = event.target;
-  if (!(current instanceof HTMLDetailsElement) || !current.matches('.faq-category[name="support-faq"]') || !current.open) return;
-  document.querySelectorAll('.faq-category[name="support-faq"][open]').forEach(item => {
-    if (item !== current) item.open = false;
-  });
+  if (!(current instanceof HTMLDetailsElement) || !current.matches('.faq-category') || !current.open) return;
+  scrollOpenFaqIntoView(current);
 }, true);
