@@ -89,14 +89,14 @@ test('one visual foundation is loaded together with the original animated avatar
   assert.doesNotMatch(html, /premium.css|showcase-desktop.css/);
 });
 
-test('FAQ accordion is exclusive, animated and catalog rows do not expose demo labels', () => {
+test('FAQ accordion is independent, animated and catalog rows do not expose demo labels', () => {
   const html = solutions.renderSolutionsHome({
     groups: [{ items: [{ knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001' }] }],
     searchQuery: '',
     searchResults: null,
     searching: false,
   });
-  assert.match(html, /<details class="faq-category" name="support-faq"/);
+  assert.doesNotMatch(html, /name="support-faq"/);
   assert.match(html, /class="faq-category-panel"/);
   assert.doesNotMatch(html, /Exemplo visual/);
   assert.match(html, /Como entrar no CDM depois da aprovação[^]*?class="solution-arrow"/);
