@@ -183,11 +183,15 @@ def _compact_intent(text: str, scenario: str, signal: str, has_system: bool) -> 
     privileged_access = (
         signal == "PRIVILEGED_ACCESS" and _PRIVILEGED_ROLE.search(normalized) is not None
     )
-    if signal in {
-        "ACCESS_REQUEST",
-        "LOGIN_PROBLEM",
-        "PASSWORD_EVIDENCE",
-    } and textual_access:
+    if (
+        signal
+        in {
+            "ACCESS_REQUEST",
+            "LOGIN_PROBLEM",
+            "PASSWORD_EVIDENCE",
+        }
+        and textual_access
+    ):
         return "PROBLEMA_ACESSO"
     if privileged_access:
         return "PROBLEMA_ACESSO"
