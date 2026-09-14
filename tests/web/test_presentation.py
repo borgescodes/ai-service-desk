@@ -16,7 +16,7 @@ def _pending_request(runtime: DemoRuntime):
     )
 
 
-def test_present_request_uses_portuguese_state_label_and_neutral_confidence_semantic() -> None:
+def test_present_request_uses_portuguese_state_label_and_explainable_confidence() -> None:
     runtime = DemoRuntime.create()
     try:
         record, audit, assignment = _pending_request(runtime)
@@ -29,12 +29,28 @@ def test_present_request_uses_portuguese_state_label_and_neutral_confidence_sema
 
         assert payload["state"] == "PENDING_APPROVAL"
         assert payload["state_label"] == "Aguardando aprovação"
-        assert payload["confidence"] == {
-            "level": "HIGH",
-            "label": "Alta",
-            "percent": 87,
-            "tone": "confidence",
+        assert payload["requester"] == {
+            "name": "Fulano de Tal",
+            "username": "fulano.tal",
+            "email": "fulano.tal@juparana.com.br",
+            "area": "Revenda - Matriz",
+            "identity_source": "BACKEND_SESSION_PROVIDER",
         }
+        assert payload["confidence"]["level"] == "HIGH"
+        assert payload["confidence"]["label"] == "Alta"
+        assert payload["confidence"]["percent"] is None
+        assert payload["confidence"]["explanations"] == [
+            {
+                "code": "AREA_MATCH_REVENDA",
+                "kind": "positive",
+                "text": "Área de atuação compatível com Revenda.",
+            },
+            {
+                "code": "PURPOSE_MATCH_MATERIAL_REQUEST",
+                "kind": "positive",
+                "text": "Finalidade de solicitação de materiais confirmada.",
+            },
+        ]
         assert "reason_code" not in payload["policy"]
     finally:
         runtime.close()
