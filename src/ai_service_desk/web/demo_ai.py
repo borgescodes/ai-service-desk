@@ -9,10 +9,12 @@ from ai_service_desk.engine.types import TicketClassification
 from ai_service_desk.engine.validation import normalize_text
 
 _CDM_SYSTEM = re.compile(r"\b(?:cdm|central de dados mestres)\b")
-_PRIVILEGED_ROLE = re.compile(r"\b(?:admin|administrador(?:a)?|superadmin)\b")
+_PRIVILEGED_ROLE = re.compile(
+    r"\b(?:adm|admin|administrador(?:a)?|administrativ(?:o|a)|superadmin)\b"
+)
 _OTHER_EXPLICIT_SYSTEM = re.compile(
     r"\b(?:sap|siagri|cigam|metadados|portal rh|office|microsoft 365|m365|"
-    r"outlook|teams|onedrive|one drive)\b"
+    r"outlook|teams|onedrive|one drive|ubs)\b"
 )
 _MATERIAL = re.compile(r"\bmateria(?:l|is)\b")
 _REVENDA = re.compile(r"\brevenda\b")
@@ -122,9 +124,9 @@ _COMPACT_SYSTEM_PROMPT = "\n".join(
         "M365_SUPPORT=login/senha no Microsoft 365/Office/Outlook; "
         "OTHER_IT=outro TI; UNKNOWN=incerto. "
         "Cadastro de material sem pedido de acesso não é CDM_ACCESS.",
-        "signal: ACCESS_REQUEST=acesso normal; PRIVILEGED_ACCESS=admin/superadmin; "
-        "LOGIN_PROBLEM=falha de acesso; PASSWORD_EVIDENCE=senha; "
-        "SUCCESS=funcionou; FAILURE=não resolveu; UNKNOWN=demais.",
+        "signal: ACCESS_REQUEST=acesso normal; PRIVILEGED_ACCESS=adm/admin/administrativo/"
+        "administrador/superadmin; LOGIN_PROBLEM=falha de acesso; PASSWORD_EVIDENCE=senha; "
+        "SUCCESS=funcionou/deu certo; FAILURE=não resolveu/deu errado/não rolou; UNKNOWN=demais.",
         "BUSINESS_CONTEXT_CURRENT vem do backend; não amplie sistemas nem invente identidade, "
         "autorização, policy, aprovação, IDs, routing ou resultado. Só JSON do schema.",
     )
