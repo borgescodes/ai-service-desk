@@ -1,5 +1,7 @@
+import hashlib
 import json
 import os
+import re
 
 import pytest
 
@@ -9,9 +11,29 @@ from ai_service_desk.web import demo_runtime
 class SemanticGateway:
     def __init__(self):
         self.payloads = []
+        self.embed_requests = []
 
     def model_info(self, name):
-        return {"name": name}
+        return {"name": name, "digest": f"fake-{name}-digest"}
+
+    @staticmethod
+    def _embedding(text: str, dimensions: int = 1024) -> list[float]:
+        vector = [0.0] * dimensions
+        for token in re.findall(r"[a-z0-9]+", text.casefold()):
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            vector[int.from_bytes(digest[:4], "big") % dimensions] += 1.0
+        if not any(vector):
+            vector[0] = 1.0
+        return vector
+
+    def json_request(self, method, path, payload=None):
+        if method != "POST" or path != "/api/embed" or not isinstance(payload, dict):
+            raise AssertionError(f"Unexpected JSON request: {method} {path}")
+        texts = payload.get("input")
+        if not isinstance(texts, list):
+            raise AssertionError("Embedding input must be a list")
+        self.embed_requests.append(payload)
+        return {"embeddings": [self._embedding(text) for text in texts]}
 
     def close(self):
         pass
