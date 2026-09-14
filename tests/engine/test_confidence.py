@@ -54,7 +54,7 @@ def valid_context() -> AccessRequestContext:
         (
             "Revenda Sintetica",
             "preciso de acesso ao CDM",
-            "LOW",
+            "MEDIUM",
             ("AREA_MATCH_REVENDA", "PURPOSE_NOT_CONFIRMED"),
         ),
         (
