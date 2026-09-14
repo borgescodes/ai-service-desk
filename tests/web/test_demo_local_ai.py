@@ -52,7 +52,12 @@ class CompactGateway:
         self.payloads.append(payload)
         properties = payload.get("format", {}).get("properties", {})
         text = payload["messages"][-1]["content"].casefold()
-        if "scenario" in properties:
+        if "assistant_message" in properties:
+            choices = properties["assistant_message"].get("enum", [])
+            if not choices:
+                raise AssertionError("Conversational payload must expose allowed choices")
+            result = {"assistant_message": choices[0]}
+        elif "scenario" in properties:
             if (
                 "cdm" in text
                 or "central de dados mestres" in text
@@ -90,10 +95,10 @@ class InvalidCompactGateway(CompactGateway):
     mode = "extra"
 
     def chat(self, payload):
-        self.payloads.append(payload)
         properties = payload.get("format", {}).get("properties", {})
         if "scenario" not in properties:
             return super().chat(payload)
+        self.payloads.append(payload)
         if self.mode == "malformed":
             content = "{not-json"
             done_reason = "stop"
@@ -270,24 +275,27 @@ def test_local_ai_metrics_count_calls_turns_and_never_store_content(monkeypatch)
         runtime.close()
 
 
-def test_local_ai_zero_call_turns_are_measured_without_inference(monkeypatch):
+def test_local_ai_social_presentation_does_not_count_as_decision_inference(monkeypatch):
     runtime = _runtime(monkeypatch)
     try:
         gateway = runtime._ollama_client
         gateway.payloads.clear()
 
         runtime.send_message("pedro-miranda", "Bom dia")
-        assert len(gateway.payloads) == 0
+        assert len(gateway.payloads) == 1
+        social_schema = gateway.payloads[0]["format"]
+        assert set(social_schema["properties"]) == {"assistant_message"}
         assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 0
 
+        gateway.payloads.clear()
         runtime.send_message("pedro-miranda", "Quanto foi o jogo do Flamengo?")
-        assert len(gateway.payloads) == 0
+        assert gateway.payloads == []
         assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 0
     finally:
         runtime.close()
 
 
-def test_local_ai_never_uses_second_inference_to_render_backend_results(monkeypatch):
+def test_local_ai_uses_one_interpretation_and_no_render_inference_for_support_result(monkeypatch):
     runtime = _runtime(monkeypatch)
     try:
         gateway = runtime._ollama_client
@@ -296,6 +304,7 @@ def test_local_ai_never_uses_second_inference_to_render_backend_results(monkeypa
         created = runtime.send_message("pedro-miranda", "Preciso acessar o CDM.")
         assert created["request_id"]
         assert len(gateway.payloads) == 1
+        assert set(gateway.payloads[0]["format"]["properties"]) == {"scenario", "signal"}
         assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 1
 
         runtime.reset()
@@ -307,8 +316,9 @@ def test_local_ai_never_uses_second_inference_to_render_backend_results(monkeypa
         gateway.payloads.clear()
         resolved = runtime.send_message("pedro-miranda", "Funcionou.")
         assert resolved["resolved"] is True
-        assert gateway.payloads == []
-        assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 0
+        assert len(gateway.payloads) == 1
+        assert set(gateway.payloads[0]["format"]["properties"]) == {"scenario", "signal"}
+        assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 1
     finally:
         runtime.close()
 
