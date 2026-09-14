@@ -580,6 +580,12 @@ class DemoRuntime:
             return True
         if _GENERAL_IT_CLEAR.search(normalized):
             return True
+        if (
+            result.get("status") == "TRIAGE_ABSTAINED"
+            and state.intent in {"ORIENTACAO", "OUTRO"}
+            and bool(state.system)
+        ):
+            return True
         return bool(
             result.get("status") == "TRIAGE_ABSTAINED"
             and state.intent in {"ERRO_SISTEMA", "INSTALACAO_SOFTWARE", "PROBLEMA_ACESSO"}
