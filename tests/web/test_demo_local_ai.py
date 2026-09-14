@@ -4,6 +4,8 @@ import pytest
 
 from ai_service_desk.engine.ollama import OllamaError
 from ai_service_desk.web import demo_runtime
+from ai_service_desk.web.business_context import BusinessVocabulary
+from ai_service_desk.web.demo_ai import compact_interpretation_to_classification
 from ai_service_desk.web.errors import WebDemoError
 
 
@@ -147,6 +149,71 @@ def test_local_ai_uses_compact_scenario_signal_contract_and_small_payload(monkey
             assert broad_system not in lowered
     finally:
         runtime.close()
+
+
+@pytest.mark.parametrize(
+    "text,scenario,signal,expected_intent,expected_system",
+    [
+        (
+            "Preciso cadastrar um material para revenda",
+            "CDM_ACCESS",
+            "ACCESS_REQUEST",
+            "ORIENTACAO",
+            "CDM",
+        ),
+        (
+            "Bom dia! Preciso cadastrar material para revenda no SIAGRI",
+            "CDM_ACCESS",
+            "ACCESS_REQUEST",
+            "ORIENTACAO",
+            "SIAGRI",
+        ),
+        (
+            "Preciso de acesso ao CDM",
+            "CDM_ACCESS",
+            "ACCESS_REQUEST",
+            "PROBLEMA_ACESSO",
+            "CDM",
+        ),
+        (
+            "Nao consigo entrar no CDM",
+            "CDM_ACCESS",
+            "LOGIN_PROBLEM",
+            "PROBLEMA_ACESSO",
+            "CDM",
+        ),
+        (
+            "Preciso de acesso administrador ao CDM",
+            "CDM_ACCESS",
+            "PRIVILEGED_ACCESS",
+            "PROBLEMA_ACESSO",
+            "CDM",
+        ),
+        (
+            "Preciso instalar o Teams",
+            "OTHER_IT",
+            "UNKNOWN",
+            "INSTALACAO_SOFTWARE",
+            "OFFICE 365",
+        ),
+    ],
+)
+def test_compact_interpretation_requires_textual_access_evidence(
+    text,
+    scenario,
+    signal,
+    expected_intent,
+    expected_system,
+):
+    classification = compact_interpretation_to_classification(
+        text,
+        scenario,
+        signal,
+        BusinessVocabulary(),
+    )
+
+    assert classification.intent == expected_intent
+    assert classification.system == expected_system
 
 
 def test_local_ai_metrics_count_calls_turns_and_never_store_content(monkeypatch):
