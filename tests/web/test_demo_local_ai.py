@@ -1,4 +1,6 @@
+import hashlib
 import json
+import re
 
 import pytest
 
@@ -14,13 +16,37 @@ class CompactGateway:
 
     def __init__(self, *args, **kwargs):
         self.payloads = []
+        self.embed_requests = []
         self.model_checks = []
+        self._models = {}
         self.closed = False
         type(self).instances.append(self)
 
     def model_info(self, name):
-        self.model_checks.append(name)
-        return {"name": name, "digest": "fake-qwen-digest"}
+        if name not in self._models:
+            self.model_checks.append(name)
+            self._models[name] = {"name": name, "digest": f"fake-{name}-digest"}
+        return self._models[name]
+
+    @staticmethod
+    def _embedding(text: str, dimensions: int = 1024) -> list[float]:
+        vector = [0.0] * dimensions
+        for token in re.findall(r"[a-z0-9]+", text.casefold()):
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            index = int.from_bytes(digest[:4], "big") % dimensions
+            vector[index] += 1.0
+        if not any(vector):
+            vector[0] = 1.0
+        return vector
+
+    def json_request(self, method, path, payload=None):
+        if method != "POST" or path != "/api/embed" or not isinstance(payload, dict):
+            raise AssertionError(f"Unexpected JSON request: {method} {path}")
+        texts = payload.get("input")
+        if not isinstance(texts, list):
+            raise AssertionError("Embedding input must be a list")
+        self.embed_requests.append(payload)
+        return {"embeddings": [self._embedding(text) for text in texts]}
 
     def chat(self, payload):
         self.payloads.append(payload)
@@ -313,11 +339,13 @@ def test_local_ai_transport_failure_is_explicit_and_counted(monkeypatch):
         runtime.close()
 
 
-def test_local_ai_startup_validates_model_without_warmup_call(monkeypatch):
+def test_local_ai_startup_validates_models_without_warmup_chat(monkeypatch):
     runtime = _runtime(monkeypatch)
     try:
         gateway = runtime._ollama_client
-        assert gateway.model_checks == ["qwen3.5:4b"]
+        assert gateway.model_checks == ["qwen3.5:4b", "qwen3-embedding:0.6b"]
+        assert gateway.embed_requests
+        assert all(request["model"] == "qwen3-embedding:0.6b" for request in gateway.embed_requests)
         assert gateway.payloads == []
         metrics = runtime.local_ai_metrics()
         assert metrics["startup_ms"] >= 0
