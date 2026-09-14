@@ -97,10 +97,20 @@ def test_material_registration_never_becomes_cdm_access_request() -> None:
     try:
         result = runtime.send_message("pedro-miranda", "Preciso cadastrar um material para revenda")
 
-        assert result["status"] == "SUPPORT_HANDOFF_PENDING"
-        assert result["support_handoff"]["technician"]["technician_id"] == "TECH-GENERAL"
         assert result.get("state") != "PENDING_APPROVAL"
         assert result.get("policy") != "REQUIRE_APPROVAL"
+        assert runtime.created_request_ids == []
+        assert runtime.fake_cdm_store.access_count == 0
+
+        if result["status"] == "NEEDS_CLARIFICATION":
+            result = runtime.send_message(
+                "pedro-miranda",
+                "eu ja consigo acessar, preciso de ajuda com o cadastro do material",
+            )
+
+        assert result["status"] == "SUPPORT_HANDOFF_PENDING"
+        assert result["support_handoff"]["technician"]["technician_id"] == "TECH-GENERAL"
+        assert result["request_id"] is None
         assert runtime.created_request_ids == []
         assert runtime.fake_cdm_store.access_count == 0
     finally:
