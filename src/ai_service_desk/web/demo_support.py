@@ -370,14 +370,15 @@ class DemoSupportState:
     def _signal(
         message: str, interpreted_signal: LinguisticSignal | str | None
     ) -> LinguisticSignal:
+        normalized = normalize_text(message)
+        if _PASSWORD_EVIDENCE.search(normalized):
+            return LinguisticSignal.PASSWORD_EVIDENCE
+        # Evidência textual forte e controlada prevalece sobre um sinal semântico mais amplo.
         if interpreted_signal is not None:
             try:
                 return LinguisticSignal(interpreted_signal)
             except ValueError:
                 return LinguisticSignal.UNKNOWN
-        normalized = normalize_text(message)
-        if _PASSWORD_EVIDENCE.search(normalized):
-            return LinguisticSignal.PASSWORD_EVIDENCE
         # O troubleshooting focado desta demo é de autenticação/senha.
         # Teams genérico continua no fluxo de triagem existente, mesmo quando
         # a mensagem também menciona Office 365.
