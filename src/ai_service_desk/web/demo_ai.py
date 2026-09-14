@@ -19,6 +19,9 @@ _REVENDA = re.compile(r"\brevenda\b")
 _CDM_REQUEST_LANGUAGE = re.compile(
     r"\b(?:preciso|quero|acesso|acessar|entrar|solicitar|pedir|libera|liberar|perfil|sou)\b"
 )
+_ACCESS_EVIDENCE = re.compile(
+    r"\b(?:acesso|acessar|entrar|senha|permissao|permissoes|libera|liberar|perfil)\b"
+)
 
 
 class DemoClassifierClient:
@@ -115,9 +118,9 @@ _COMPACT_SYSTEM_PROMPT = "\n".join(
     (
         "Jup: classifique a mensagem para suporte de TI. Só interprete; "
         "o backend decide e executa.",
-        "scenario: CDM_ACCESS=acesso ao CDM/Central de Dados Mestres ou materiais da revenda; "
+        "scenario: CDM_ACCESS=pedido/problema de acesso ou permissão no CDM/Central de Dados Mestres; "
         "M365_SUPPORT=login/senha no Microsoft 365/Office/Outlook; OTHER_IT=outro TI; "
-        "UNKNOWN=incerto.",
+        "UNKNOWN=incerto. Cadastrar/operar materiais sem pedido de acesso não é CDM_ACCESS.",
         "signal: ACCESS_REQUEST=acesso normal; PRIVILEGED_ACCESS=admin/superadmin; "
         "LOGIN_PROBLEM=falha de acesso; PASSWORD_EVIDENCE=senha errada/esquecida; "
         "SUCCESS=funcionou; FAILURE=não resolveu; UNKNOWN=demais.",
@@ -174,15 +177,18 @@ def parse_compact_interpretation_response(payload: dict) -> tuple[str, str]:
 
 
 def _compact_intent(text: str, scenario: str, signal: str, has_system: bool) -> str:
+    normalized = normalize_text(text)
+    textual_access = _ACCESS_EVIDENCE.search(normalized) is not None
+    privileged_access = signal == "PRIVILEGED_ACCESS" and _PRIVILEGED_ROLE.search(normalized) is not None
     if signal in {
         "ACCESS_REQUEST",
-        "PRIVILEGED_ACCESS",
         "LOGIN_PROBLEM",
         "PASSWORD_EVIDENCE",
-    }:
+    } and textual_access:
         return "PROBLEMA_ACESSO"
-    normalized = normalize_text(text)
-    if re.search(r"\b(?:acesso|acessar|entrar|senha|permissao|permissoes)\b", normalized):
+    if privileged_access:
+        return "PROBLEMA_ACESSO"
+    if textual_access:
         return "PROBLEMA_ACESSO"
     if re.search(r"\b(?:instalar|instalacao)\b", normalized):
         return "INSTALACAO_SOFTWARE"
