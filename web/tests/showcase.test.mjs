@@ -119,12 +119,12 @@ test('welcome tagline is typewriter-ready and draft content switches the welcome
   assert.match(listening, /chat-welcome[^]*?data-state="listening"/);
 });
 
-test('desktop shell prevents FAQ page overflow and gives conversation a branded minimal scrollbar', () => {
+test('desktop shell allows FAQ document scrolling and gives conversation a branded minimal scrollbar', () => {
   const baseCss = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
   const responsiveCss = readFileSync(new URL('../src/desktop-responsive.css', import.meta.url), 'utf8');
   const css = `${baseCss}\n${responsiveCss}`;
   assert.match(css, /scrollbar-gutter:\s*stable/);
-  assert.match(css, /body:has\(\.solutions-home\)[^}]*overflow:\s*hidden/);
+  assert.doesNotMatch(css, /body:has\(\.solutions-home\)[^}]*overflow:\s*hidden/);
   assert.match(css, /\.conversation-thread[^}]*scrollbar-color:/);
   assert.match(css, /\.chat-welcome-tagline/);
 });

@@ -1,3 +1,4 @@
+import { presentChat, dismissThinking } from './presentation.mjs';
 import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
 import { captureConversationScroll, restoreConversationScroll } from './conversation.mjs';
 import { createFaqSearch, renderSolutionDetail, renderSolutionsHome, renderSolutionsResults } from './solutions.mjs';
@@ -17,6 +18,8 @@ import { createInitialState, selectIdentity, resetConversation, personaPath } fr
 const app = document.querySelector('#app');
 let identityRevision = 0;
 let renderedMessageCount = 0;
+let finishPresentation = () => {};
+let welcomePresented = false;
 // IDs only, scoped to the current page session and technician. Details are always reauthorized.
 const knownOperationalRequests = new Map();
 async function loadOperationalItems(identityId) {
@@ -102,6 +105,7 @@ function renderRoute() {
 }
 
 function render() {
+  finishPresentation();
   const scroll = captureConversationScroll(app.querySelector('.conversation-thread'));
   const focused = document.activeElement?.id === 'jup-message';
   app.innerHTML = `${renderAppHeader({
@@ -112,6 +116,9 @@ function render() {
   })}<main id="main-content" class="main-content main-content--${['solutions', 'solution'].includes(state.route) ? 'public' : 'workspace'}" tabindex="-1">${renderRoute()}</main>`;
   app.setAttribute('aria-busy', String(state.loading));
   bindInteractions();
+  const hasWelcome = Boolean(app.querySelector('.chat-welcome:not(.chat-welcome--leaving)'));
+  finishPresentation = presentChat(app, { welcome: hasWelcome && !welcomePresented, followConversation: scroll?.atEnd ?? true, reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false });
+  if (hasWelcome) welcomePresented = true;
   renderedMessageCount = state.messages.length;
   restoreConversationScroll(app.querySelector('.conversation-thread'), app.querySelector('[data-action="scroll-bottom"]'), scroll, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
   if (focused && !state.pendingAction) app.querySelector('#jup-message')?.focus?.({ preventScroll: true });
@@ -278,6 +285,8 @@ async function submitMessage(form) {
     }
     await presentationReady;
     if (revision !== identityRevision) return;
+    await dismissThinking(app, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
+    if (revision !== identityRevision) return;
     state.messages = [
       ...state.messages,
       {
@@ -428,6 +437,7 @@ async function newChat() {
     identityRevision += 1;
     state = resetConversation(state);
     renderedMessageCount = 0;
+    welcomePresented = false;
     await navigate('/jup');
   } catch (error) {
     if (revision !== identityRevision) return;

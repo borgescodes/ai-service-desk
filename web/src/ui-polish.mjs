@@ -1,3 +1,4 @@
+import { pageScrollTarget } from './presentation.mjs';
 function syncWelcomeListening(value) {
   const welcome = document.querySelector('.chat-welcome');
   if (!welcome) return;
@@ -12,22 +13,25 @@ document.addEventListener('input', event => {
 });
 
 function scrollOpenFaqIntoView(current) {
-  const viewport = current.closest('.faq-directory-scroll');
-  if (!viewport || !current.open) return;
+  if (!current.open) return;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  requestAnimationFrame(() => {
-    const viewportRect = viewport.getBoundingClientRect();
-    const categoryRect = current.getBoundingClientRect();
-    const targetTop = viewport.scrollTop + categoryRect.top - viewportRect.top - 8;
-    viewport.scrollTo({
-      top: Math.max(0, targetTop),
-      behavior: reducedMotion ? 'auto' : 'smooth',
-    });
-  });
+  setTimeout(() => {
+    if (!current.open || !current.isConnected) return;
+    const target = pageScrollTarget(current.getBoundingClientRect(), window.innerHeight, window.scrollY);
+    if (target !== null) window.scrollTo({ top: target, behavior: reducedMotion ? 'auto' : 'smooth' });
+  }, reducedMotion ? 0 : 240);
 }
+
+const toggledByUser = new WeakSet();
+document.addEventListener('click', event => {
+  const category = event.target.closest?.('.faq-category > summary')?.parentElement;
+  if (category) toggledByUser.add(category);
+});
 
 document.addEventListener('toggle', event => {
   const current = event.target;
   if (!(current instanceof HTMLDetailsElement) || !current.matches('.faq-category') || !current.open) return;
+  if (!toggledByUser.has(current)) return;
+  toggledByUser.delete(current);
   scrollOpenFaqIntoView(current);
 }, true);

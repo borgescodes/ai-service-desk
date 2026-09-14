@@ -1,40 +1,16 @@
 /* Desktop interaction polish: stable shell, compact FAQ accordion, and branded scrollbars. */
-html {
-  scrollbar-gutter: stable;
-  overflow-x: hidden;
-}
-
-body {
-  overflow-x: hidden;
-}
-
-body:has(.solutions-home) {
-  overflow: hidden;
-}
-
-.app-header {
-  width: 100%;
-}
+/* The root paints the reserved native scrollbar gutter; the body paints the canvas. */
+html { scrollbar-gutter: stable; background: white; }
+body { min-height: 100dvh; }
+.app-header { width: 100%; }
 
 .header-actions {
   min-width: 278px;
   justify-content: flex-end;
 }
 
-.main-content--public:has(.solutions-home) {
-  height: calc(100dvh - 80px);
-  overflow: hidden;
-  padding: 12px;
-}
-
-.solutions-home {
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  padding: clamp(18px, 2.8vh, 34px) clamp(24px, 3vw, 40px);
-}
+.main-content--public:has(.solutions-home) { padding: 12px; }
+.solutions-home { min-height: 0; padding: clamp(18px, 2.8vh, 34px) clamp(24px, 3vw, 40px); }
 
 .faq-hero {
   flex: none;
@@ -53,46 +29,9 @@ body:has(.solutions-home) {
   margin-top: clamp(10px, 1.6vh, 16px);
 }
 
-.help-articles,
-#faq-results {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-}
-
-.help-articles {
-  display: flex;
-}
-
-#faq-results {
-  display: flex;
-  flex-direction: column;
-}
-
-.directory-count {
-  flex: none;
-  margin: 0 0 8px;
-}
-
-.faq-directory {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.faq-directory-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-right: 4px;
-  scroll-behavior: smooth;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-primary-700) transparent;
-}
+.help-articles, #faq-results { width: 100%; }
+.directory-count { margin: 0 0 8px; }
+.faq-directory { display: block; }
 
 .faq-category {
   flex: none;
@@ -183,6 +122,9 @@ body:has(.solutions-home) {
 }
 
 .faq-help-strip {
+  margin-top: 22px;
+  border: 0;
+  border-radius: 14px;
   position: relative;
   flex: none;
   min-height: clamp(50px, 6vh, 64px);
@@ -199,19 +141,16 @@ body:has(.solutions-home) {
   scrollbar-color: var(--color-primary-700) transparent;
 }
 
-.faq-directory-scroll::-webkit-scrollbar,
 .conversation-thread::-webkit-scrollbar,
 .chat-support-rail::-webkit-scrollbar {
   width: 7px;
 }
 
-.faq-directory-scroll::-webkit-scrollbar-track,
 .conversation-thread::-webkit-scrollbar-track,
 .chat-support-rail::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.faq-directory-scroll::-webkit-scrollbar-thumb,
 .conversation-thread::-webkit-scrollbar-thumb,
 .chat-support-rail::-webkit-scrollbar-thumb {
   background: var(--color-primary-700);
@@ -220,7 +159,6 @@ body:has(.solutions-home) {
   border-radius: 999px;
 }
 
-.faq-directory-scroll::-webkit-scrollbar-thumb:hover,
 .conversation-thread::-webkit-scrollbar-thumb:hover,
 .chat-support-rail::-webkit-scrollbar-thumb:hover {
   background: var(--color-primary-800);
@@ -271,12 +209,8 @@ body:has(.solutions-home) {
   color: var(--color-ink-soft);
   font-size: 14px;
   white-space: nowrap;
-  animation: welcome-typewriter 1.9s steps(48, end) .32s both;
-}
-
-@keyframes welcome-typewriter {
-  from { clip-path: inset(0 100% 0 0); }
-  to { clip-path: inset(0 0 0 0); }
+  min-height: 21px;
+  animation: none;
 }
 
 @media (max-height: 820px) and (min-width: 1060px) {
@@ -373,10 +307,6 @@ body:has(.solutions-home) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .faq-directory-scroll {
-    scroll-behavior: auto;
-  }
-
   .faq-category-panel,
   .faq-category > summary,
   .faq-category > summary > .nav-icon:last-child,
@@ -389,3 +319,9 @@ body:has(.solutions-home) {
     clip-path: none;
   }
 }
+
+@supports (interpolate-size: allow-keywords) {
+  .faq-category::details-content { interpolate-size: allow-keywords; height: 0; overflow: clip; transition: height 220ms ease, content-visibility 220ms allow-discrete; }
+  .faq-category[open]::details-content { height: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .faq-category::details-content { transition: none; } }

@@ -75,7 +75,7 @@ function renderFaqHelpStrip() {
 }
 
 function renderFaqDirectory(content, countLabel = '') {
-  return `${countLabel ? `<p class="directory-count">${countLabel}</p>` : ''}<div class="faq-directory"><div class="faq-directory-scroll">${content}</div>${renderFaqHelpStrip()}</div>`;
+  return `${countLabel ? `<p class="directory-count">${countLabel}</p>` : ''}<div class="faq-directory">${content}</div>${renderFaqHelpStrip()}`;
 }
 
 export function renderSolutionsResults({ groups = [], searchQuery = '', category = '', searchResults = null, searching = false, error = null }) {

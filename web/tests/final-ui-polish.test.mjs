@@ -6,11 +6,11 @@ import { renderSolutionsHome } from '../src/solutions.mjs';
 
 const groups = [{ items: [{ knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001' }] }];
 
-test('FAQ categories are independent and the help CTA sits outside the scrollable category viewport', () => {
+test('FAQ categories are independent and the help CTA sits outside the natural category card', () => {
   const html = renderSolutionsHome({ groups, searchQuery: '', searchResults: null, searching: false });
   assert.doesNotMatch(html, /name="support-faq"/);
-  assert.match(html, /class="faq-directory-scroll"/);
-  assert.match(html, /faq-directory-scroll[^]*?<details class="faq-category"[^]*?<\/div><aside class="faq-help-strip"/);
+  assert.doesNotMatch(html, /class="faq-directory-scroll"/);
+  assert.match(html, /<\/details><\/div><aside class="faq-help-strip"/);
 });
 
 test('FAQ catalog and shell use the shared Lucide icon registry', () => {
@@ -32,18 +32,17 @@ test('utility icon rendering is centralized instead of being defined inside comp
   assert.doesNotMatch(components, /export function navIcon|const paths = \{/);
 });
 
-test('FAQ interaction scrolls only its internal viewport and does not close sibling categories', () => {
+test('FAQ interaction scrolls the page only when needed and does not close sibling categories', () => {
   const polish = readFileSync(new URL('../src/ui-polish.mjs', import.meta.url), 'utf8');
-  assert.match(polish, /\.faq-directory-scroll/);
+  assert.doesNotMatch(polish, /\.faq-directory-scroll/);
   assert.match(polish, /scrollTo\(/);
   assert.match(polish, /prefers-reduced-motion/);
   assert.doesNotMatch(polish, /item\.open\s*=\s*false/);
 });
 
-test('FAQ layout has an internal branded scrollbar, stable CTA, and subtle motion', () => {
+test('FAQ layout grows naturally with a separate CTA, and subtle motion', () => {
   const css = readFileSync(new URL('../src/desktop-responsive.css', import.meta.url), 'utf8');
-  assert.match(css, /\.faq-directory-scroll[^}]*overflow-y:\s*auto/);
-  assert.match(css, /\.faq-directory-scroll[^}]*scrollbar-color:/);
+  assert.doesNotMatch(css, /\.faq-directory-scroll/);
   assert.match(css, /\.faq-help-strip[^}]*position:\s*relative/);
   assert.match(css, /\.faq-category-panel[^}]*transition:/);
   assert.match(css, /\.faq-category\[open\][^{]*>\s*summary/);
