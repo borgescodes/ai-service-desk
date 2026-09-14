@@ -255,7 +255,7 @@ def test_browser_source_never_targets_ollama_or_fake_cdm() -> None:
     source = "\n".join(
         path.read_text(encoding="utf-8")
         for path in web_root.rglob("*")
-        if path.is_file() and path.suffix != ".png"
+        if path.is_file() and path.suffix in {".mjs", ".css", ".html"}
     ).casefold()
 
     assert "ollama" not in source

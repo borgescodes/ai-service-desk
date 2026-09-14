@@ -8,8 +8,8 @@ const groups = [
     label: 'CIGAM',
     items: [
       {
-        knowledge_id: 'KB-CIGAM',
-        title: 'CIGAM não abre',
+        knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001',
+        title: 'Como solicitar acesso ao CDM',
         question: 'Não consigo acessar o CIGAM.',
         system: 'CIGAM',
         category: 'CIGAM',
@@ -20,10 +20,10 @@ const groups = [
 
 test('solutions home is task-first and does not contain marketing copy', () => {
   const html = renderSolutionsHome({ groups, searchQuery: '', searchResults: null, searching: false });
-  assert.match(html, /Como podemos ajudar\?/);
-  assert.match(html, /Pesquise por um problema, sistema ou dúvida/);
-  assert.match(html, /CIGAM não abre/);
-  assert.match(html, /Não encontrou o que precisa\?/);
+  assert.match(html, /Central de <span>Suporte/);
+  assert.match(html, /Busque uma dúvida ou sistema/);
+  assert.match(html, /Como solicitar acesso ao CDM/);
+  assert.match(html, /Precisa de uma mão\?/);
   assert.match(html, /Falar com o Jup/);
   assert.doesNotMatch(html, /Assistente de IA|Inteligência para|transforme|revolucione/i);
 });
@@ -36,7 +36,7 @@ test('solutions home renders result mode without category card grid', () => {
     searching: false,
   });
   assert.match(html, /1 solução encontrada/);
-  assert.match(html, /data-knowledge-id="KB-CIGAM"/);
+  assert.match(html, /data-knowledge-id="KB-SYN-FAQ-CDM-REQUEST-001"/);
   assert.doesNotMatch(html, /dashboard-card|metric-card|feature-card/);
 });
 
@@ -57,19 +57,18 @@ test('faq search path encodes the query', () => {
 
 import { renderSolutionDetail } from '../src/solutions.mjs';
 
-test('solution detail uses literal approved answer and two outcome actions', () => {
+test('solution detail uses literal approved answer and continuation action', () => {
   const html = renderSolutionDetail({
-    knowledge_id: 'KB-CIGAM',
-    title: 'CIGAM não abre',
+    knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001',
+    title: 'Como solicitar acesso ao CDM',
     answer: 'Feche a sessão e tente novamente.',
     system: 'CIGAM',
     category: 'CIGAM',
     procedure_url: null,
   });
-  assert.match(html, /CIGAM não abre/);
+  assert.match(html, /Como solicitar acesso ao CDM/);
   assert.match(html, /Feche a sessão e tente novamente\./);
-  assert.match(html, /Resolveu\?/);
-  assert.match(html, />Sim</);
-  assert.match(html, /Ainda preciso de ajuda/);
-  assert.match(html, /\/jup\?from=KB-CIGAM/);
+  assert.match(html, /Ainda precisa de ajuda\?/);
+  assert.match(html, /Falar com o Jup/);
+  assert.match(html, /\/jup\?from=KB-SYN-FAQ-CDM-REQUEST-001/);
 });

@@ -30,6 +30,12 @@ async function files(dirUrl) {
 
 let failed = false;
 for (const file of await files(root)) {
+  if (file.pathname.endsWith('/OFL.txt')) continue;
+  if (file.pathname.endsWith('.woff2')) {
+    const bytes = await readFile(file);
+    if (bytes.subarray(0, 4).toString() !== 'wOF2') { console.error('Invalid WOFF2 font'); failed = true; }
+    continue;
+  }
   if (file.pathname.endsWith('.png')) {
     const bytes = await readFile(file);
     if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
@@ -37,7 +43,11 @@ for (const file of await files(root)) {
     }
     continue;
   }
-  const text = await readFile(file, 'utf8');
+  let text = await readFile(file, 'utf8');
+  if (file.pathname.endsWith('.svg')) {
+    text = text.replace(/xmlns(?::xlink)?="http:\/\/www\.w3\.org\/(?:2000\/svg|1999\/xlink)"/g, '');
+    if (/<script|\son\w+=|<foreignObject/i.test(text)) { console.error('Unsafe SVG asset'); failed = true; }
+  }
   for (const token of forbidden) {
     if (text.includes(token)) {
       console.error(`Forbidden frontend token ${JSON.stringify(token)} in ${file.pathname}`);

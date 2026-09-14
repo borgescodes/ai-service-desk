@@ -1,73 +1,25 @@
----
-name: Jup Resolve
-description: Sistema visual desktop de atendimento da Juparanã
-colors:
-  brand-green: "#45813c"
-  brand-yellow: "#eeb41e"
-  brand-gray: "#808285"
-  white: "#ffffff"
-  ink: "#20241f"
-  ink-muted: "#626762"
-  line: "#d8ddd6"
-  surface-soft: "#f5f7f4"
-  focus: "#1849a9"
-  green-text: "#32652b"
-typography:
-  heading:
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-    fontSize: "34px"
-    fontWeight: 650
-    lineHeight: 1.25
-    letterSpacing: "-0.025em"
-  body:
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-    fontSize: "16px"
-    lineHeight: 1.55
-rounded:
-  control: "5px"
-  field: "6px"
-spacing:
-  small: "12px"
-  medium: "24px"
-  large: "48px"
-components:
-  button-primary:
-    backgroundColor: "{colors.brand-green}"
-    textColor: "{colors.white}"
-    rounded: "{rounded.control}"
-    padding: "10px 20px"
----
+# Sistema visual do Jup Resolve
 
-# Sistema visual Jup Resolve
+Direção de frontend atualizada em 14/09/2026 a partir do ZIP `jup-ui-central-suporte.zip` e do briefing explícito do usuário. Substitui a direção visual anterior da Fase 14.
 
-## Overview
+## Linguagem compartilhada
 
-Interface de trabalho clara e discreta. A direção aprovada prioriza leitura e resolução de problemas, com branco, linhas e uso concentrado de verde. O modo Operate corresponde às superfícies de soluções e conversa desta fase.
+Inter, servida localmente com licença OFL, verde estrutural `#45813c`, verde profundo `#173e25`, amarelo de acento `#eeb41e`, canvas `#f6f8f5` e superfícies brancas. Tokens em `web/src/tokens.css`; componentes e layouts em `web/src/styles.css`. As camadas antigas `premium.css` e `showcase-desktop.css` foram removidas.
 
-## Colors
+Navbar de 80 px, sidebar contextual de 232 px, controles compactos, raios de 8 a 22 px e transições de 150–180 ms. Desktop prioritário em 1440, 1600 e 1920 px. Sem refinamento mobile nesta missão; navegação e conteúdo continuam acessíveis em larguras menores.
 
-Verde estrutura e sinaliza ação; amarelo destaca a entrada para o Jup. Cinza de marca permanece no contorno de campos. Texto secundário usa o tom ink-muted, de maior contraste. Estado também é identificado por texto e forma.
+## Superfícies
 
-## Typography
+- Central editorial com busca e apenas o tutorial CDM `KB-SYN-FAQ-CDM-REQUEST-001`.
+- Artigo com breadcrumb, conteúdo aprovado literal, endereço oficial e continuidade com o Jup.
+- Chat com cabeçalho compacto, avatar animado original, mensagens alinhadas por autor, horário de apresentação e composer fixo dentro da conversa.
+- Operação com fila, detalhe, policy, routing, contexto e timeline reais; encaminhamentos de suporte mostram o resumo armazenado no backend.
+- Solicitações do usuário com status e detalhe expansível.
 
-Fontes locais do sistema, sem downloads. Títulos funcionais de 34 px, título inicial do chat de 30 px e texto de 16–17 px. Não usar títulos comerciais ou slogans.
+## Interação e autoridade
 
-## Layout
+O menu de usuários lista identidades retornadas pelo provider; as rotas mantêm o mapeamento demo existente. O backend valida cada chamada. Novo chat reinicia somente contexto conversacional da identidade, preservando solicitações e encaminhamentos.
 
-Conteúdo de 1220 px; header de 72 px. FAQ em até quatro listas editoriais; busca de 66 px de altura. Artigo de 800 px e conversa de 820 px. Escopo de verificação: desktop de 1280, 1440 e 1600 px.
+Mensagens entram imediatamente. A resposta bem-sucedida respeita um mínimo visual de 2,4 segundos contado desde o envio; backend lento não recebe atraso adicional. O indicador diz “Processando sua mensagem”, sem afirmar consultas ou decisões ainda não sinalizadas. Erros aparecem sem espera artificial. Redução de movimento desativa as animações.
 
-## Elevation & Depth
-
-Sem sombras na estrutura pública. Separadores e superfícies suaves distinguem mensagens e encaminhamento. A imagem original do Jup conserva seu próprio volume.
-
-## Shapes
-
-Campos com raio de 6 px, botões de 5 px. Evitar pills e containers aninhados. A faixa do Jup é retangular.
-
-## Components
-
-Busca com label acessível, debounce de 140 ms e região de resultados viva. Artigo com parágrafos e listas semânticas. Conversa sem painel lateral permanente; resumo técnico em disclosure nativo. Controles com foco visível. Motion de controles em 180 ms e estado do Jup em 400 ms, com redução de movimento. Usar somente os seis desenhos derivados do pacote fornecido.
-
-## Do's and Don'ts
-
-Preservar o conteúdo aprovado e a allowlist do link Microsoft. Não usar gradientes, glass, glow, parede de cards, ícones decorativos por tópico ou seletor público de identidade. Operação permanece em rotas dedicadas. Os arquivos core protegidos não participam do design.
+`REQUEST_CREATED` mantém estado `success`; handoffs de suporte usam `escalation`; `warning` usa o emote sem rosto. Dados e links são escapados; somente destinos oficiais explicitamente permitidos são clicáveis. A CSP permanece restrita à própria origem.

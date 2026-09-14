@@ -7,28 +7,37 @@ import {
   renderStatus,
 } from './render.mjs';
 
-const JUP_QUICK_PROMPTS = Object.freeze([
-  'Preciso de acesso ao CDM',
-  'Um sistema apresenta erro',
-  'Estou sem internet',
-]);
 
 export function renderJupAvatar({ compact = false } = {}) {
   return renderJupVisual({ compact });
 }
 
-function renderBrandSymbol() {
-  return `<span class="brand-symbol" aria-hidden="true"><svg viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="M18 28V14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M18 17c-6 0-9.5-3.2-9.5-8.2 6 0 9.5 3.2 9.5 8.2Z" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M18 13c0-5 3.5-8.2 9.5-8.2 0 5-3.5 8.2-9.5 8.2Z" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M8.5 29h19" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="27.5" cy="26.5" r="2.2" fill="currentColor"/></svg></span>`;
+export function renderAppHeader({ activeRoute, operational = false, operationPath = '/demo/operacao/cdm', identities = [], identity = {}, pending = false }) {
+  const items = operational
+    ? [['approvals', operationPath, 'Solicitações recebidas'], ['prevention', '/demo/operacao/prevention', 'Prevenção']]
+    : [['solutions', '/', 'Central de Suporte'], ['jup', '/jup', 'Falar com o Jup'], ['requests', '/requests', 'Minhas solicitações']];
+  const initials = (identity.name || 'Jup').split(' ').slice(0, 2).map(word => word[0]).join('');
+  const links = items.map(([route, href, label]) => `<a href="${href}" data-route="${route}"${activeRoute === route || (route === 'solutions' && activeRoute === 'solution') ? ' aria-current="page"' : ''}>${navIcon(route)}<span>${label}</span></a>`).join('');
+  return `<header class="app-header app-header--${operational ? 'operational' : 'public'}">
+    <a class="brand-lockup" href="/" data-route="solutions"><img src="/assets/brand/jup-resolve-logo.svg" width="168" height="42" alt="Jup Resolve"></a>
+    <nav class="primary-nav" aria-label="Navegação principal">${links}</nav>
+    <details class="persona-menu"><summary><span class="user-avatar">${escapeHtml(initials)}</span><span class="user-copy"><strong>${escapeHtml(identity.name || 'Carregando')}</strong><small>${escapeHtml(identity.area || 'Juparanã')}</small></span>${navIcon('chevron')}</summary><div class="persona-options"><p>Trocar usuário</p>${identities.map(item => `<button type="button" data-persona="${escapeHtml(item.identity_id)}"${pending ? ' disabled' : ''} aria-pressed="${item.identity_id === identity.identity_id}"><strong>${escapeHtml(item.name || item.identity_id)}</strong><small>${escapeHtml(item.area || '')}</small></button>`).join('')}</div></details>
+  </header><aside class="app-sidebar" aria-label="Menu contextual"><nav>
+  ${operational ? '<p class="sidebar-label">Painel operacional</p>' : `<button class="sidebar-new" type="button" data-action="new-chat"${pending ? ' disabled' : ''}>${navIcon('plus')}Novo chat</button>`}
+  ${links}</nav><div class="sidebar-footer"><img src="/assets/brand/jup-tagline.svg" alt="Jup Resolve" width="150" height="32"><p>Suporte para seguir em frente.</p></div></aside>`;
 }
 
-export function renderAppHeader({ activeRoute, operational = false, operationPath = '/demo/operacao/cdm' }) {
-  const items = operational
-    ? [['solutions', '/', 'Soluções'], ['approvals', operationPath, 'Operação'], ['prevention', '/demo/operacao/prevention', 'Prevenção']]
-    : [['solutions', '/', 'Soluções'], ['jup', '/jup', 'Falar com o Jup']];
-  return `<header class="app-header app-header--${operational ? 'operational' : 'public'}">
-    <a class="brand-lockup" href="/" data-route="solutions">${renderBrandSymbol()}<span class="brand-wordmark">Jup Resolve</span></a>
-    <nav class="primary-nav" aria-label="Navegação principal">${items.map(([route, href, label]) => `<a href="${href}" data-route="${route}"${activeRoute === route || (route === 'solutions' && activeRoute === 'solution') ? ' aria-current="page"' : ''}><span>${label}</span></a>`).join('')}</nav>
-  </header>`;
+export function navIcon(name) {
+  const paths = {
+    plus: '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',
+    solutions: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+    jup: '<path d="M21 11a9 9 0 0 1-9 9H4l-2 2v-11a9 9 0 0 1 19 0Z"/><path d="M7 11h10M7 15h6"/>',
+    requests: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3h6v4H9zM9 11h6M9 15h6"/>',
+    approvals: '<path d="M3 5h18v15H3zM3 10h18M9 10v10"/>',
+    prevention: '<path d="M3 18h18M5 14l4-4 4 3 6-8"/>',
+    chevron: '<path d="m7 10 5 5 5-5"/>',
+  };
+  return `<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.solutions}</svg>`;
 }
 
 function renderSupportHandoff(handoff) {
@@ -61,36 +70,11 @@ function renderMessage(message, { fresh = false, visualState = null } = {}) {
   const context = message.context ? [message.context.system, message.context.next_step].filter(Boolean).map(escapeHtml).join(' · ') : '';
   return `<article class="conversation-message ${klass}${message.thinking ? ' conversation-message--thinking' : ''}${fresh ? ' is-new' : ''}">
     ${message.role === 'JUP' ? renderJupVisual({ state: emote, compact: true }) : ''}
-    <div class="message-content"><div class="message-author"><strong>${role}</strong></div>
-    ${message.thinking ? '<div class="thinking-dots" role="status" aria-label="Jup está pensando"><span aria-hidden="true">.</span><span aria-hidden="true">.</span><span aria-hidden="true">.</span></div>' : message.failed ? `<p class="message-error" role="alert">${escapeHtml(message.text)}</p>` : message.role === 'JUP' ? renderApprovedKnowledgeBody({ text: message.text, procedureUrl: message.procedure_url, knowledgeId: message.knowledge_id }) : renderMessageBody(message.text)}
+    <div class="message-content"><div class="message-author"><strong>${role}</strong>${message.sentAt ? `<time datetime="${escapeHtml(message.sentAt)}">${escapeHtml(new Date(message.sentAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}</time>` : ''}</div>
+    ${message.thinking ? '<div class="processing" role="status" aria-label="Jup está pensando"><strong>Pensando<span class="thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></strong><p class="processing-activity">Processando sua mensagem</p></div>' : message.failed ? `<p class="message-error" role="alert">${escapeHtml(message.text)}</p>` : message.role === 'JUP' ? renderApprovedKnowledgeBody({ text: message.text, procedureUrl: message.procedure_url, knowledgeId: message.knowledge_id }) : renderMessageBody(message.text)}
     ${message.role === 'JUP' ? renderSupportHandoff(message.support_handoff) : ''}
     ${context ? `<div class="request-context">${context}</div>` : ''}</div>
   </article>`;
-}
-
-function jupDraftPath(text) {
-  return `/jup?draft=${encodeURIComponent(text)}`;
-}
-
-function renderJupSidecar({ loading = false } = {}) {
-  const state = loading ? 'thinking' : 'idle';
-  return `<aside class="jup-sidecar" aria-label="Guia do atendimento">
-    <div class="jup-sidecar__visual">
-      <div class="jup-sidecar__avatar">${renderJupVisual({ state })}</div>
-      <div><span>Jup Resolve</span><strong>${loading ? 'Analisando sua mensagem' : 'Pronto para ajudar'}</strong></div>
-    </div>
-    <p class="jup-sidecar__intro">Comece pelo sintoma. O Jup organiza o contexto, consulta orientação aprovada e mostra o próximo passo.</p>
-    <div class="jup-sidecar__flow" aria-label="Fluxo do Jup">
-      <span><b>01</b> Entender o contexto</span>
-      <span><b>02</b> Consultar a base aprovada</span>
-      <span><b>03</b> Resolver ou encaminhar</span>
-    </div>
-    <div class="jup-quick-prompts">
-      <span>Atalhos de conversa</span>
-      ${JUP_QUICK_PROMPTS.map(prompt => `<a href="${jupDraftPath(prompt)}" data-route="jup"><span>${escapeHtml(prompt)}</span><span aria-hidden="true">→</span></a>`).join('')}
-    </div>
-    <div class="jup-sidecar__guardrail"><span aria-hidden="true">✓</span><p>Seu contexto vem da sessão. Não envie senhas ou códigos de verificação.</p></div>
-  </aside>`;
 }
 
 export function renderJupWorkspace({ messages = [], understood = null, loading = false, sourceContext = null, visualState = null, messageError = null, draft = '', animateFrom = messages.length }) {
@@ -101,10 +85,10 @@ export function renderJupWorkspace({ messages = [], understood = null, loading =
   )).join('') : renderMessage({ role: 'JUP', text: 'Como posso ajudar?\n\nConte o que está acontecendo e em qual sistema. Vamos começar por aí.' }, { visualState: visualState || 'idle' });
   return `<section class="jup-surface" aria-label="Atendimento com Jup">
     <div class="jup-workspace-frame">
-      <header class="conversation-header"><div class="conversation-header__copy"><span class="conversation-kicker">Atendimento com Jup</span><h1>Falar com o Jup</h1><p>Descreva o problema e siga a conversa até o próximo passo.</p></div><div class="conversation-header__actions"><div class="conversation-status" data-state="${loading ? 'thinking' : 'ready'}"><span aria-hidden="true"></span>${loading ? 'Analisando sua mensagem' : 'Jup disponível'}</div><a class="back-link" href="/" data-route="solutions">← Soluções</a></div></header>
+      <header class="conversation-header">${renderJupVisual({ state: loading ? 'thinking' : visualState || 'idle' })}<div class="conversation-header__copy"><h1>Olá, eu sou o <strong>Jup</strong></h1><p>Seu assistente virtual, pronto para ajudar.</p></div><div class="conversation-header__actions"><div class="conversation-status" data-state="${loading ? 'thinking' : 'ready'}"><span aria-hidden="true"></span>${loading ? 'Analisando sua mensagem' : 'Jup disponível'}</div><a class="back-link" href="/" data-route="solutions">Central de Suporte</a></div></header>
       ${sourceContext ? `<p class="faq-source-context">Você estava vendo: <strong>${escapeHtml(sourceContext.title)}</strong></p>` : ''}
       <div class="jup-workspace-body">
-        ${renderJupSidecar({ loading })}
+
         <div class="conversation-stage"><div class="jup-conversation"><div class="conversation-thread" role="log" aria-label="Conversa com Jup" aria-live="polite" tabindex="0">${conversation}
           ${understood && lastAssistant < 0 ? renderMessage({ role: 'JUP', text: '', context: understood }) : ''}
           ${loading ? renderMessage({ role: 'JUP', thinking: true }, { fresh: true }) : ''}
@@ -136,7 +120,7 @@ export function renderRequestList(items = []) {
     .map((item) => `<article class="request-row" data-request-id="${escapeHtml(item.request_id)}">
       <div class="request-row-main"><span class="system-mark">${escapeHtml(item.system)}</span><div><h3>${escapeHtml(item.purpose || item.requested_role || 'Solicitação')}</h3><p>${escapeHtml(item.request_id)}</p></div></div>
       <div class="request-row-status">${renderStatus(item)}</div>
-      <div class="request-timeline">${timeline(item.timeline)}</div>
+      <details class="request-timeline"><summary>Ver detalhes da solicitação</summary><p>${escapeHtml(item.purpose)}</p>${item.routing?.technician_name ? `<p>Responsável: ${escapeHtml(item.routing.technician_name)}</p>` : ''}${timeline(item.timeline)}</details>
     </article>`)
     .join('')}</div>`;
 }
@@ -151,10 +135,11 @@ export function renderOperationDetail(item, uiState = {}) {
     <header class="operation-detail-header"><div><p>${escapeHtml(item.request_id)}</p><h2>${escapeHtml(item.system)} · ${escapeHtml(item.purpose || item.requested_role)}</h2></div>${renderStatus(item)}</header>
     <div class="evidence-grid">
       <section><span>Solicitante</span><strong>${escapeHtml(item.requester?.name)}</strong><p>${escapeHtml(item.requester?.area)}</p></section>
-      <section><span>Confidence</span>${renderConfidence(item.confidence)}</section>
+      <section><span>Confiança da classificação</span>${renderConfidence(item.confidence)}</section>
       <section><span>Policy</span><strong>${escapeHtml(item.policy?.decision)}</strong><p>${escapeHtml(policyReason)}</p></section>
-      <section><span>Routing</span><strong>${escapeHtml(item.routing?.technician_name || 'Não atribuído')}</strong></section>
+      <section><span>Routing</span><strong>${escapeHtml(item.routing?.technician_name || 'Não atribuído')}</strong><p>${escapeHtml(item.routing?.capability)}</p></section>
     </div>
+    <section class="technical-context"><h3>Contexto da solicitação</h3><p>${escapeHtml(item.purpose)}</p><dl><dt>Perfil solicitado</dt><dd>${escapeHtml(item.requested_role)}</dd><dt>Orientação de origem</dt><dd>${escapeHtml(item.knowledge_id)}</dd></dl></section>
     ${timeline(item.timeline)}
     <div class="decision-bar">
       <button class="button button--secondary button--danger" data-action="reject" type="button"${actionDisabled ? ' disabled' : ''}>${rejecting ? 'Rejeitando...' : 'Rejeitar'}</button>
@@ -179,4 +164,9 @@ export function renderPreventionList(items = []) {
       <button class="text-action" type="button" data-opportunity-id="${escapeHtml(item.opportunity_id)}">Ver explicação</button>
     </article>`)
     .join('')}</div>`;
+}
+
+export function renderHandoffs(items = []) {
+  if (!items.length) return '';
+  return `<section class="handoff-inbox" aria-label="Encaminhamentos recebidos"><h2>Encaminhados pelo Jup</h2>${items.map(item => `<article class="operation-detail"><header class="operation-detail-header"><div><p>${escapeHtml(item.handoff_id)}</p><h2>${escapeHtml(item.system)} · ${escapeHtml(item.requester?.name)}</h2></div><span class="status-badge">Encaminhado para suporte</span></header><div class="evidence-grid"><section><span>Responsável</span><strong>${escapeHtml(item.technician?.name)}</strong></section><section><span>Área do solicitante</span><strong>${escapeHtml(item.requester?.area)}</strong></section><section><span>Routing</span><strong>${escapeHtml(item.capability)}</strong></section></div><h3>Resumo técnico</h3><p class="technical-summary">${escapeHtml(item.technical_summary)}</p><details class="handoff-conversation"><summary>Ver contexto da conversa</summary>${(item.source_conversation ?? []).map(entry => `<p><strong>${entry.role === 'USER' ? 'Solicitante' : 'Jup'}:</strong> ${escapeHtml(entry.text)}</p>`).join('')}</details></article>`).join('')}</section>`;
 }

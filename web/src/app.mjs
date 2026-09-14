@@ -5,6 +5,7 @@ import { apiRequest, ApiError } from './api.mjs';
 import {
   renderAppHeader,
   renderApprovalQueue,
+  renderHandoffs,
   renderJupWorkspace,
   renderOperationDetail,
   renderPreventionList,
@@ -12,7 +13,7 @@ import {
 } from './components.mjs';
 import { escapeHtml, renderErrorState, renderUnauthorizedState } from './render.mjs';
 import { demoIdentityForPath, resolveRoute, routeParams } from './router.mjs';
-import { createInitialState, selectIdentity } from './state.mjs';
+import { createInitialState, selectIdentity, resetConversation, personaPath } from './state.mjs';
 
 const app = document.querySelector('#app');
 let identityRevision = 0;
@@ -58,7 +59,7 @@ function renderRoute() {
       : renderErrorState(state.transientError.message);
   }
   if (state.loading && !state.routeData.loaded) {
-    return `<section class="state-panel" role="status" aria-live="polite"><div><strong>Carregando</strong><p>Buscando o estado atual no backend.</p></div></section>`;
+    return `<section class="state-panel" role="status" aria-live="polite"><div><strong>Carregando</strong><p>Atualizando informações.</p></div></section>`;
   }
 
   if (state.route === 'solution') return renderSolutionDetail(state.routeData.detail);
@@ -79,13 +80,13 @@ function renderRoute() {
   }
 
   if (state.route === 'requests') {
-    return `${pageHeading('Solicitações', 'Acompanhe somente os estados registrados pelo backend e o histórico real de cada solicitação.')}${renderRequestList(state.routeData.items ?? [])}`;
+    return `${pageHeading('Minhas solicitações', 'Acompanhe o andamento dos seus atendimentos.')}${renderRequestList(state.routeData.items ?? [])}`;
   }
 
   if (state.route === 'approvals') {
     const items = state.routeData.items ?? [];
     const selected = state.routeData.selected ?? items.find((item) => item.request_id === state.selectedRequestId) ?? items[0] ?? null;
-    return `${pageHeading('Operação', 'Revise contexto, policy e routing antes de agir. A decisão continua sendo validada pelo backend.')}${operationTabs()}<div class="operation-split"><section aria-label="Fila de pendências">${renderApprovalQueue(items)}</section><section aria-label="Detalhe da pendência">${renderOperationDetail(selected, state)}</section></div>`;
+    return `${pageHeading('Solicitações recebidas', 'Revise o contexto e dê continuidade ao atendimento.')}${operationTabs()}<div class="operation-split"><section aria-label="Fila de pendências">${renderApprovalQueue(items)}</section><section aria-label="Detalhe da pendência">${renderOperationDetail(selected, state)}</section></div>${renderHandoffs(state.routeData.handoffs ?? [])}`;
   }
 
   const prevention = state.routeData.items ?? [];
@@ -93,7 +94,7 @@ function renderRoute() {
   const detail = selected
     ? `<aside class="operation-detail prevention-detail"><header class="operation-detail-header"><div><p>${escapeHtml(selected.opportunity_id)}</p><h2>${escapeHtml(selected.category_label)}</h2></div></header><div class="evidence-grid"><section><span>Sistema</span><strong>${escapeHtml(selected.system)}</strong></section><section><span>Intent</span><strong>${escapeHtml(selected.intent)}</strong></section><section><span>Área</span><strong>${escapeHtml(selected.area || 'Não informada')}</strong></section><section><span>Ocorrências</span><strong>${escapeHtml(selected.occurrence_count)}</strong></section></div><p>${escapeHtml(selected.explanation)}</p>${selected.reason_codes?.length ? `<p><strong>Evidências:</strong> ${selected.reason_codes.map(escapeHtml).join(', ')}</p>` : ''}</aside>`
     : '';
-  return `${pageHeading('Prevenção', 'Padrões recorrentes identificados pelo engine F11, apresentados sem recalcular categorias no navegador.')}${operationTabs()}${renderPreventionList(prevention)}${detail}`;
+  return `${pageHeading('Prevenção', 'Acompanhe situações recorrentes e oportunidades de melhoria.')}${operationTabs()}${renderPreventionList(prevention)}${detail}`;
 }
 
 function render() {
@@ -101,6 +102,7 @@ function render() {
   const focused = document.activeElement?.id === 'jup-message';
   app.innerHTML = `${renderAppHeader({
     activeRoute: state.route,
+    identities: state.identities, identity: selectedIdentity() ?? {}, pending: Boolean(state.pendingAction),
     operational: ['approvals', 'prevention'].includes(state.route),
     operationPath: operationPath(),
   })}<main id="main-content" class="main-content" tabindex="-1">${renderRoute()}</main>`;
@@ -185,7 +187,8 @@ async function loadRoute() {
     } else if (routeState.route === 'approvals') {
       const items = await apiRequest('/api/operations/approvals', { identityId: routeState.identityId });
       routeState.selectedRequestId = items[0]?.request_id ?? null;
-      routeState.routeData = { items, selected: items[0] ?? null, loaded: true };
+      const handoffs = await apiRequest('/api/operations/handoffs', { identityId: routeState.identityId });
+      routeState.routeData = { items, handoffs, selected: items[0] ?? null, loaded: true };
     } else if (routeState.route === 'prevention') {
       const items = await apiRequest('/api/operations/prevention', { identityId: routeState.identityId });
       routeState.routeData = { items, loaded: true };
@@ -239,7 +242,8 @@ async function submitMessage(form) {
 
   const revision = identityRevision;
   const identityId = state.identityId;
-  state.messages = [...state.messages, { role: 'USER', text: message }];
+  const presentationReady = new Promise(resolve => setTimeout(resolve, 2400));
+  state.messages = [...state.messages, { role: 'USER', text: message, sentAt: new Date().toISOString() }];
   state.composerDraft = '';
   state.lastBackendStatus = null;
   state.messageError = null;
@@ -268,10 +272,13 @@ async function submitMessage(form) {
     } else {
       state.understood = null;
     }
+    await presentationReady;
+    if (revision !== identityRevision) return;
     state.messages = [
       ...state.messages,
       {
         role: 'JUP',
+        sentAt: new Date().toISOString(),
         status: result.status,
         context: state.understood,
         knowledge_id: result.knowledge?.knowledge_id,
@@ -296,15 +303,18 @@ async function submitMessage(form) {
 }
 
 async function selectApproval(requestId) {
+  const requestState = state;
   try {
     const selected = await apiRequest(
       `/api/operations/approvals/${encodeURIComponent(requestId)}`,
       { identityId: state.identityId },
     );
+    if (state !== requestState) return;
     state.selectedRequestId = requestId;
     state.routeData = { ...state.routeData, selected };
     render();
   } catch (error) {
+    if (state !== requestState) return;
     state.transientError = friendlyError(error);
     render();
   }
@@ -325,6 +335,8 @@ async function decide(action) {
     return;
   }
 
+  const requestState = state;
+  const identityId = state.identityId;
   state.pendingAction = action;
   render();
   try {
@@ -332,33 +344,41 @@ async function decide(action) {
       `/api/requests/${encodeURIComponent(item.request_id)}/${action === 'approve' ? 'approve' : 'reject'}`,
       {
         method: 'POST',
-        identityId: state.identityId,
+        identityId,
         body: { expected_version: item.version },
       },
     );
+    if (state !== requestState) return;
     const items = await apiRequest('/api/operations/approvals', {
-      identityId: state.identityId,
+      identityId,
     });
-    state.routeData = { items, selected: final, loaded: true };
+    if (state !== requestState) return;
+    state.routeData = { ...state.routeData, items, selected: final, loaded: true };
     state.selectedRequestId = final.request_id;
   } catch (error) {
+    if (state !== requestState) return;
     state.transientError = friendlyError(error);
   } finally {
-    state.pendingAction = null;
-    render();
+    if (state === requestState) {
+      state.pendingAction = null;
+      render();
+    }
   }
 }
 
 async function selectPrevention(opportunityId) {
+  const requestState = state;
   try {
     const selected = await apiRequest(
       `/api/operations/prevention/${encodeURIComponent(opportunityId)}`,
       { identityId: state.identityId },
     );
+    if (state !== requestState) return;
     state.selectedOpportunityId = opportunityId;
     state.routeData = { ...state.routeData, selected };
     render();
   } catch (error) {
+    if (state !== requestState) return;
     state.transientError = friendlyError(error);
     render();
   }
@@ -395,14 +415,48 @@ function bindRouteLinks(root) {
   });
 }
 
+async function newChat() {
+  if (state.pendingAction) return;
+  const revision = identityRevision;
+  state.pendingAction = 'reset';
+  render();
+  try {
+    await apiRequest('/api/jup/conversation/reset', { method: 'POST', identityId: state.identityId });
+    if (revision !== identityRevision) return;
+    identityRevision += 1;
+    state = resetConversation(state);
+    renderedMessageCount = 0;
+    await navigate('/jup');
+  } catch (error) {
+    if (revision !== identityRevision) return;
+    state.pendingAction = null;
+    state.messageError = friendlyError(error).message;
+    state.transientError = state.route === 'jup' ? null : friendlyError(error);
+    render();
+  }
+}
+
 function bindInteractions() {
   bindRouteLinks(app);
+  app.querySelector('[data-action="new-chat"]')?.addEventListener('click', newChat);
+  app.querySelectorAll('[data-persona]').forEach(button => {
+    button.addEventListener('click', async () => {
+      if (state.pendingAction) return;
+      const identity = state.identities.find(item => item.identity_id === button.dataset.persona);
+      const path = personaPath(identity);
+      if (path) await navigate(path);
+    });
+  });
   app.querySelectorAll('[data-category]').forEach(button => {
     button.addEventListener('click', () => {
       state.faqCategory = button.dataset.category;
       app.querySelectorAll('[data-category]').forEach(topic => topic.setAttribute('aria-pressed', String(topic.dataset.category === state.faqCategory)));
       faqSearch.input(state.faqSearchQuery, state.faqCategory);
     });
+  });
+  app.querySelector('#faq-search-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    faqSearch.input(state.faqSearchQuery, state.faqCategory);
   });
   app.querySelector('#faq-search')?.addEventListener('input', (event) => {
     state.faqSearchQuery = event.target.value;

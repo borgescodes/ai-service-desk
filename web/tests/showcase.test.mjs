@@ -5,14 +5,6 @@ import * as solutions from '../src/solutions.mjs';
 import { renderAppHeader, renderJupWorkspace } from '../src/components.mjs';
 import { renderApprovedKnowledgeBody } from '../src/knowledge_content.mjs';
 
-test('four functional topic filters preserve the query and combine request parameters', () => {
-  const html = solutions.renderSolutionsHome({ searchQuery: 'Outlook', category: 'rede-internet' });
-  for (const label of ['Acessos e rotinas', 'Erros em sistemas', 'Impressão, Office e aplicativos', 'Rede e internet']) assert.ok(html.includes(label));
-  assert.match(html, /data-category="rede-internet"[^>]*aria-pressed="true"/);
-  assert.match(html, /value="Outlook"/);
-  assert.equal(solutions.faqSearchPath(' Wi-Fi ', 'rede-internet'), '/api/faq/search?q=Wi-Fi&category=rede-internet');
-});
-
 test('topic-only search requests results and cannot leak a previous topic', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const calls = [], updates = [];
@@ -28,10 +20,10 @@ test('topic-only search requests results and cannot leak a previous topic', asyn
 });
 
 test('filtered results show only response items and empty search offers editable draft', () => {
-  const html = solutions.renderSolutionsResults({ category: 'rede-internet', searchResults: [{ knowledge_id: 'KB-WIFI', title: 'Wi-Fi', category: 'Rede e internet' }], groups: [{ label: 'Old', items: [{ title: 'Outlook' }] }] });
-  assert.match(html, /Wi-Fi/); assert.doesNotMatch(html, /Outlook/);
+  const html = solutions.renderSolutionsResults({ category: 'acessos-rotinas', searchResults: [{ knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001', title: 'CDM', category: 'Acessos e rotinas' }], groups: [{ label: 'Old', items: [{ title: 'Outlook' }] }] });
+  assert.match(html, /CDM/); assert.doesNotMatch(html, /Outlook/);
   const empty = solutions.renderSolutionsResults({ searchQuery: 'zzzz', searchResults: [] });
-  assert.match(empty, /Perguntar ao Jup/); assert.match(empty, /draft=zzzz/);
+  assert.match(empty, /Falar com o Jup/); assert.match(empty, /draft=zzzz/);
 });
 
 test('demo scenarios are drafts with no official knowledge identifiers', () => {
@@ -78,41 +70,6 @@ test('CDM link needs the exact tutorial identity and backend URL; arbitrary URLs
   }
 });
 
-test('solution groups use h3 under the guidance h2', () => {
-  const html = solutions.renderSolutionsHome({ groups: [{ key: 'acessos-rotinas', label: 'Acessos e rotinas', items: [] }] });
-  assert.match(html, /<div class="results-heading">[^]*?<h2>Orientações para sua rotina<\/h2>/);
-  assert.match(html, /<section class="solution-group"><h3>Acessos e rotinas<\/h3>/);
-  assert.doesNotMatch(html, /<section class="solution-group"><h2>/);
-});
-
-test('desktop showcase uses premium visual hierarchy with icon-led topics', () => {
-  const html = solutions.renderSolutionsHome({
-    groups: [{ key: 'acessos-rotinas', label: 'Acessos e rotinas', items: [{ knowledge_id: 'KB-ACCESS', title: 'Solicitar acesso', category: 'Acessos e rotinas' }] }],
-  });
-  assert.match(html, /class="help-kicker"/);
-  assert.match(html, /class="faq-topic-grid"/);
-  const topicCards = html.match(/class="faq-topic-card/g) ?? [];
-  assert.equal(topicCards.length, 4);
-  for (const icon of ['access', 'errors', 'apps', 'network']) assert.match(html, new RegExp(`data-topic-icon="${icon}"`));
-  assert.match(html, /class="jup-spotlight"/);
-  assert.match(html, /class="field-lines"/);
-});
-
-test('desktop article detail has reading surface metadata rail and resolution panel', () => {
-  const html = solutions.renderSolutionDetail({
-    knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001', title: 'Como solicitar acesso ao CDM', category: 'Acessos e rotinas', category_key: 'acessos-rotinas', system: 'CDM',
-    answer: 'Para solicitar seu acesso ao CDM:\n\n1. Acesse https://cdm.juparana.com.br/.\n2. Clique em Solicitar Acesso.', procedure_url: 'https://cdm.juparana.com.br/',
-    provenance: { source: 'SYNTHETIC_DEMO', status: 'APPROVED', version: 1 },
-  });
-  assert.match(html, /class="solution-detail-layout"/);
-  assert.match(html, /class="solution-article-card"/);
-  assert.match(html, /class="solution-detail-aside"/);
-  assert.match(html, /class="solution-meta-card"/);
-  assert.match(html, /Conteúdo aprovado/);
-  assert.match(html, /CDM/);
-  assert.match(html, /class="solution-outcome-card"/);
-});
-
 test('Jup desktop workspace has product frame status and elevated composer', () => {
   const html = renderJupWorkspace({ messages: [{ role: 'USER', text: 'Preciso de acesso ao CDM' }, { role: 'JUP', text: 'Posso ajudar com isso.' }] });
   assert.match(html, /class="jup-workspace-frame"/);
@@ -122,64 +79,10 @@ test('Jup desktop workspace has product frame status and elevated composer', () 
   assert.match(html, /class="composer-hint"/);
 });
 
-test('public header has a visual brand symbol without changing navigation authority', () => {
-  const html = renderAppHeader({ activeRoute: 'solutions' });
-  assert.match(html, /class="brand-symbol"/);
-  assert.match(html, /class="brand-wordmark"/);
-  assert.match(html, /<svg[^>]*aria-hidden="true"/);
-  assert.match(html, /href="\/" data-route="solutions"/);
-  assert.match(html, /href="\/jup" data-route="jup"/);
-});
-
-test('desktop home exposes trust signals article counts and a live Jup presence', () => {
-  const html = solutions.renderSolutionsHome({
-    groups: [{
-      key: 'acessos-rotinas',
-      label: 'Acessos e rotinas',
-      items: [
-        { knowledge_id: 'KB-1', title: 'Acesso 1' },
-        { knowledge_id: 'KB-2', title: 'Acesso 2' },
-      ],
-    }],
-  });
-  assert.match(html, /class="help-trust-strip"/);
-  assert.match(html, /faq-topic-count">2 orientações/);
-  assert.match(html, /jup-spotlight__mark[^]*?class="jup-avatar/);
-  assert.match(html, /Disponível para conversar/);
-});
-
-test('article detail promotes the validated destination without changing approval authority', () => {
-  const html = solutions.renderSolutionDetail({
-    knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001',
-    title: 'Como solicitar acesso ao CDM',
-    category: 'Acessos e rotinas',
-    system: 'CDM',
-    answer: '1. Acesse https://cdm.juparana.com.br/.',
-    procedure_url: 'https://cdm.juparana.com.br/',
-    provenance: { source: 'SYNTHETIC_DEMO', status: 'APPROVED', version: 1 },
-  });
-  assert.match(html, /class="solution-reading-map"/);
-  assert.match(html, /Entenda[^]*Execute[^]*Confirme/);
-  assert.match(html, /class="solution-official-card"/);
-  assert.match(html, /class="solution-official-action"[^>]*href="https:\/\/cdm.juparana.com.br\/"/);
-  assert.match(html, /class="solution-trust-card"/);
-  assert.match(html, /não concede acesso nem altera permissões/);
-});
-
-test('Jup workspace uses a guided sidecar and safe editable conversation shortcuts', () => {
-  const html = renderJupWorkspace({ messages: [{ role: 'JUP', text: 'Como posso ajudar?' }] });
-  assert.match(html, /class="jup-workspace-body"/);
-  assert.match(html, /class="jup-sidecar"/);
-  assert.match(html, /class="jup-quick-prompts"/);
-  assert.match(html, /href="\/jup\?draft=Preciso%20de%20acesso%20ao%20CDM" data-route="jup"/);
-  assert.match(html, /Entender o contexto[^]*Consultar a base aprovada[^]*Resolver ou encaminhar/);
-  assert.match(html, /Não envie senhas ou códigos de verificação/);
-});
-
-test('desktop showcase stylesheet is explicitly loaded after the base visual layers', () => {
+test('one visual foundation is loaded together with the original animated avatar', () => {
   const html = readFileSync(new URL('../src/index.html', import.meta.url), 'utf8');
-  const avatarIndex = html.indexOf('/assets/jup/jup-avatar.css');
-  const showcaseIndex = html.indexOf('/showcase-desktop.css');
-  assert.ok(avatarIndex >= 0);
-  assert.ok(showcaseIndex > avatarIndex);
+  assert.match(html, /href="\/tokens.css"/);
+  assert.match(html, /href="\/styles.css"/);
+  assert.match(html, /href="\/assets\/jup\/jup-avatar.css"/);
+  assert.doesNotMatch(html, /premium.css|showcase-desktop.css/);
 });
