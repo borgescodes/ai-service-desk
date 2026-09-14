@@ -86,3 +86,39 @@ test('one visual foundation is loaded together with the original animated avatar
   assert.match(html, /href="\/assets\/jup\/jup-avatar.css"/);
   assert.doesNotMatch(html, /premium.css|showcase-desktop.css/);
 });
+
+test('FAQ accordion is exclusive, animated and catalog rows do not expose demo labels', () => {
+  const html = solutions.renderSolutionsHome({
+    groups: [{ items: [{ knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001' }] }],
+    searchQuery: '',
+    searchResults: null,
+    searching: false,
+  });
+  assert.match(html, /<details class="faq-category" name="support-faq"/);
+  assert.match(html, /class="faq-category-panel"/);
+  assert.doesNotMatch(html, /Exemplo visual/);
+  assert.match(html, /Como entrar no CDM depois da aprovação[^]*?class="solution-arrow"/);
+});
+
+test('Jup contextual sidebar keeps only new conversation and request tracking', () => {
+  const html = renderAppHeader({ activeRoute: 'jup', identity: { name: 'Pedro Miranda' } });
+  assert.match(html, /Nova conversa/);
+  assert.match(html, /Acompanhar chamado/);
+  assert.doesNotMatch(html, /Artigos de ajuda/);
+});
+
+test('welcome tagline is typewriter-ready and draft content switches the welcome avatar to listening', () => {
+  const idle = renderJupWorkspace({ draft: '' });
+  const listening = renderJupWorkspace({ draft: 'oi' });
+  assert.match(idle, /class="chat-welcome-tagline"/);
+  assert.match(idle, /chat-welcome[^]*?data-state="idle"/);
+  assert.match(listening, /chat-welcome[^]*?data-state="listening"/);
+});
+
+test('desktop shell prevents FAQ page overflow and gives conversation a branded minimal scrollbar', () => {
+  const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /scrollbar-gutter:\s*stable/);
+  assert.match(css, /body:has\(\.solutions-home\)[^}]*overflow:\s*hidden/);
+  assert.match(css, /\.conversation-thread[^}]*scrollbar-color:/);
+  assert.match(css, /\.chat-welcome-tagline/);
+});
