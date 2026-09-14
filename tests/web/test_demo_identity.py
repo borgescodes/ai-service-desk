@@ -16,12 +16,12 @@ def test_provider_lists_only_predefined_public_identities() -> None:
     assert all("capabilities" not in item for item in payloads)
 
 
-def test_pedro_miranda_resolves_exact_requester_identity() -> None:
+def test_demo_requester_resolves_exact_trusted_identity() -> None:
     requester = DemoIdentityProvider().requester_identity("pedro-miranda")
 
-    assert requester.username == "pedro.miranda"
-    assert requester.name == "Pedro Miranda"
-    assert requester.email == "pedro.miranda@example.invalid"
+    assert requester.username == "fulano.tal"
+    assert requester.name == "Fulano de Tal"
+    assert requester.email == "fulano.tal@juparana.com.br"
     assert requester.area == "Revenda - Matriz"
 
 
