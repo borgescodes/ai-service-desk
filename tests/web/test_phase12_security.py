@@ -92,7 +92,7 @@ def test_body_identity_cannot_override_controlled_header_identity() -> None:
         )
         assert response.status_code == 200
         record = runtime.request_repository.get(response.json()["request_id"])
-        assert record.context.requester.username == "pedro.miranda"
+        assert record.context.requester.username == "fulano.tal"
     finally:
         runtime.close()
 
@@ -113,7 +113,7 @@ def test_conversation_text_cannot_promote_requester_identity() -> None:
         )
         assert response.status_code == 200
         record = runtime.request_repository.get(response.json()["request_id"])
-        assert record.context.requester.username == "pedro.miranda"
+        assert record.context.requester.username == "fulano.tal"
     finally:
         runtime.close()
 
