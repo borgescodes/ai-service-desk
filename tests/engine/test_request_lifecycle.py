@@ -164,7 +164,7 @@ def test_denied_policy_after_approval_preserves_the_complete_decision_pair() -> 
         make_record(creation_policy=make_policy_decision(decision="ALLOW")),
         make_record(latest_policy=object()),
         make_record(confidence=object()),
-        make_record(confidence=ConfidenceAssessment("MEDIUM", ("SYNTHETIC_REASON",))),
+        make_record(confidence=ConfidenceAssessment("INVALID", ("SYNTHETIC_REASON",))),
         make_record(confidence=ConfidenceAssessment("HIGH", ["SYNTHETIC_REASON"])),
         make_record("PENDING_APPROVAL", decided_by="TECH-SYNTHETIC"),
         make_record(
