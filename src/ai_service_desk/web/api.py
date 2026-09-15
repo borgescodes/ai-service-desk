@@ -146,8 +146,8 @@ def create_app(
         return app.state.runtime.list_faq()
 
     @app.get("/api/faq/search")
-    def faq_search(q: str = ""):
-        return app.state.runtime.search_faq(q)
+    def faq_search(q: str = "", category: str = ""):
+        return app.state.runtime.search_faq(q, category)
 
     @app.get("/api/faq/{knowledge_id}")
     def faq_detail(knowledge_id: str):
@@ -157,6 +157,12 @@ def create_app(
     def send_message(body: MessageBody, x_demo_identity: str | None = Header(default=None)):
         identity_id = identity(x_demo_identity)
         return app.state.runtime.send_message(identity_id, body.message)
+
+    @app.post("/api/jup/conversation/reset")
+    def reset_conversation(x_demo_identity: str | None = Header(default=None)):
+        identity_id = identity(x_demo_identity)
+        app.state.runtime.reset_conversation(identity_id)
+        return {"status": "RESET"}
 
     @app.get("/api/requests")
     def list_requests(x_demo_identity: str | None = Header(default=None)):
@@ -172,6 +178,11 @@ def create_app(
     def approvals(x_demo_identity: str | None = Header(default=None)):
         identity_id = identity(x_demo_identity)
         return app.state.runtime.list_approvals(identity_id)
+
+    @app.get("/api/operations/handoffs")
+    def handoffs(x_demo_identity: str | None = Header(default=None)):
+        identity_id = identity(x_demo_identity)
+        return app.state.runtime.list_handoffs(identity_id)
 
     @app.get("/api/operations/approvals/{request_id}")
     def operational_detail(request_id: str, x_demo_identity: str | None = Header(default=None)):

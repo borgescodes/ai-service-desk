@@ -1,35 +1,33 @@
-import { renderJupVisual } from './jup_visual.mjs';
+import { renderTrackingQueue, renderTrackingDetail, renderTrackingWorkspace } from './tracking.mjs';
+import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
 import { renderApprovedKnowledgeBody, renderMessageBody } from './knowledge_content.mjs';
+import { navIcon } from './icons.mjs';
 import {
   escapeHtml,
-  renderConfidence,
   renderEmptyState,
-  renderStatus,
 } from './render.mjs';
 
-
-function initials(name = 'Jup') {
-  return String(name)
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase();
-}
+export { navIcon };
 
 export function renderJupAvatar({ compact = false } = {}) {
   return renderJupVisual({ compact });
 }
 
-export function renderAppHeader({ activeRoute, operational = false, operationPath = '/demo/operacao/cdm' }) {
-  const items = operational
-    ? [['solutions', '/', 'Soluções'], ['approvals', operationPath, 'Operação'], ['prevention', '/demo/operacao/prevention', 'Prevenção']]
-    : [['solutions', '/', 'Soluções'], ['jup', '/jup', 'Falar com o Jup']];
+export function renderAppHeader({ activeRoute, operational = false, operationPath = '/demo/operacao/cdm', identities = [], identity = {}, pending = false }) {
+  const globalItems = operational ? [] : [['solutions', '/', 'Soluções'], ['jup', '/jup', 'Falar com o Jup']];
+  const sidebarItems = operational
+    ? [['approvals', operationPath, 'Solicitações recebidas']]
+    : [['requests', '/requests', 'Acompanhar chamado']];
+  const initials = (identity.name || 'Jup').split(' ').slice(0, 2).map(word => word[0]).join('');
+  const links = items => items.map(([route, href, label]) => `<a href="${href}" data-route="${route}"${activeRoute === route || (route === 'solutions' && activeRoute === 'solution') ? ' aria-current="page"' : ''}>${navIcon(route)}<span>${label}</span></a>`).join('');
+  const showSidebar = !['solutions', 'solution'].includes(activeRoute);
   return `<header class="app-header app-header--${operational ? 'operational' : 'public'}">
-    <a class="brand-lockup" href="/" data-route="solutions">Jup Resolve</a>
-    <nav class="primary-nav" aria-label="Navegação principal">${items.map(([route, href, label]) => `<a href="${href}" data-route="${route}"${activeRoute === route || (route === 'solutions' && activeRoute === 'solution') ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav>
-  </header>`;
+    <a class="brand-lockup" href="/" data-route="solutions"><img src="/assets/brand/jup-resolve-logo.svg" width="168" height="42" alt="Jup Resolve"></a>
+    ${operational ? '<div></div>' : `<nav class="primary-nav" aria-label="Navegação principal">${links(globalItems)}</nav>`}
+    <div class="header-actions"><a class="header-search" href="/" data-route="solutions" aria-label="Buscar artigos">${navIcon('search')}</a><details class="persona-menu"><summary><span class="user-avatar">${escapeHtml(initials)}</span><span class="user-copy"><strong>${escapeHtml(identity.name || 'Carregando')}</strong><small>${escapeHtml(identity.area || 'Juparanã')}</small></span>${navIcon('chevron')}</summary><div class="persona-options"><p>Trocar usuário</p>${identities.filter(item => item.identity_id !== 'tecnico-geral').map(item => `<button type="button" data-persona="${escapeHtml(item.identity_id)}"${pending ? ' disabled' : ''} aria-pressed="${item.identity_id === identity.identity_id}"><strong>${escapeHtml(item.name || item.identity_id)}</strong><small>${escapeHtml(item.area || '')}</small></button>`).join('')}</div></details></div>
+  </header>${showSidebar ? `<aside class="app-sidebar" aria-label="Menu contextual"><nav>
+  ${operational ? '<p class="sidebar-label">Painel operacional</p>' : `<button class="sidebar-new" type="button" data-action="new-chat"${pending ? ' disabled' : ''}>${navIcon('plus')}Nova conversa</button>`}
+  ${links(sidebarItems)}</nav></aside>` : ''}`;
 }
 
 function renderSupportHandoff(handoff) {
@@ -55,83 +53,88 @@ function renderSupportHandoff(handoff) {
   </section>`;
 }
 
-function renderMessage(message) {
+function renderMessage(message, { fresh = false, visualState = null, initials = '' } = {}) {
   const role = message.role === 'USER' ? 'Você' : 'Jup';
   const klass = message.role === 'USER' ? 'conversation-message--user' : 'conversation-message--jup';
-  return `<article class="conversation-message ${klass}">
-    <div class="message-author">${message.role === 'JUP' ? renderJupAvatar({ compact: true }) : `<span class="user-avatar" aria-hidden="true">${escapeHtml(initials(role))}</span>`}<strong>${role}</strong></div>
-    ${message.role === 'JUP' ? renderApprovedKnowledgeBody({ text: message.text, procedureUrl: message.procedure_url }) : renderMessageBody(message.text)}
+  const emote = message.thinking ? 'thinking' : visualState ?? message.visual_state ?? visualStateFromUi({ backendStatus: message.status, failed: message.failed });
+  const context = message.context ? [message.context.system, message.context.next_step].filter(Boolean).map(escapeHtml).join(' · ') : '';
+  return `<article class="conversation-message ${klass}${message.thinking ? ' conversation-message--thinking' : ''}${fresh ? ' is-new' : ''}">
+    ${message.role === 'JUP' ? renderJupVisual({ state: emote, compact: true }) : ''}
+    <div class="message-content"><div class="message-author"><strong>${role}</strong>${message.sentAt ? `<time datetime="${escapeHtml(message.sentAt)}">${escapeHtml(new Date(message.sentAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}</time>` : ''}</div>
+    <div class="message-bubble"${fresh && message.role === 'JUP' && !message.thinking && !message.failed ? ' data-reveal-response' : ''}>${message.thinking ? `<div class="processing" role="status" aria-label="Jup está pensando"><strong>Pensando<span class="thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></strong><p class="processing-activity">${escapeHtml(message.activity || 'Buscando contexto')}</p></div>` : message.failed ? `<p class="message-error" role="alert">${escapeHtml(message.text)}</p>` : message.role === 'JUP' ? renderApprovedKnowledgeBody({ text: message.text, procedureUrl: message.procedure_url, knowledgeId: message.knowledge_id }) : renderMessageBody(message.text)}
     ${message.role === 'JUP' ? renderSupportHandoff(message.support_handoff) : ''}
+    ${context ? `<div class="request-context">${context}</div>` : ''}</div></div>
+    ${message.role === 'USER' && initials ? `<span class="message-user-avatar" aria-hidden="true">${escapeHtml(initials)}</span>` : ''}
   </article>`;
 }
 
-export function renderJupWorkspace({ messages = [], understood = null, loading = false, sourceContext = null, visualState = 'idle', messageError = null }) {
-  const conversation = messages.length
-    ? `<div class="conversation-visual">${renderJupVisual({ state: visualState, compact: true })}</div><div class="conversation-thread" role="log" aria-label="Conversa com Jup">${messages.map(renderMessage).join('')}${loading ? '<p class="thinking" role="status">Jup está analisando...</p>' : ''}</div>`
-    : `<div class="jup-welcome">${renderJupVisual({ state: visualState })}<h1>Como posso ajudar?</h1></div>`;
-  const context = understood ? [understood.system, understood.next_step].filter(Boolean).map(escapeHtml).join(' · ') : '';
+function renderChatWelcome(leaving, draft = '') {
+  const listening = Boolean(String(draft).trim());
+  return `<div class="chat-welcome${leaving ? ' chat-welcome--leaving' : ''}" data-listening="${listening}"${leaving ? ' aria-hidden="true"' : ''}>
+    <div class="chat-welcome-avatar-stack" aria-live="polite">
+      <div class="chat-welcome-avatar-state chat-welcome-avatar-state--idle" data-welcome-state="idle" aria-hidden="${listening}">${renderJupVisual({ state: 'idle' })}</div>
+      <div class="chat-welcome-avatar-state chat-welcome-avatar-state--listening" data-welcome-state="listening" aria-hidden="${!listening}">${renderJupVisual({ state: 'listening' })}</div>
+    </div>
+    <h1>Olá, eu sou o <strong>Jup</strong></h1>
+    <p class="chat-welcome-tagline">Seu assistente virtual, sempre pronto para ajudar</p>
+  </div>`;
+}
+
+function processingActivity(messages) {
+  // Presentation context only: no claim about backend retrieval stages.
+  for (const message of [...messages].reverse()) {
+    if (message.role !== 'USER') continue;
+    const text = message.text || '';
+    const cdm = /\bcdm\b/i.test(text);
+    const office = /\b(?:m365|365|office|outlook|teams|sharepoint)\b/i.test(text);
+    if (cdm && office) return 'Buscando contexto';
+    if (cdm) return 'Buscando contexto CDM';
+    if (office) return 'Buscando contexto 365';
+  }
+  return 'Buscando contexto';
+}
+
+export function renderJupWorkspace({ identity = {}, messages = [], understood = null, loading = false, sourceContext = null, visualState = null, messageError = null, draft = '', animateFrom = messages.length } = {}) {
+  const entering = loading && messages.length === 1 && animateFrom === 0;
+  const welcome = (!messages.length && !loading) || entering;
+  const initials = (identity.name || '').split(' ').slice(0, 2).map(word => word[0] || '').join('');
+  const lastAssistant = messages.findLastIndex(message => message.role === 'JUP');
+  const conversation = messages.length ? messages.map((message, index) => renderMessage(
+    message.role === 'JUP' && index === lastAssistant && !message.context && understood ? { ...message, context: understood } : message,
+    { fresh: index >= animateFrom, initials, visualState: index === lastAssistant && !loading ? visualState : null },
+  )).join('') : '';
   return `<section class="jup-surface" aria-label="Atendimento com Jup">
-    <a class="back-link" href="/" data-route="solutions">← Soluções</a>
-    ${sourceContext ? `<p class="faq-source-context">Você estava vendo: ${escapeHtml(sourceContext.title)}</p>` : ''}
-    <div class="jup-conversation">${conversation}
-      ${context ? `<p class="request-context">${context}</p>` : ''}
-      ${messageError ? `<p class="message-error" role="alert">${escapeHtml(messageError)}</p>` : ''}
-      <form id="jup-form" class="composer" aria-label="Enviar mensagem ao Jup">
-        <label class="sr-only" for="jup-message">Mensagem</label>
-        <textarea id="jup-message" name="message" rows="2" maxlength="3000" placeholder="Descreva o que aconteceu..."></textarea>
-        <div class="composer-actions"><span>Enter para enviar · Shift+Enter para nova linha</span><button class="button button--primary" type="submit"${loading ? ' disabled' : ''}>Enviar</button></div>
-      </form>
+    <div class="jup-workspace-frame">
+      ${sourceContext ? `<p class="faq-source-context">Você estava vendo: <strong>${escapeHtml(sourceContext.title)}</strong></p>` : ''}
+      <div class="jup-workspace-body">
+
+        <div class="conversation-stage"><div class="jup-conversation"><div class="conversation-thread${entering ? ' conversation-thread--entering' : ''}" role="log" aria-label="Conversa com Jup" aria-live="polite" tabindex="0">${welcome ? renderChatWelcome(entering, draft) : ''}${conversation}
+          ${understood && lastAssistant < 0 ? renderMessage({ role: 'JUP', text: '', context: understood }) : ''}
+          ${loading ? renderMessage({ role: 'JUP', thinking: true, activity: processingActivity(messages) }, { fresh: true }) : ''}
+          ${messageError ? renderMessage({ role: 'JUP', text: messageError, failed: true }, { fresh: true }) : ''}
+          <div class="conversation-end" aria-hidden="true"></div></div>
+          <button class="scroll-bottom" type="button" data-action="scroll-bottom" hidden aria-label="Voltar à última mensagem">Última mensagem ↓</button>
+          <form id="jup-form" class="composer" aria-label="Enviar mensagem ao Jup" aria-busy="${loading}">
+            <div class="composer-input-row"><span class="composer-leading-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17.5V7.8A2.8 2.8 0 0 1 6.8 5h10.4A2.8 2.8 0 0 1 20 7.8v6.4a2.8 2.8 0 0 1-2.8 2.8H9l-5 3v-2.5Z"/><path d="M8 9.5h8M8 13h5"/></svg></span><label class="sr-only" for="jup-message">Mensagem</label><textarea id="jup-message" name="message" rows="1" maxlength="3000" aria-describedby="composer-hint" placeholder="Digite sua mensagem aqui..."${loading ? ' disabled' : ''}>${escapeHtml(draft)}</textarea></div>
+            <div class="composer-actions"><span id="composer-hint" class="composer-hint">Enter para enviar · Shift+Enter para nova linha</span><button class="button button--primary composer-send" type="submit" aria-label="Enviar mensagem"${loading ? ' disabled' : ''}><span class="sr-only">${loading ? 'Aguarde...' : 'Enviar'}</span>${navIcon('send')}</button></div>
+          </form>
+        </div></div>
+        ${renderChatSupportRail()}
+      </div>
     </div>
   </section>`;
 }
 
-function timeline(events = []) {
-  if (!events.length) return '';
-  return `<ol class="timeline">${events
-    .map((event) => `<li><span aria-hidden="true"></span><div><strong>${escapeHtml(event.label)}</strong>${event.occurred_at ? `<small>${escapeHtml(event.occurred_at)}</small>` : ''}</div></li>`)
-    .join('')}</ol>`;
-}
-
-export function renderRequestList(items = []) {
-  if (!items.length) {
-    return renderEmptyState('Nenhuma solicitação ainda', 'Converse com o Jup para iniciar uma solicitação quando houver uma ação necessária.');
-  }
-  return `<div class="request-list">${items
-    .map((item) => `<article class="request-row" data-request-id="${escapeHtml(item.request_id)}">
-      <div class="request-row-main"><span class="system-mark">${escapeHtml(item.system)}</span><div><h3>${escapeHtml(item.purpose || item.requested_role || 'Solicitação')}</h3><p>${escapeHtml(item.request_id)}</p></div></div>
-      <div class="request-row-status">${renderStatus(item)}</div>
-      <div class="request-timeline">${timeline(item.timeline)}</div>
-    </article>`)
-    .join('')}</div>`;
+export function renderRequestList(items = [], selectedId = null) {
+  return renderTrackingWorkspace(items, selectedId);
 }
 
 export function renderOperationDetail(item, uiState = {}) {
-  if (!item) return renderEmptyState('Selecione uma pendência', 'Abra uma solicitação da fila para revisar contexto, policy e routing.');
-  const approving = uiState.pendingAction === 'approve';
-  const rejecting = uiState.pendingAction === 'reject';
-  const actionDisabled = approving || rejecting || item.state !== 'PENDING_APPROVAL';
-  const policyReason = item.policy?.reason || item.policy?.decision || 'Sem detalhe adicional.';
-  return `<article class="operation-detail">
-    <header class="operation-detail-header"><div><p>${escapeHtml(item.request_id)}</p><h2>${escapeHtml(item.system)} · ${escapeHtml(item.purpose || item.requested_role)}</h2></div>${renderStatus(item)}</header>
-    <div class="evidence-grid">
-      <section><span>Solicitante</span><strong>${escapeHtml(item.requester?.name)}</strong><p>${escapeHtml(item.requester?.area)}</p></section>
-      <section><span>Confidence</span>${renderConfidence(item.confidence)}</section>
-      <section><span>Policy</span><strong>${escapeHtml(item.policy?.decision)}</strong><p>${escapeHtml(policyReason)}</p></section>
-      <section><span>Routing</span><strong>${escapeHtml(item.routing?.technician_name || 'Não atribuído')}</strong></section>
-    </div>
-    ${timeline(item.timeline)}
-    <div class="decision-bar">
-      <button class="button button--secondary button--danger" data-action="reject" type="button"${actionDisabled ? ' disabled' : ''}>${rejecting ? 'Rejeitando...' : 'Rejeitar'}</button>
-      <button class="button button--primary" data-action="approve" data-version="${escapeHtml(item.version)}" type="button"${actionDisabled ? ' disabled' : ''}>${approving ? 'Aprovando solicitação...' : 'Aprovar solicitação'}</button>
-    </div>
-  </article>`;
+  return renderTrackingDetail(item, { operational: true, pendingAction: uiState.pendingAction });
 }
 
-export function renderApprovalQueue(items = []) {
-  if (!items.length) return renderEmptyState('Nenhuma pendência para você', 'Quando uma solicitação exigir sua aprovação e for roteada para você, ela aparecerá aqui.');
-  return `<div class="approval-queue">${items
-    .map((item) => `<button type="button" class="queue-row" data-request-id="${escapeHtml(item.request_id)}"><div><span>${escapeHtml(item.system)}</span><strong>${escapeHtml(item.requester?.name)}</strong><small>${escapeHtml(item.request_id)}</small></div>${renderStatus(item)}</button>`)
-    .join('')}</div>`;
+export function renderApprovalQueue(items = [], selectedId = null) {
+  return renderTrackingQueue(items, selectedId || items[0]?.request_id, true);
 }
 
 export function renderPreventionList(items = []) {
@@ -143,4 +146,13 @@ export function renderPreventionList(items = []) {
       <button class="text-action" type="button" data-opportunity-id="${escapeHtml(item.opportunity_id)}">Ver explicação</button>
     </article>`)
     .join('')}</div>`;
+}
+
+export function renderHandoffs(items = []) {
+  if (!items.length) return '';
+  return `<section class="handoff-inbox" aria-label="Encaminhamentos recebidos"><h2>Encaminhados pelo Jup</h2>${items.map(item => `<article class="operation-detail"><header class="operation-detail-header"><div><p>${escapeHtml(item.handoff_id)}</p><h2>${escapeHtml(item.system)} · ${escapeHtml(item.requester?.name)}</h2></div><span class="status-badge">Encaminhado para suporte</span></header><div class="evidence-grid"><section><span>Responsável</span><strong>${escapeHtml(item.technician?.name)}</strong></section><section><span>Área do solicitante</span><strong>${escapeHtml(item.requester?.area)}</strong></section><section><span>Routing</span><strong>${escapeHtml(item.capability)}</strong></section></div><h3>Resumo técnico</h3><p class="technical-summary">${escapeHtml(item.technical_summary)}</p><details class="handoff-conversation"><summary>Ver contexto da conversa</summary>${(item.source_conversation ?? []).map(entry => `<p><strong>${entry.role === 'USER' ? 'Solicitante' : 'Jup'}:</strong> ${escapeHtml(entry.text)}</p>`).join('')}</details></article>`).join('')}</section>`;
+}
+
+function renderChatSupportRail() {
+  return `<aside class="chat-support-rail" aria-label="Apoio ao atendimento"><section class="related-articles"><header><span class="support-icon">${navIcon('solutions')}</span><h2>Artigos relacionados</h2><a href="/" data-route="solutions">Ver todos →</a></header><a class="related-article" href="/solucoes/KB-SYN-FAQ-CDM-REQUEST-001" data-solution-link><span>Como solicitar acesso ao CDM</span><span aria-hidden="true">›</span></a>${['Como entrar no CDM depois da aprovação', 'Redefinir sua senha', 'Erro de login no CDM'].map(title => `<div class="related-article related-article--example" aria-disabled="true"><span>${title}</span><small>Exemplo</small></div>`).join('')}</section><section class="support-assistance"><div><span class="support-icon">${navIcon('support')}</span><div><h2>Ainda precisa de ajuda?</h2><p>Conte ao Jup o que aconteceu para iniciar seu atendimento.</p></div></div><a class="button button--secondary" href="/jup?draft=Preciso%20de%20ajuda%20com%20um%20sistema." data-route="jup">${navIcon('jup')}Solicitar atendimento</a></section></aside>`;
 }

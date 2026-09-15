@@ -12,7 +12,7 @@ def run_web_demo_smoke() -> dict:
     cases: list[dict] = []
     try:
         requester = runtime.identity_provider.requester_identity("pedro-miranda")
-        requester_ok = requester.username == "pedro.miranda"
+        requester_ok = requester.username == "fulano.tal"
         cases.append(
             _case(
                 "REQUESTER_IDENTITY",

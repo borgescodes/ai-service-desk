@@ -122,9 +122,7 @@ def _imports(path: Path) -> tuple[set[str], set[str]]:
 
 @pytest.mark.parametrize(("path", "expected_sha"), PROTECTED_BLOBS)
 def test_previous_phase_protected_blobs_are_exact(path: str, expected_sha: str) -> None:
-    # Preserva parâmetros/node IDs históricos; somente estas extensões foram autorizadas.
     authorized_extensions = {
-        # F13: correção autorizada de transporte Windows, sem mudança de domínio.
         "src/ai_service_desk/integrations/cdm_fake_api.py": (
             "275b1833d5b27b09c0ffeae9f4484636d10afe63",
             "790a3d3fb13bd3b617c0e8587811bf70e519e40c",
@@ -136,6 +134,18 @@ def test_previous_phase_protected_blobs_are_exact(path: str, expected_sha: str) 
         "src/ai_service_desk/engine/triage.py": (
             "c5ab48f7194fab561f9062c3ab5798c86ec0a8a0",
             "a0fe911053b66faaddd6d02533e7fcc1c5688bce",
+        ),
+        "src/ai_service_desk/engine/access_request.py": (
+            "f34fc3f0e22d82b8bf8f13439ed78a7d31d5869d",
+            "515a23a38791edd4e11f675804062aa9305a1d25",
+        ),
+        "src/ai_service_desk/engine/confidence.py": (
+            "ffc0c212b455978f79a3591578f323ca0e9612dc",
+            "9864ed510a0de3270d30e9088aec407bfd16392d",
+        ),
+        "src/ai_service_desk/engine/request_lifecycle.py": (
+            "dfd194ff8a364a0eb0d803409dad252ced216279",
+            "6ab28ad86d7d40e4873e9a76b6c3cd9f3b4c843b",
         ),
     }
     if path in authorized_extensions:

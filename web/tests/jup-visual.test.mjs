@@ -12,6 +12,10 @@ test('backend outcome maps only to presentation states', () => {
   assert.equal(visualStateFromUi({ pending: false, backendStatus: 'SUPPORT_HANDOFF_PENDING', focused: false }), 'escalation');
 });
 
+test('created request uses the success presentation state', () => {
+  assert.equal(visualStateFromUi({ pending: false, backendStatus: 'REQUEST_CREATED', focused: false }), 'success');
+});
+
 test('focused composer uses listening only when no stronger backend state is active', () => {
   assert.equal(visualStateFromUi({ pending: false, backendStatus: null, focused: true }), 'listening');
   assert.equal(visualStateFromUi({ pending: false, backendStatus: null, focused: false }), 'idle');

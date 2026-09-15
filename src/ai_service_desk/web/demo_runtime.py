@@ -9,6 +9,7 @@ from ai_service_desk.engine.access_request import prepare_access_request
 from ai_service_desk.engine.approval import ApprovalService
 from ai_service_desk.engine.cdm_execution import CDMActionExecutor
 from ai_service_desk.engine.classification import classify_ticket
+from ai_service_desk.engine.confidence import assess_support_context
 from ai_service_desk.engine.execution import ExecutionEngine
 from ai_service_desk.engine.knowledge import build_knowledge_index
 from ai_service_desk.engine.learning_prevention import (
@@ -18,7 +19,7 @@ from ai_service_desk.engine.learning_prevention import (
     OutcomeRecord,
     PatternAggregator,
 )
-from ai_service_desk.engine.ollama import OllamaClient, OllamaError
+from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient, OllamaError
 from ai_service_desk.engine.playbook import build_playbook_catalog
 from ai_service_desk.engine.playbook_resolution import (
     PlaybookEngine,
@@ -63,22 +64,45 @@ from ai_service_desk.web.demo_data import (
     write_demo_playbooks,
 )
 from ai_service_desk.web.demo_faq import DemoFaqCatalog, FaqNotFoundError
+from ai_service_desk.web.demo_faq_data import write_demo_faq_knowledge
 from ai_service_desk.web.demo_identity import DemoIdentityProvider, IdentityNotFoundError
 from ai_service_desk.web.demo_knowledge import DemoKnowledgeEngine
 from ai_service_desk.web.demo_support import (
     DemoSupportState,
+    LinguisticSignal,
+    SupportConversation,
     SupportHandoff,
     SupportHandoffStore,
+    SupportHistoryEntry,
     SupportProcedure,
+    SupportStage,
 )
 from ai_service_desk.web.errors import WebDemoError
-from ai_service_desk.web.presentation import present_prevention, present_request
+from ai_service_desk.web.presentation import present_confidence, present_prevention, present_request
 
 DEMO_MODES = frozenset({"DETERMINISTIC", "LOCAL_AI"})
 DEFAULT_DEMO_MODE = "DETERMINISTIC"
 DEMO_KNOWLEDGE_THRESHOLD = 0.45
-_ADMIN_ROLE_ALIAS = re.compile(r"\badministrador(?:a)?\b", re.IGNORECASE)
+_ADMIN_ROLE_ALIAS = re.compile(
+    r"\b(?:adm|admin|administrador|administradora|administrativo|administrativa)\b",
+    re.IGNORECASE,
+)
 _ENTER_ACCESS_ALIAS = re.compile(r"\bentrar\b", re.IGNORECASE)
+_GENERAL_IT_CLEAR = re.compile(
+    r"\b(?:pc|computador|notebook|windows)\b.*\b(?:travando|travou|trava|lento|lentidao|"
+    r"erro|nao liga|nao abre)\b|\b(?:travando|travou|lentidao)\b.*\b(?:pc|computador|notebook)\b",
+    re.IGNORECASE,
+)
+_ACCESS_REQUEST = re.compile(
+    r"\b(?:acesso|acessar|entrar|permissao|permissoes|libera|liberar|perfil)\b",
+    re.IGNORECASE,
+)
+_LOCAL_SUPPORT_SIGNALS = {
+    "LOGIN_PROBLEM": LinguisticSignal.M365_LOGIN_PROBLEM,
+    "PASSWORD_EVIDENCE": LinguisticSignal.PASSWORD_EVIDENCE,
+    "SUCCESS": LinguisticSignal.PROCEDURE_SUCCEEDED,
+    "FAILURE": LinguisticSignal.PROCEDURE_FAILED,
+}
 
 
 def _canonicalize_access_request_language(text: str) -> str:
@@ -106,11 +130,12 @@ class DemoRuntime:
             startup_started = perf_counter()
             try:
                 client.model_info("qwen3.5:4b")
+                client.model_info("qwen3-embedding:0.6b")
             except OllamaError as exc:
                 client.close()
                 raise WebDemoError(
                     "LOCAL_AI_UNAVAILABLE",
-                    "Não foi possível validar o modelo local qwen3.5:4b no Ollama.",
+                    "Não foi possível validar qwen3.5:4b e qwen3-embedding:0.6b no Ollama local.",
                 ) from exc
             finally:
                 self._local_ai_startup_ms = max(0.0, (perf_counter() - startup_started) * 1000)
@@ -167,8 +192,8 @@ class DemoRuntime:
         groups = self.faq_catalog.featured_groups()
         return {"groups": groups, "total": sum(len(group["items"]) for group in groups)}
 
-    def search_faq(self, query: str) -> dict:
-        items = self.faq_catalog.search(query)
+    def search_faq(self, query: str, category: str = "") -> dict:
+        items = self.faq_catalog.search(query, category)
         return {"items": items, "total": len(items)}
 
     def get_faq(self, knowledge_id: str) -> dict:
@@ -185,19 +210,29 @@ class DemoRuntime:
         phase4_faq_source = (
             Path(__file__).resolve().parents[3] / "knowledge" / "phase4_synthetic_faq.jsonl"
         )
-        self.faq_catalog = DemoFaqCatalog.from_sources([phase4_faq_source, knowledge_source])
+        faq_demo_source = write_demo_faq_knowledge(root / "faq-demo.jsonl")
+        self.faq_catalog = DemoFaqCatalog.from_sources(
+            [phase4_faq_source, knowledge_source, faq_demo_source]
+        )
         playbook_source = write_demo_playbooks(root / "playbooks.jsonl")
         knowledge_index = root / "knowledge-index"
         playbook_catalog = root / "playbook-catalog"
 
-        self.demo_embedder = DemoEmbedder()
+        if self.mode == "LOCAL_AI":
+            if self._ollama_client is None:
+                raise WebDemoError("LOCAL_AI_UNAVAILABLE", "Cliente LOCAL_AI não está disponível.")
+            self.demo_embedder = LocalEmbedder(self._ollama_client)
+            retrieval_client = self._ollama_client
+        else:
+            self.demo_embedder = DemoEmbedder()
+            retrieval_client = DemoClassifierClient()
         self.business_vocabulary = BusinessVocabulary()
         self.demo_classifier_client = DemoClassifierClient()
         build_knowledge_index(knowledge_source, knowledge_index, self.demo_embedder, batch_size=2)
         build_playbook_catalog(playbook_source, knowledge_index, playbook_catalog)
         self.knowledge_engine = DemoKnowledgeEngine(
             knowledge_index,
-            self.demo_classifier_client,
+            retrieval_client,
             self.demo_embedder,
             threshold=DEMO_KNOWLEDGE_THRESHOLD,
             resolver=self.business_vocabulary,
@@ -207,6 +242,7 @@ class DemoRuntime:
         self.request_repository = InMemoryRequestRepository()
         self.routing_store = InMemoryRoutingAssignmentStore()
         self.conversations: dict[str, list[dict]] = {}
+        self._conversation_generations: dict[str, int] = {}
         self._triage: dict[str, tuple[TriageEngine, object]] = {}
         self.created_request_ids: list[str] = []
         self.request_metadata: dict[str, dict] = {}
@@ -214,9 +250,11 @@ class DemoRuntime:
         self.support_handoff_store = SupportHandoffStore()
         self._support_resolution_outcomes: dict[str, str] = {}
         self._support_handoff_ids: dict[str, str] = {}
+        self._general_handoff_ids: dict[str, str] = {}
 
         cdm_technician = self.identity_provider.technician_identity("tecnico-cdm")
         m365_technician = self.identity_provider.technician_identity("tecnico-m365")
+        general_technician = self.identity_provider.technician_identity("tecnico-geral")
         self.authorization_registry = TechnicianAuthorizationRegistry(
             [
                 TechnicianRegistryEntry(
@@ -226,6 +264,10 @@ class DemoRuntime:
                 TechnicianRegistryEntry(
                     identity=m365_technician,
                     capabilities=self.identity_provider.technician_capabilities("tecnico-m365"),
+                ),
+                TechnicianRegistryEntry(
+                    identity=general_technician,
+                    capabilities=self.identity_provider.technician_capabilities("tecnico-geral"),
                 ),
             ]
         )
@@ -237,6 +279,8 @@ class DemoRuntime:
                     "MICROSOFT_365_SUPPORT_REQUEST",
                     m365_technician,
                 ),
+                RoutingRule("GENERAL_IT", "GENERAL_IT_SUPPORT", general_technician),
+                RoutingRule("UBS", "GENERAL_IT_SUPPORT", general_technician),
             ],
             self.authorization_registry,
         )
@@ -281,7 +325,10 @@ class DemoRuntime:
         )
 
     def _new_triage(self, identity_id: str) -> tuple[TriageEngine, object]:
-        session_id = f"demo-{identity_id}-{len(self.conversations.get(identity_id, [])) + 1}"
+        generation = self._conversation_generations.get(identity_id, 0)
+        session_id = (
+            f"demo-{identity_id}-{generation}-{len(self.conversations.get(identity_id, [])) + 1}"
+        )
 
         def classifier(text):
             if self.mode == "LOCAL_AI":
@@ -300,7 +347,7 @@ class DemoRuntime:
         )
         return engine, engine.initial_state()
 
-    def _classify_local_ai(self, text: str):
+    def _interpret_local_ai(self, text: str) -> tuple[str, str]:
         if self._ollama_client is None:
             raise WebDemoError(
                 "LOCAL_AI_UNAVAILABLE",
@@ -313,11 +360,8 @@ class DemoRuntime:
         try:
             response = self._ollama_client.chat(payload)
             scenario, signal = parse_compact_interpretation_response(response)
-            classification = compact_interpretation_to_classification(
-                text, scenario, signal, self.business_vocabulary
-            )
             ok = True
-            return classification
+            return scenario, signal
         except OllamaError as exc:
             raise WebDemoError(
                 "LOCAL_AI_INFERENCE_FAILED",
@@ -333,6 +377,21 @@ class DemoRuntime:
             if not ok:
                 self._local_ai_failed_calls += 1
             self._local_ai_calls.append({"duration_ms": duration_ms, "ok": ok})
+
+    def _classify_local_ai(self, text: str):
+        scenario, signal = self._interpret_local_ai(text)
+        return compact_interpretation_to_classification(
+            text, scenario, signal, self.business_vocabulary
+        )
+
+    def _support_signal_local_ai(self, identity_id: str, message: str):
+        if (
+            self.mode != "LOCAL_AI"
+            or self.support_state.get(identity_id).stage == SupportStage.IDLE
+        ):
+            return None
+        _, signal = self._interpret_local_ai(message)
+        return _LOCAL_SUPPORT_SIGNALS.get(signal)
 
     def local_ai_metrics(self) -> dict:
         return {
@@ -401,6 +460,18 @@ class DemoRuntime:
         patterns = PatternAggregator.aggregate(self.outcome_store.snapshot())
         return OpportunityEngine().generate(patterns)
 
+    def reset_conversation(self, identity_id: str) -> None:
+        self._requester(identity_id)
+        self._triage.pop(identity_id, None)
+        self.conversations.pop(identity_id, None)
+        self.support_state.clear(identity_id)
+        self._support_resolution_outcomes.pop(identity_id, None)
+        self._support_handoff_ids.pop(identity_id, None)
+        self._general_handoff_ids.pop(identity_id, None)
+        self._conversation_generations[identity_id] = (
+            self._conversation_generations.get(identity_id, 0) + 1
+        )
+
     def send_message(self, identity_id: str, message: str) -> dict:
         if self.mode != "LOCAL_AI":
             return self._send_message_impl(identity_id, message)
@@ -423,10 +494,15 @@ class DemoRuntime:
             raise ValueError("Mensagem vazia.")
 
         if is_social_greeting(message):
+            chat = (
+                self._ollama_client.chat
+                if self.mode == "LOCAL_AI" and self._ollama_client
+                else None
+            )
             return {
                 "status": "SOCIAL",
                 "request_id": None,
-                "assistant_message": greeting_message(message, requester.name, None),
+                "assistant_message": greeting_message(message, requester.name, chat),
             }
 
         if is_outside_it_support_scope(message):
@@ -440,9 +516,11 @@ class DemoRuntime:
             return result
 
         systems = self.business_vocabulary.systems(message)
+        interpreted_signal = self._support_signal_local_ai(identity_id, message)
         support_turn = self.support_state.handle(
             identity_id,
             message,
+            interpreted_signal=interpreted_signal,
             explicit_other_system=bool(systems and "OFFICE 365" not in systems),
         )
         if support_turn is not None and support_turn.status != "PASSWORD_EVIDENCE_COLLECTED":
@@ -479,12 +557,61 @@ class DemoRuntime:
 
         result = self._send_operational_message(identity_id, message, requester)
         state = self._triage[identity_id][1]
+        if result.get("status") == "TRIAGE_ABSTAINED" and state.system == "OFFICE 365":
+            handoff = self._materialize_m365_knowledge_gap_handoff(
+                identity_id,
+                requester,
+                message,
+                intent=state.intent or "OUTRO",
+            )
+            result = {
+                "status": "SUPPORT_HANDOFF_PENDING",
+                "request_id": None,
+                "support_handoff": handoff.as_result(),
+            }
+        elif self._should_general_handoff(message, systems, result, state):
+            system = systems[0] if len(systems) == 1 else "GENERAL_IT"
+            handoff = self._materialize_general_handoff(
+                identity_id,
+                requester,
+                message,
+                system=system,
+                intent=state.intent or "OUTRO",
+            )
+            result = {
+                "status": "SUPPORT_HANDOFF_PENDING",
+                "request_id": None,
+                "support_handoff": handoff.as_result(),
+            }
         result["business_context"] = {
             "system": state.system,
             "product": state.entities.get("product", ""),
         }
         result["assistant_message"] = operational_message(result, message, None)
         return result
+
+    @staticmethod
+    def _should_general_handoff(
+        message: str, systems: tuple[str, ...], result: dict, state
+    ) -> bool:
+        if result.get("status") not in {"NEEDS_CLARIFICATION", "TRIAGE_ABSTAINED"}:
+            return False
+        normalized = " ".join(message.casefold().split())
+        if systems == ("UBS",) and _ACCESS_REQUEST.search(normalized):
+            return True
+        if _GENERAL_IT_CLEAR.search(normalized):
+            return True
+        if (
+            result.get("status") == "TRIAGE_ABSTAINED"
+            and state.intent in {"ORIENTACAO", "OUTRO"}
+            and bool(state.system)
+        ):
+            return True
+        return bool(
+            result.get("status") == "TRIAGE_ABSTAINED"
+            and state.intent in {"ERRO_SISTEMA", "INSTALACAO_SOFTWARE", "PROBLEMA_ACESSO"}
+            and state.system not in {"CDM", "OFFICE 365"}
+        )
 
     def _record_support_resolution(self, identity_id: str, requester) -> None:
         if identity_id in self._support_resolution_outcomes:
@@ -557,10 +684,157 @@ class DemoRuntime:
         )
         return stored
 
+    def _materialize_m365_knowledge_gap_handoff(
+        self,
+        identity_id: str,
+        requester,
+        message: str,
+        *,
+        intent: str,
+    ) -> SupportHandoff:
+        existing_id = self._support_handoff_ids.get(identity_id)
+        if existing_id is not None:
+            return self.support_handoff_store.get(existing_id)
+
+        technician = self.routing_registry.resolve("MICROSOFT_365", "MICROSOFT_365_SUPPORT_REQUEST")
+        assessment = assess_support_context(requester.area, "OFFICE 365", message)
+        confidence = present_confidence(assessment)
+        conversation_history = tuple(
+            SupportHistoryEntry("USER", item["text"])
+            for item in self.conversations.get(identity_id, [])
+            if item.get("role") == "USER" and item.get("text")
+        )
+        if not conversation_history or conversation_history[-1].text != message.strip():
+            conversation_history += (SupportHistoryEntry("USER", message.strip()),)
+        support = SupportConversation(
+            stage=SupportStage.HANDOFF,
+            original_symptom=message.strip(),
+            evidence=(message.strip(),),
+            history=conversation_history,
+        )
+        summary = "\n".join(
+            (
+                f"Solicitante: {requester.name}",
+                f"E-mail: {requester.email}",
+                f"Área: {requester.area}",
+                "Sistema/contexto: Microsoft 365",
+                f"Intenção interpretada: {intent or 'OUTRO'}",
+                f"Sintoma/pedido informado: {message.strip()}",
+                "Orientação aprovada encontrada: não",
+                f"Confiança de contexto: {confidence['label']}",
+                "Motivos: " + ", ".join(assessment.reason_codes),
+                f"Encaminhamento: {technician.name}",
+            )
+        )
+        handoff_id = f"DEMO-M365-HANDOFF-{len(self.support_handoff_store.snapshot()) + 1:03d}"
+        handoff = SupportHandoff(
+            handoff_id=handoff_id,
+            system="MICROSOFT_365",
+            capability="MICROSOFT_365_SUPPORT_REQUEST",
+            technician=technician,
+            requester=requester,
+            technical_summary=summary,
+            source_conversation=support,
+            confidence=confidence,
+        )
+        stored = self.support_handoff_store.put(handoff)
+        self._support_handoff_ids[identity_id] = stored.handoff_id
+        self.outcome_store.ingest(
+            OutcomeRecord(
+                interaction_id=f"{stored.handoff_id}-OUTCOME",
+                system=stored.system,
+                intent=intent or "OUTRO",
+                capability=stored.capability,
+                area=requester.area,
+                knowledge_id="",
+                playbook_id="",
+                playbook_version=None,
+                step_id="",
+                outcome="ROUTED_TO_HUMAN",
+                reason_code="NO_APPROVED_KNOWLEDGE",
+            )
+        )
+        return stored
+
+    def _materialize_general_handoff(
+        self,
+        identity_id: str,
+        requester,
+        message: str,
+        *,
+        system: str,
+        intent: str,
+    ) -> SupportHandoff:
+        existing_id = self._general_handoff_ids.get(identity_id)
+        if existing_id is not None:
+            return self.support_handoff_store.get(existing_id)
+
+        technician = self.identity_provider.technician_identity("tecnico-geral")
+        assessment = assess_support_context(requester.area, system, message)
+        confidence = present_confidence(assessment)
+        conversation_history = tuple(
+            SupportHistoryEntry("USER", item["text"])
+            for item in self.conversations.get(identity_id, [])
+            if item.get("role") == "USER" and item.get("text")
+        )
+        if not conversation_history or conversation_history[-1].text != message.strip():
+            conversation_history += (SupportHistoryEntry("USER", message.strip()),)
+        support = SupportConversation(
+            stage=SupportStage.HANDOFF,
+            original_symptom=message.strip(),
+            evidence=(message.strip(),),
+            history=conversation_history,
+        )
+        public_system = system if system != "GENERAL_IT" else "TI geral"
+        summary = "\n".join(
+            (
+                f"Solicitante: {requester.name}",
+                f"E-mail: {requester.email}",
+                f"Área: {requester.area}",
+                f"Sistema/contexto: {public_system}",
+                f"Intenção interpretada: {intent or 'OUTRO'}",
+                f"Sintoma/pedido informado: {message.strip()}",
+                "Orientação aprovada encontrada: não",
+                f"Confiança de contexto: {confidence['label']}",
+                "Motivos: " + ", ".join(assessment.reason_codes),
+                f"Encaminhamento: {technician.name}",
+            )
+        )
+        handoff_id = f"DEMO-GENERAL-HANDOFF-{len(self.support_handoff_store.snapshot()) + 1:03d}"
+        handoff = SupportHandoff(
+            handoff_id=handoff_id,
+            system=system,
+            capability="GENERAL_IT_SUPPORT",
+            technician=technician,
+            requester=requester,
+            technical_summary=summary,
+            source_conversation=support,
+            confidence=confidence,
+        )
+        stored = self.support_handoff_store.put(handoff)
+        self._general_handoff_ids[identity_id] = stored.handoff_id
+        self.outcome_store.ingest(
+            OutcomeRecord(
+                interaction_id=f"{stored.handoff_id}-OUTCOME",
+                system=stored.system,
+                intent=intent or "OUTRO",
+                capability=stored.capability,
+                area=requester.area,
+                knowledge_id="",
+                playbook_id="",
+                playbook_version=None,
+                step_id="",
+                outcome="ROUTED_TO_HUMAN",
+                reason_code="NO_APPROVED_KNOWLEDGE",
+            )
+        )
+        return stored
+
     @staticmethod
     def _support_handoff_summary(support, requester, technician_name: str) -> str:
         lines = [
             f"Solicitante: {requester.name}",
+            f"E-mail: {requester.email}",
             f"Área: {requester.area}",
             "Sistema: Microsoft 365",
             "Categoria: falha de autenticação",
@@ -695,6 +969,14 @@ class DemoRuntime:
         return [
             self._present(item.request, assignment=item.assignment, include_internal=True)
             for item in self.approval_queue.pending(technician_id=technician.technician_id)
+        ]
+
+    def list_handoffs(self, identity_id: str) -> list[dict]:
+        technician = self._technician(identity_id)
+        return [
+            handoff.as_result()
+            for handoff in self.support_handoff_store.snapshot()
+            if handoff.technician.technician_id == technician.technician_id
         ]
 
     def get_operational_request(self, identity_id: str, request_id: str) -> dict:

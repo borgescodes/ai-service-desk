@@ -8,7 +8,10 @@ from ai_service_desk.web.demo_runtime import DemoRuntime
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WEB_SRC = _REPO_ROOT / "web" / "src"
-_ALLOWED_FRONTEND_HTTPS = {"https://mysignins.microsoft.com/security-info/password/change"}
+_ALLOWED_FRONTEND_HTTPS = {
+    "https://cdm.juparana.com.br/",
+    "https://mysignins.microsoft.com/security-info/password/change",
+}
 _FORBIDDEN_FRONTEND_TOKENS = (
     "RoutingRegistry",
     "ApprovalService",
@@ -51,10 +54,22 @@ def test_frontend_has_no_domain_decisions_direct_cdm_or_embedded_token() -> None
     files = tuple(path for path in _WEB_SRC.rglob("*") if path.is_file())
     assert files
     for path in files:
+        if path.name == "OFL.txt":
+            continue
+        if path.suffix == ".woff2":
+            assert path.read_bytes().startswith(b"wOF2")
+            continue
         if path.suffix == ".png":
             assert path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
             continue
         text = path.read_text(encoding="utf-8")
+        if path.suffix == ".svg":
+            text = re.sub(
+                r'xmlns(?::xlink)?="http://www\.w3\.org/(?:2000/svg|1999/xlink)"',
+                "",
+                text,
+            )
+            assert not re.search(r"<script|\son\w+=|<foreignObject", text, re.IGNORECASE)
         for token in _FORBIDDEN_FRONTEND_TOKENS:
             assert token not in text, f"forbidden frontend token {token!r} in {path}"
         assert "http://" not in text
@@ -77,7 +92,7 @@ def test_body_identity_cannot_override_controlled_header_identity() -> None:
         )
         assert response.status_code == 200
         record = runtime.request_repository.get(response.json()["request_id"])
-        assert record.context.requester.username == "pedro.miranda"
+        assert record.context.requester.username == "fulano.tal"
     finally:
         runtime.close()
 
@@ -98,7 +113,7 @@ def test_conversation_text_cannot_promote_requester_identity() -> None:
         )
         assert response.status_code == 200
         record = runtime.request_repository.get(response.json()["request_id"])
-        assert record.context.requester.username == "pedro.miranda"
+        assert record.context.requester.username == "fulano.tal"
     finally:
         runtime.close()
 
@@ -181,9 +196,24 @@ def test_faq_projects_safe_fields_without_private_review_or_credentials():
         items = response.json()["items"]
         assert items
         for item in items:
-            assert set(item) == {"knowledge_id", "title", "question", "system", "category"}
+            assert set(item) == {
+                "knowledge_id",
+                "title",
+                "question",
+                "system",
+                "category",
+                "category_key",
+            }
             detail = client.get(f"/api/faq/{item['knowledge_id']}").json()
-            assert set(detail) == set(item) | {"answer", "procedure_url"}
+            assert set(detail) == set(item) | {
+                "answer",
+                "procedure_url",
+                "provenance",
+            }
+            assert set(detail["provenance"]) == {"source", "status", "version"}
+            assert detail["provenance"]["status"] == "APPROVED"
+            assert "reviewed_by" not in detail
+            assert "reviewed_at" not in detail
             assert detail["procedure_url"] in {None, *_ALLOWED_FRONTEND_HTTPS}
             assert "phase12-demo-service-token" not in str(detail)
     finally:

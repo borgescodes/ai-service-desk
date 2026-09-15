@@ -1,9 +1,13 @@
+import hashlib
 import json
+import re
 
 import pytest
 
 from ai_service_desk.engine.ollama import OllamaError
 from ai_service_desk.web import demo_runtime
+from ai_service_desk.web.business_context import BusinessVocabulary
+from ai_service_desk.web.demo_ai import compact_interpretation_to_classification
 from ai_service_desk.web.errors import WebDemoError
 
 
@@ -12,19 +16,48 @@ class CompactGateway:
 
     def __init__(self, *args, **kwargs):
         self.payloads = []
+        self.embed_requests = []
         self.model_checks = []
+        self._models = {}
         self.closed = False
         type(self).instances.append(self)
 
     def model_info(self, name):
-        self.model_checks.append(name)
-        return {"name": name, "digest": "fake-qwen-digest"}
+        if name not in self._models:
+            self.model_checks.append(name)
+            self._models[name] = {"name": name, "digest": f"fake-{name}-digest"}
+        return self._models[name]
+
+    @staticmethod
+    def _embedding(text: str, dimensions: int = 1024) -> list[float]:
+        vector = [0.0] * dimensions
+        for token in re.findall(r"[a-z0-9]+", text.casefold()):
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            index = int.from_bytes(digest[:4], "big") % dimensions
+            vector[index] += 1.0
+        if not any(vector):
+            vector[0] = 1.0
+        return vector
+
+    def json_request(self, method, path, payload=None):
+        if method != "POST" or path != "/api/embed" or not isinstance(payload, dict):
+            raise AssertionError(f"Unexpected JSON request: {method} {path}")
+        texts = payload.get("input")
+        if not isinstance(texts, list):
+            raise AssertionError("Embedding input must be a list")
+        self.embed_requests.append(payload)
+        return {"embeddings": [self._embedding(text) for text in texts]}
 
     def chat(self, payload):
         self.payloads.append(payload)
         properties = payload.get("format", {}).get("properties", {})
         text = payload["messages"][-1]["content"].casefold()
-        if "scenario" in properties:
+        if "assistant_message" in properties:
+            choices = properties["assistant_message"].get("enum", [])
+            if not choices:
+                raise AssertionError("Conversational payload must expose allowed choices")
+            result = {"assistant_message": choices[0]}
+        elif "scenario" in properties:
             if (
                 "cdm" in text
                 or "central de dados mestres" in text
@@ -62,10 +95,10 @@ class InvalidCompactGateway(CompactGateway):
     mode = "extra"
 
     def chat(self, payload):
-        self.payloads.append(payload)
         properties = payload.get("format", {}).get("properties", {})
         if "scenario" not in properties:
             return super().chat(payload)
+        self.payloads.append(payload)
         if self.mode == "malformed":
             content = "{not-json"
             done_reason = "stop"
@@ -149,6 +182,71 @@ def test_local_ai_uses_compact_scenario_signal_contract_and_small_payload(monkey
         runtime.close()
 
 
+@pytest.mark.parametrize(
+    "text,scenario,signal,expected_intent,expected_system",
+    [
+        (
+            "Preciso cadastrar um material para revenda",
+            "CDM_ACCESS",
+            "ACCESS_REQUEST",
+            "ORIENTACAO",
+            "CDM",
+        ),
+        (
+            "Bom dia! Preciso cadastrar material para revenda no SIAGRI",
+            "CDM_ACCESS",
+            "ACCESS_REQUEST",
+            "ORIENTACAO",
+            "SIAGRI",
+        ),
+        (
+            "Preciso de acesso ao CDM",
+            "CDM_ACCESS",
+            "ACCESS_REQUEST",
+            "PROBLEMA_ACESSO",
+            "CDM",
+        ),
+        (
+            "Nao consigo entrar no CDM",
+            "CDM_ACCESS",
+            "LOGIN_PROBLEM",
+            "PROBLEMA_ACESSO",
+            "CDM",
+        ),
+        (
+            "Preciso de acesso administrador ao CDM",
+            "CDM_ACCESS",
+            "PRIVILEGED_ACCESS",
+            "PROBLEMA_ACESSO",
+            "CDM",
+        ),
+        (
+            "Preciso instalar o Teams",
+            "OTHER_IT",
+            "UNKNOWN",
+            "INSTALACAO_SOFTWARE",
+            "OFFICE 365",
+        ),
+    ],
+)
+def test_compact_interpretation_requires_textual_access_evidence(
+    text,
+    scenario,
+    signal,
+    expected_intent,
+    expected_system,
+):
+    classification = compact_interpretation_to_classification(
+        text,
+        scenario,
+        signal,
+        BusinessVocabulary(),
+    )
+
+    assert classification.intent == expected_intent
+    assert classification.system == expected_system
+
+
 def test_local_ai_metrics_count_calls_turns_and_never_store_content(monkeypatch):
     runtime = _runtime(monkeypatch)
     try:
@@ -177,24 +275,27 @@ def test_local_ai_metrics_count_calls_turns_and_never_store_content(monkeypatch)
         runtime.close()
 
 
-def test_local_ai_zero_call_turns_are_measured_without_inference(monkeypatch):
+def test_local_ai_social_presentation_does_not_count_as_decision_inference(monkeypatch):
     runtime = _runtime(monkeypatch)
     try:
         gateway = runtime._ollama_client
         gateway.payloads.clear()
 
         runtime.send_message("pedro-miranda", "Bom dia")
-        assert len(gateway.payloads) == 0
+        assert len(gateway.payloads) == 1
+        social_schema = gateway.payloads[0]["format"]
+        assert set(social_schema["properties"]) == {"assistant_message"}
         assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 0
 
+        gateway.payloads.clear()
         runtime.send_message("pedro-miranda", "Quanto foi o jogo do Flamengo?")
-        assert len(gateway.payloads) == 0
+        assert gateway.payloads == []
         assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 0
     finally:
         runtime.close()
 
 
-def test_local_ai_never_uses_second_inference_to_render_backend_results(monkeypatch):
+def test_local_ai_uses_one_interpretation_and_no_render_inference_for_support_result(monkeypatch):
     runtime = _runtime(monkeypatch)
     try:
         gateway = runtime._ollama_client
@@ -203,6 +304,7 @@ def test_local_ai_never_uses_second_inference_to_render_backend_results(monkeypa
         created = runtime.send_message("pedro-miranda", "Preciso acessar o CDM.")
         assert created["request_id"]
         assert len(gateway.payloads) == 1
+        assert set(gateway.payloads[0]["format"]["properties"]) == {"scenario", "signal"}
         assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 1
 
         runtime.reset()
@@ -214,8 +316,9 @@ def test_local_ai_never_uses_second_inference_to_render_backend_results(monkeypa
         gateway.payloads.clear()
         resolved = runtime.send_message("pedro-miranda", "Funcionou.")
         assert resolved["resolved"] is True
-        assert gateway.payloads == []
-        assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 0
+        assert len(gateway.payloads) == 1
+        assert set(gateway.payloads[0]["format"]["properties"]) == {"scenario", "signal"}
+        assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 1
     finally:
         runtime.close()
 
@@ -246,11 +349,13 @@ def test_local_ai_transport_failure_is_explicit_and_counted(monkeypatch):
         runtime.close()
 
 
-def test_local_ai_startup_validates_model_without_warmup_call(monkeypatch):
+def test_local_ai_startup_validates_models_without_warmup_chat(monkeypatch):
     runtime = _runtime(monkeypatch)
     try:
         gateway = runtime._ollama_client
-        assert gateway.model_checks == ["qwen3.5:4b"]
+        assert gateway.model_checks == ["qwen3.5:4b", "qwen3-embedding:0.6b"]
+        assert gateway.embed_requests
+        assert all(request["model"] == "qwen3-embedding:0.6b" for request in gateway.embed_requests)
         assert gateway.payloads == []
         metrics = runtime.local_ai_metrics()
         assert metrics["startup_ms"] >= 0

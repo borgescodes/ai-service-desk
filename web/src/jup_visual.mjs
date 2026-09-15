@@ -1,7 +1,7 @@
 import { JUP_ASSETS, JUP_SHELL } from './jup_visual_assets.mjs';
 
 const STATUS_TO_VISUAL = Object.freeze({
-  SUPPORT_RESOLVED: 'success', KNOWLEDGE_FOUND: 'success',
+  SUPPORT_RESOLVED: 'success', KNOWLEDGE_FOUND: 'success', REQUEST_CREATED: 'success',
   DENIED_POLICY: 'warning', LOCAL_AI_INFERENCE_FAILED: 'warning', LOCAL_AI_RESPONSE_INVALID: 'warning',
   SUPPORT_HANDOFF_PENDING: 'escalation',
 });

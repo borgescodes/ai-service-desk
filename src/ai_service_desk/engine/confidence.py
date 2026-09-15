@@ -11,10 +11,13 @@ from ai_service_desk.engine.access_request import (
 from ai_service_desk.engine.validation import normalize_text
 
 CONTEXT_NOT_CDM_ACCESS_REQUEST = "CONTEXT_NOT_CDM_ACCESS_REQUEST"
+IDENTITY_CONFIRMED = "IDENTITY_CONFIRMED"
 AREA_MATCH_REVENDA = "AREA_MATCH_REVENDA"
 AREA_OUTSIDE_REVENDA = "AREA_OUTSIDE_REVENDA"
+AREA_SYSTEM_MISMATCH = "AREA_SYSTEM_MISMATCH"
 PURPOSE_MATCH_MATERIAL_REQUEST = "PURPOSE_MATCH_MATERIAL_REQUEST"
 PURPOSE_NOT_CONFIRMED = "PURPOSE_NOT_CONFIRMED"
+CONTEXT_INSUFFICIENT = "CONTEXT_INSUFFICIENT"
 
 MATERIAL_PURPOSE_PHRASES = (
     "solicitar material",
@@ -26,7 +29,7 @@ MATERIAL_PURPOSE_PHRASES = (
 
 @dataclass(frozen=True)
 class ConfidenceAssessment:
-    level: Literal["HIGH", "LOW"]
+    level: Literal["HIGH", "MEDIUM", "LOW"]
     reason_codes: tuple[str, ...]
 
 
@@ -56,5 +59,28 @@ def assess_confidence(context: AccessRequestContext) -> ConfidenceAssessment:
     purpose_match = _purpose_matches_material_request(context.purpose)
     area_reason = AREA_MATCH_REVENDA if area_match else AREA_OUTSIDE_REVENDA
     purpose_reason = PURPOSE_MATCH_MATERIAL_REQUEST if purpose_match else PURPOSE_NOT_CONFIRMED
-    level: Literal["HIGH", "LOW"] = "HIGH" if area_match and purpose_match else "LOW"
+    if area_match and purpose_match:
+        level: Literal["HIGH", "MEDIUM", "LOW"] = "HIGH"
+    elif area_match:
+        level = "MEDIUM"
+    else:
+        level = "LOW"
     return ConfidenceAssessment(level, (area_reason, purpose_reason))
+
+
+def assess_support_context(area: str, system: str, purpose: str) -> ConfidenceAssessment:
+    normalized_area = normalize_text(area)
+    normalized_system = normalize_text(system)
+    normalized_purpose = normalize_text(purpose)
+    reasons: list[str] = [IDENTITY_CONFIRMED]
+
+    if normalized_system == "ubs" and "revenda" in normalized_area.split():
+        reasons.extend((AREA_SYSTEM_MISMATCH, CONTEXT_INSUFFICIENT))
+        return ConfidenceAssessment("LOW", tuple(reasons))
+
+    if normalized_system and normalized_purpose:
+        reasons.append(CONTEXT_INSUFFICIENT)
+        return ConfidenceAssessment("MEDIUM", tuple(reasons))
+
+    reasons.append(CONTEXT_INSUFFICIENT)
+    return ConfidenceAssessment("LOW", tuple(reasons))

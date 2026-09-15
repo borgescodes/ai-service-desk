@@ -72,7 +72,20 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
     if result["status"] == "SUPPORT_HANDOFF_PENDING":
         handoff = result.get("support_handoff") or {}
         technician = handoff.get("technician") or {}
-        technician_name = technician.get("name") or "o suporte do Microsoft 365"
+        technician_name = technician.get("name") or "o suporte técnico"
+        if (
+            handoff.get("capability") == "GENERAL_IT_SUPPORT"
+            or handoff.get("confidence") is not None
+        ):
+            system = handoff.get("system") or "TI"
+            if system == "MICROSOFT_365":
+                system = "Microsoft 365"
+            return (
+                f"Entendi o contexto do seu atendimento sobre {system}. "
+                "Ainda não tenho um procedimento aprovado suficiente para orientar esse caso "
+                "com segurança, então "
+                f"encaminhei o atendimento para {technician_name}."
+            )
         return (
             "Entendi. Como o procedimento não resolveu o acesso, "
             f"encaminhei o atendimento para {technician_name}."

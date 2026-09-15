@@ -79,6 +79,14 @@ def test_web_demo_smoke_prints_marker(monkeypatch, capsys) -> None:
     assert "10/10" in output
 
 
+def test_windows_launcher_pins_python_to_its_checkout() -> None:
+    launcher = Path("run-web-demo.cmd").read_text(encoding="utf-8")
+
+    assert 'set "PROJECT_ROOT=%~dp0"' in launcher
+    assert 'pushd "%PROJECT_ROOT%"' in launcher
+    assert 'set "PYTHONPATH=%PROJECT_ROOT%src;%PYTHONPATH%"' in launcher
+
+
 def test_phase12_operator_docs_and_windows_launcher_cover_demo_flow() -> None:
     launcher = Path("run-web-demo.cmd").read_text(encoding="utf-8")
     environment = Path("docs/environment/web-demo.md").read_text(encoding="utf-8")

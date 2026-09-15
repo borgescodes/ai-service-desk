@@ -24,9 +24,9 @@ class DemoIdentity:
 _IDENTITIES = (
     DemoIdentity(
         identity_id="pedro-miranda",
-        name="Pedro Miranda",
-        username="pedro.miranda",
-        email="pedro.miranda@example.invalid",
+        name="Fulano de Tal",
+        username="fulano.tal",
+        email="fulano.tal@juparana.com.br",
         area="Revenda - Matriz",
         role="REQUESTER",
     ),
@@ -58,7 +58,7 @@ _IDENTITIES = (
         area="Tecnologia da Informação",
         role="TECHNICIAN",
         technician_id="TECH-GENERAL",
-        capabilities=frozenset(),
+        capabilities=frozenset({"GENERAL_IT_SUPPORT"}),
     ),
 )
 

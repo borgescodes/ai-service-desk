@@ -21,7 +21,41 @@ _EVENT_LABELS = {
     "EXECUTION_FAILED": "Execução falhou",
 }
 
-_CONFIDENCE_LABELS = {"HIGH": "Alta", "LOW": "Baixa"}
+_CONFIDENCE_LABELS = {"HIGH": "Alta", "MEDIUM": "Média", "LOW": "Baixa"}
+_CONFIDENCE_EXPLANATIONS = {
+    "IDENTITY_CONFIRMED": (
+        "positive",
+        "Identidade confirmada pelo backend/session provider.",
+    ),
+    "AREA_MATCH_REVENDA": (
+        "positive",
+        "Área de atuação compatível com Revenda.",
+    ),
+    "AREA_OUTSIDE_REVENDA": (
+        "conflict",
+        "Área de atuação não corresponde ao contexto esperado de Revenda.",
+    ),
+    "AREA_SYSTEM_MISMATCH": (
+        "conflict",
+        "Acesso solicitado não possui coerência conhecida com a área de atuação.",
+    ),
+    "PURPOSE_MATCH_MATERIAL_REQUEST": (
+        "positive",
+        "Finalidade de solicitação de materiais confirmada.",
+    ),
+    "PURPOSE_NOT_CONFIRMED": (
+        "missing",
+        "Finalidade operacional ainda não foi confirmada.",
+    ),
+    "CONTEXT_INSUFFICIENT": (
+        "missing",
+        "Contexto insuficiente para elevar a confiança.",
+    ),
+    "CONTEXT_NOT_CDM_ACCESS_REQUEST": (
+        "conflict",
+        "O contexto não corresponde a uma solicitação controlada de acesso ao CDM.",
+    ),
+}
 
 _PREVENTION_CATEGORY_LABELS = {
     "KNOWLEDGE_GAP": "Lacuna de conhecimento",
@@ -37,17 +71,28 @@ def _iso(value):
     return value.isoformat() if value is not None else None
 
 
-def _confidence(record, metadata: dict[str, object]) -> dict:
-    raw = metadata.get("classification_confidence")
-    percent = None
-    if type(raw) in {int, float} and not isinstance(raw, bool) and 0 <= raw <= 1:
-        percent = round(float(raw) * 100)
+def present_confidence(assessment) -> dict:
+    explanations = []
+    for code in assessment.reason_codes:
+        kind, text = _CONFIDENCE_EXPLANATIONS.get(
+            code,
+            ("missing", "Evidência registrada pelo backend sem descrição pública."),
+        )
+        explanations.append({"code": code, "kind": kind, "text": text})
     return {
-        "level": record.confidence.level,
-        "label": _CONFIDENCE_LABELS[record.confidence.level],
-        "percent": percent,
+        "level": assessment.level,
+        "label": _CONFIDENCE_LABELS[assessment.level],
+        "percent": None,
         "tone": "confidence",
+        "explanations": explanations,
     }
+
+
+def _confidence(record, metadata: dict[str, object]) -> dict:
+    # Percentuais de classificação do LLM não representam confiança de negócio.
+    # A UI explica somente o assessment calculado pelo backend.
+    _ = metadata
+    return present_confidence(record.confidence)
 
 
 def present_timeline(events) -> list[dict]:
@@ -104,7 +149,9 @@ def present_request(
         "requester": {
             "name": record.context.requester.name,
             "username": record.context.requester.username,
+            "email": record.context.requester.email,
             "area": record.context.requester.area,
+            "identity_source": "BACKEND_SESSION_PROVIDER",
         },
         "system": record.context.system,
         "intent": record.context.intent,

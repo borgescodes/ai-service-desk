@@ -65,6 +65,12 @@ SYSTEMS = (
         "Não substitui SAP como sistema mestre. Comprar ou pedir material não identifica CDM.",
         related=("SAP",),
     ),
+    BusinessSystem(
+        "UBS",
+        ("UBS",),
+        "Sistema reconhecido somente como contexto de atendimento nesta demo. "
+        "Não possui integração automática nem coerência curada com a área Revenda - Matriz.",
+    ),
 )
 PRODUCTS = (
     ("OUTLOOK", ("Outlook",)),
@@ -73,7 +79,7 @@ PRODUCTS = (
 )
 # Cigan: candidato HISTORICAL_LANGUAGE_ONLY, 62 registros em título/descrição;
 # correspondência com CIGAM revisada nesta etapa. Não importa procedimentos.
-CONTEXT_VERSION = "2026-09-10"
+CONTEXT_VERSION = "2026-09-14"
 PROVENANCE = "BUSINESS_CONTEXT_CURRENT"
 
 
@@ -135,7 +141,11 @@ class BusinessVocabulary:
                 clause,
             ):
                 return ("CDM",)
-            privileged = re.search(r"\b(?:admin|administrador|administradora|superadmin)\b", clause)
+            privileged = re.search(
+                r"\b(?:adm|admin|administrador|administradora|administrativo|administrativa|"
+                r"superadmin)\b",
+                clause,
+            )
             access_request = re.search(
                 r"\b(?:acesso|acessar|entrar|perfil|libera|liberar|preciso|quero)\b",
                 clause,
@@ -167,6 +177,8 @@ class BusinessVocabulary:
                 "Cadastro de material para revenda é contexto forte CDM; compra, pedido e "
                 "movimentação não bastam. Sistema explícito prevalece. "
                 "Não inferir SAP por migração.",
+                "UBS é apenas contexto conhecido para encaminhamento humano nesta demo; "
+                "não existe integração automática UBS nem autorização implícita.",
                 "Cadastro de dados de negócio cria registros, não instala programas. "
                 "INSTALACAO_SOFTWARE exige uma necessidade de instalar aplicativo ou programa, "
                 "não criar cadastros. Pedidos de processo de negócio fora das categorias de TI "

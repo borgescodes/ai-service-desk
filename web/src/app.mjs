@@ -1,24 +1,48 @@
+import { presentChat, dismissThinking, createWelcomeEntry } from './presentation.mjs';
 import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
+import { captureConversationScroll, restoreConversationScroll } from './conversation.mjs';
 import { createFaqSearch, renderSolutionDetail, renderSolutionsHome, renderSolutionsResults } from './solutions.mjs';
 import { apiRequest, ApiError } from './api.mjs';
 import {
   renderAppHeader,
   renderApprovalQueue,
+  renderHandoffs,
   renderJupWorkspace,
   renderOperationDetail,
-  renderPreventionList,
   renderRequestList,
 } from './components.mjs';
 import { escapeHtml, renderErrorState, renderUnauthorizedState } from './render.mjs';
 import { demoIdentityForPath, resolveRoute, routeParams } from './router.mjs';
-import { createInitialState, selectIdentity } from './state.mjs';
+import { createInitialState, selectIdentity, resetConversation, personaPath } from './state.mjs';
 
 const app = document.querySelector('#app');
 let identityRevision = 0;
+let renderedMessageCount = 0;
+let finishPresentation = () => {};
+const welcomeEntry = createWelcomeEntry();
+// IDs only, scoped to the current page session and technician. Details are always reauthorized.
+const knownOperationalRequests = new Map();
+async function loadOperationalItems(identityId) {
+  const pending = await apiRequest('/api/operations/approvals', { identityId });
+  const known = knownOperationalRequests.get(identityId) || new Set();
+  pending.forEach(item => known.add(item.request_id));
+  knownOperationalRequests.set(identityId, known);
+  const currentIds = new Set(pending.map(item => item.request_id));
+  const previous = await Promise.all([...known].filter(id => !currentIds.has(id)).map(async id => {
+    try { return await apiRequest(`/api/operations/approvals/${encodeURIComponent(id)}`, { identityId }); }
+    catch (error) {
+      if (error instanceof ApiError && [403, 404].includes(error.status)) { known.delete(id); return null; }
+      throw error;
+    }
+  }));
+  return [...pending, ...previous.filter(Boolean)];
+}
 let state = {
   ...createInitialState(),
   route: resolveRoute(window.location.pathname),
   composerFocused: false,
+  composerDraft: '',
+  faqCategory: '',
   lastBackendStatus: null,
   messageError: null,
   messages: [],
@@ -40,13 +64,6 @@ function operationPath() {
   return state.identityId === 'tecnico-m365' ? '/demo/operacao/m365' : '/demo/operacao/cdm';
 }
 
-function operationTabs() {
-  return `<nav class="operations-tabs" aria-label="Operação">
-    <a href="${operationPath()}" data-route-link="approvals"${state.route === 'approvals' ? ' aria-current="page"' : ''}>Pendências</a>
-    <a href="/demo/operacao/prevention" data-route-link="prevention"${state.route === 'prevention' ? ' aria-current="page"' : ''}>Prevenção</a>
-  </nav>`;
-}
-
 function renderRoute() {
   if (state.transientError) {
     return state.transientError.kind === 'unauthorized'
@@ -54,7 +71,7 @@ function renderRoute() {
       : renderErrorState(state.transientError.message);
   }
   if (state.loading && !state.routeData.loaded) {
-    return `<section class="state-panel" role="status" aria-live="polite"><div><strong>Carregando</strong><p>Buscando o estado atual no backend.</p></div></section>`;
+    return `<section class="state-panel" role="status" aria-live="polite"><div><strong>Carregando</strong><p>Atualizando informações.</p></div></section>`;
   }
 
   if (state.route === 'solution') return renderSolutionDetail(state.routeData.detail);
@@ -65,7 +82,9 @@ function renderRoute() {
       identity: selectedIdentity() ?? {},
       sourceContext: state.faqContext,
       messageError: state.messageError,
-      visualState: visualStateFromUi({ pending: state.pendingAction === 'message', backendStatus: state.lastBackendStatus, focused: state.composerFocused, failed: Boolean(state.messageError) }),
+      visualState: state.composerFocused && !state.pendingAction ? 'listening' : null,
+      draft: state.composerDraft,
+      animateFrom: renderedMessageCount,
       messages: state.messages,
       understood: state.understood,
       loading: state.pendingAction === 'message',
@@ -73,31 +92,35 @@ function renderRoute() {
   }
 
   if (state.route === 'requests') {
-    return `${pageHeading('Solicitações', 'Acompanhe somente os estados registrados pelo backend e o histórico real de cada solicitação.')}${renderRequestList(state.routeData.items ?? [])}`;
+    return `${pageHeading('Acompanhar chamados', 'Acompanhe o andamento dos seus atendimentos.')}${renderRequestList(state.routeData.items ?? [], state.selectedRequestId)}`;
   }
 
   if (state.route === 'approvals') {
     const items = state.routeData.items ?? [];
     const selected = state.routeData.selected ?? items.find((item) => item.request_id === state.selectedRequestId) ?? items[0] ?? null;
-    return `${pageHeading('Operação', 'Revise contexto, policy e routing antes de agir. A decisão continua sendo validada pelo backend.')}${operationTabs()}<div class="operation-split"><section aria-label="Fila de pendências">${renderApprovalQueue(items)}</section><section aria-label="Detalhe da pendência">${renderOperationDetail(selected, state)}</section></div>`;
+    return `${pageHeading('Solicitações recebidas', 'Revise o contexto e dê continuidade ao atendimento.')}<div class="tracking-workspace"><section class="tracking-list" aria-label="Fila de solicitações"><header class="tracking-list-header"><h2>Fila de atendimento</h2><span>${items.length}</span></header>${renderApprovalQueue(items, selected?.request_id)}</section><section aria-label="Detalhe da pendência">${renderOperationDetail(selected, state)}</section></div>${renderHandoffs(state.routeData.handoffs ?? [])}`;
   }
 
-  const prevention = state.routeData.items ?? [];
-  const selected = state.routeData.selected ?? prevention.find((item) => item.opportunity_id === state.selectedOpportunityId) ?? null;
-  const detail = selected
-    ? `<aside class="operation-detail prevention-detail"><header class="operation-detail-header"><div><p>${escapeHtml(selected.opportunity_id)}</p><h2>${escapeHtml(selected.category_label)}</h2></div></header><div class="evidence-grid"><section><span>Sistema</span><strong>${escapeHtml(selected.system)}</strong></section><section><span>Intent</span><strong>${escapeHtml(selected.intent)}</strong></section><section><span>Área</span><strong>${escapeHtml(selected.area || 'Não informada')}</strong></section><section><span>Ocorrências</span><strong>${escapeHtml(selected.occurrence_count)}</strong></section></div><p>${escapeHtml(selected.explanation)}</p>${selected.reason_codes?.length ? `<p><strong>Evidências:</strong> ${selected.reason_codes.map(escapeHtml).join(', ')}</p>` : ''}</aside>`
-    : '';
-  return `${pageHeading('Prevenção', 'Padrões recorrentes identificados pelo engine F11, apresentados sem recalcular categorias no navegador.')}${operationTabs()}${renderPreventionList(prevention)}${detail}`;
+  return '<section class="tracking-empty"><strong>Área não disponível nesta demonstração</strong><p>Use o menu de usuários para acessar uma fila de atendimento.</p></section>';
 }
 
 function render() {
+  finishPresentation();
+  const scroll = captureConversationScroll(app.querySelector('.conversation-thread'));
+  const focused = document.activeElement?.id === 'jup-message';
   app.innerHTML = `${renderAppHeader({
     activeRoute: state.route,
+    identities: state.identities, identity: selectedIdentity() ?? {}, pending: Boolean(state.pendingAction),
     operational: ['approvals', 'prevention'].includes(state.route),
     operationPath: operationPath(),
-  })}<main id="main-content" class="main-content" tabindex="-1">${renderRoute()}</main>`;
+  })}<main id="main-content" class="main-content main-content--${['solutions', 'solution'].includes(state.route) ? 'public' : 'workspace'}" tabindex="-1">${renderRoute()}</main>`;
   app.setAttribute('aria-busy', String(state.loading));
   bindInteractions();
+  const hasWelcome = Boolean(app.querySelector('.chat-welcome:not(.chat-welcome--leaving)'));
+  finishPresentation = presentChat(app, { welcome: welcomeEntry.update(hasWelcome), followConversation: scroll?.atEnd ?? true, reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false });
+  renderedMessageCount = state.messages.length;
+  restoreConversationScroll(app.querySelector('.conversation-thread'), app.querySelector('[data-action="scroll-bottom"]'), scroll, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
+  if (focused && !state.pendingAction) app.querySelector('#jup-message')?.focus?.({ preventScroll: true });
 }
 
 function friendlyError(error) {
@@ -136,7 +159,7 @@ function syncRouteIdentity() {
   if (state.identityId !== desiredIdentityId) {
     identityRevision += 1;
     Object.assign(state, selectIdentity(state, desiredIdentityId), {
-      messages: [], understood: null, lastBackendStatus: null, composerFocused: false, messageError: null,
+      messages: [], understood: null, lastBackendStatus: null, composerFocused: false, composerDraft: '', messageError: null,
     });
   }
 }
@@ -159,6 +182,8 @@ async function loadRoute() {
       routeState.routeData = { loaded: true, detail };
     } else if (routeState.route === 'jup') {
       routeState.faqContext = null;
+      const draft = new URLSearchParams(window.location.search).get('draft');
+      if (draft !== null) routeState.composerDraft = draft.slice(0, 3000);
       const sourceId = new URLSearchParams(window.location.search).get('from');
       if (sourceId) {
         try {
@@ -170,9 +195,10 @@ async function loadRoute() {
     } else if (routeState.route === 'requests') {
       routeState.routeData = { items: await apiRequest('/api/requests', { identityId: routeState.identityId }), loaded: true };
     } else if (routeState.route === 'approvals') {
-      const items = await apiRequest('/api/operations/approvals', { identityId: routeState.identityId });
+      const items = await loadOperationalItems(routeState.identityId);
       routeState.selectedRequestId = items[0]?.request_id ?? null;
-      routeState.routeData = { items, selected: items[0] ?? null, loaded: true };
+      const handoffs = await apiRequest('/api/operations/handoffs', { identityId: routeState.identityId });
+      routeState.routeData = { items, handoffs, selected: items[0] ?? null, loaded: true };
     } else if (routeState.route === 'prevention') {
       const items = await apiRequest('/api/operations/prevention', { identityId: routeState.identityId });
       routeState.routeData = { items, loaded: true };
@@ -185,7 +211,7 @@ async function loadRoute() {
     routeState.loading = false;
     if (routeState === state) {
       render();
-      if (state.route === 'solutions' && state.faqSearchQuery.trim()) faqSearch.input(state.faqSearchQuery);
+      if (state.route === 'solutions' && (state.faqSearchQuery.trim() || state.faqCategory)) faqSearch.input(state.faqSearchQuery, state.faqCategory);
     }
   }
 }
@@ -208,6 +234,17 @@ function understoodFromRequest(detail) {
   };
 }
 
+function settleSuccessAvatar(message) {
+  if (!message || visualStateFromUi({ backendStatus: message.status }) !== 'success') return;
+  setTimeout(() => {
+    message.visual_state = 'idle';
+    if (state.route !== 'jup' || state.messages.at(-1) !== message || state.pendingAction || state.messageError) return;
+    const avatars = app.querySelectorAll('.conversation-message--jup > .jup-avatar');
+    const avatar = avatars[avatars.length - 1];
+    if (avatar) avatar.outerHTML = renderJupVisual({ state: state.composerFocused ? 'listening' : 'idle', compact: true });
+  }, 1200);
+}
+
 async function submitMessage(form) {
   const field = form.querySelector('#jup-message');
   const message = field?.value?.trim();
@@ -215,7 +252,9 @@ async function submitMessage(form) {
 
   const revision = identityRevision;
   const identityId = state.identityId;
-  state.messages = [...state.messages, { role: 'USER', text: message }];
+  const presentationReady = new Promise(resolve => setTimeout(resolve, 2400));
+  state.messages = [...state.messages, { role: 'USER', text: message, sentAt: new Date().toISOString() }];
+  state.composerDraft = '';
   state.lastBackendStatus = null;
   state.messageError = null;
   state.composerFocused = false;
@@ -243,10 +282,18 @@ async function submitMessage(form) {
     } else {
       state.understood = null;
     }
+    await presentationReady;
+    if (revision !== identityRevision) return;
+    await dismissThinking(app, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
+    if (revision !== identityRevision) return;
     state.messages = [
       ...state.messages,
       {
         role: 'JUP',
+        sentAt: new Date().toISOString(),
+        status: result.status,
+        context: state.understood,
+        knowledge_id: result.knowledge?.knowledge_id,
         text: result.assistant_message,
         procedure_url: result.procedure_url,
         support_handoff: result.support_handoff,
@@ -259,20 +306,27 @@ async function submitMessage(form) {
     if (revision === identityRevision) {
       state.pendingAction = null;
       render();
+      if (state.route === 'jup') {
+        app.querySelector('#jup-message')?.focus?.({ preventScroll: true });
+        settleSuccessAvatar(state.messages.at(-1));
+      }
     }
   }
 }
 
 async function selectApproval(requestId) {
+  const requestState = state;
   try {
     const selected = await apiRequest(
       `/api/operations/approvals/${encodeURIComponent(requestId)}`,
       { identityId: state.identityId },
     );
+    if (state !== requestState) return;
     state.selectedRequestId = requestId;
-    state.routeData = { ...state.routeData, selected };
+    state.routeData = { ...state.routeData, items: (state.routeData.items || []).map(item => item.request_id === selected.request_id ? selected : item), selected };
     render();
   } catch (error) {
+    if (state !== requestState) return;
     state.transientError = friendlyError(error);
     render();
   }
@@ -293,6 +347,8 @@ async function decide(action) {
     return;
   }
 
+  const requestState = state;
+  const identityId = state.identityId;
   state.pendingAction = action;
   render();
   try {
@@ -300,33 +356,39 @@ async function decide(action) {
       `/api/requests/${encodeURIComponent(item.request_id)}/${action === 'approve' ? 'approve' : 'reject'}`,
       {
         method: 'POST',
-        identityId: state.identityId,
+        identityId,
         body: { expected_version: item.version },
       },
     );
-    const items = await apiRequest('/api/operations/approvals', {
-      identityId: state.identityId,
-    });
-    state.routeData = { items, selected: final, loaded: true };
+    if (state !== requestState) return;
+    const items = await loadOperationalItems(identityId);
+    if (state !== requestState) return;
+    state.routeData = { ...state.routeData, items: [...items.filter(item => item.request_id !== final.request_id), final], selected: final, loaded: true };
     state.selectedRequestId = final.request_id;
   } catch (error) {
+    if (state !== requestState) return;
     state.transientError = friendlyError(error);
   } finally {
-    state.pendingAction = null;
-    render();
+    if (state === requestState) {
+      state.pendingAction = null;
+      render();
+    }
   }
 }
 
 async function selectPrevention(opportunityId) {
+  const requestState = state;
   try {
     const selected = await apiRequest(
       `/api/operations/prevention/${encodeURIComponent(opportunityId)}`,
       { identityId: state.identityId },
     );
+    if (state !== requestState) return;
     state.selectedOpportunityId = opportunityId;
     state.routeData = { ...state.routeData, selected };
     render();
   } catch (error) {
+    if (state !== requestState) return;
     state.transientError = friendlyError(error);
     render();
   }
@@ -334,6 +396,7 @@ async function selectPrevention(opportunityId) {
 
 function faqOptions() {
   return { groups: state.faqGroups, searchQuery: state.faqSearchQuery,
+    category: state.faqCategory,
     searchResults: state.faqSearchResults, searching: state.faqSearching, error: state.faqSearchError };
 }
 
@@ -348,7 +411,7 @@ const faqSearch = createFaqSearch({
     results.innerHTML = renderSolutionsResults(faqOptions());
     results.setAttribute('aria-busy', String(searching));
     bindRouteLinks(results);
-    results.querySelector('[data-action="retry-search"]')?.addEventListener('click', () => faqSearch.input(state.faqSearchQuery));
+    results.querySelector('[data-action="retry-search"]')?.addEventListener('click', () => faqSearch.input(state.faqSearchQuery, state.faqCategory));
   },
 });
 
@@ -362,12 +425,55 @@ function bindRouteLinks(root) {
   });
 }
 
+async function newChat() {
+  if (state.pendingAction) return;
+  const revision = identityRevision;
+  state.pendingAction = 'reset';
+  render();
+  try {
+    await apiRequest('/api/jup/conversation/reset', { method: 'POST', identityId: state.identityId });
+    if (revision !== identityRevision) return;
+    identityRevision += 1;
+    state = resetConversation(state);
+    renderedMessageCount = 0;
+    welcomeEntry.reset();
+    await navigate('/jup');
+  } catch (error) {
+    if (revision !== identityRevision) return;
+    state.pendingAction = null;
+    state.messageError = friendlyError(error).message;
+    state.transientError = state.route === 'jup' ? null : friendlyError(error);
+    render();
+  }
+}
+
 function bindInteractions() {
   bindRouteLinks(app);
+  app.querySelector('[data-action="new-chat"]')?.addEventListener('click', newChat);
+  app.querySelectorAll('[data-persona]').forEach(button => {
+    button.addEventListener('click', async () => {
+      if (state.pendingAction) return;
+      const identity = state.identities.find(item => item.identity_id === button.dataset.persona);
+      const path = personaPath(identity);
+      if (path) await navigate(path);
+    });
+  });
+  app.querySelectorAll('[data-category]').forEach(button => {
+    button.addEventListener('click', () => {
+      state.faqCategory = button.dataset.category;
+      app.querySelectorAll('[data-category]').forEach(topic => topic.setAttribute('aria-pressed', String(topic.dataset.category === state.faqCategory)));
+      faqSearch.input(state.faqSearchQuery, state.faqCategory);
+    });
+  });
+  app.querySelector('#faq-search-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    faqSearch.input(state.faqSearchQuery, state.faqCategory);
+  });
   app.querySelector('#faq-search')?.addEventListener('input', (event) => {
     state.faqSearchQuery = event.target.value;
-    faqSearch.input(state.faqSearchQuery);
+    faqSearch.input(state.faqSearchQuery, state.faqCategory);
   });
+  app.querySelector('#jup-message')?.addEventListener('input', event => { state.composerDraft = event.target.value; });
 
   app.querySelector('#jup-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -376,20 +482,24 @@ function bindInteractions() {
   for (const eventName of ['focus', 'blur']) {
     app.querySelector('#jup-message')?.addEventListener(eventName, () => {
       state.composerFocused = eventName === 'focus';
-      const container = app.querySelector('.jup-welcome .jup-avatar, .conversation-visual .jup-avatar');
+      const avatars = app.querySelectorAll('.conversation-message--jup > .jup-avatar');
+      const container = avatars[avatars.length - 1];
       if (container) container.outerHTML = renderJupVisual({
-        state: visualStateFromUi({ pending: state.pendingAction === 'message', backendStatus: state.lastBackendStatus, focused: state.composerFocused, failed: Boolean(state.messageError) }),
-        compact: state.messages.length > 0,
+        state: visualStateFromUi({ pending: state.pendingAction === 'message', backendStatus: state.messages.at(-1)?.visual_state === 'idle' ? null : state.lastBackendStatus, focused: state.composerFocused, failed: Boolean(state.messageError) }),
+        compact: true,
       });
     });
   }
   app.querySelector('#jup-message')?.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
     }
   });
 
+  app.querySelectorAll('[data-request-select]').forEach(button => {
+    button.addEventListener('click', () => { state.selectedRequestId = button.dataset.requestSelect; render(); });
+  });
   app.querySelectorAll('.queue-row[data-request-id]').forEach((button) => {
     button.addEventListener('click', () => void selectApproval(button.dataset.requestId));
   });

@@ -9,15 +9,21 @@ from ai_service_desk.engine.types import TicketClassification
 from ai_service_desk.engine.validation import normalize_text
 
 _CDM_SYSTEM = re.compile(r"\b(?:cdm|central de dados mestres)\b")
-_PRIVILEGED_ROLE = re.compile(r"\b(?:admin|administrador(?:a)?|superadmin)\b")
+_PRIVILEGED_ROLE = re.compile(
+    r"\b(?:adm|admin|administrador(?:a)?|administrativ(?:o|a)|superadmin)\b"
+)
 _OTHER_EXPLICIT_SYSTEM = re.compile(
     r"\b(?:sap|siagri|cigam|metadados|portal rh|office|microsoft 365|m365|"
-    r"outlook|teams|onedrive|one drive)\b"
+    r"outlook|teams|onedrive|one drive|ubs)\b"
 )
 _MATERIAL = re.compile(r"\bmateria(?:l|is)\b")
 _REVENDA = re.compile(r"\brevenda\b")
 _CDM_REQUEST_LANGUAGE = re.compile(
     r"\b(?:preciso|quero|acesso|acessar|entrar|solicitar|pedir|libera|liberar|perfil|sou)\b"
+)
+_ACCESS_EVIDENCE = re.compile(
+    r"\b(?:acesso|acess(?:ar|a|am)|entr(?:ar|a|am)|senha|permissao|permissoes|"
+    r"libera|liberar|perfil)\b"
 )
 
 
@@ -96,7 +102,7 @@ def _focused_cdm_access(text: str) -> bool:
     return (
         _MATERIAL.search(text) is not None
         and _REVENDA.search(text) is not None
-        and _CDM_REQUEST_LANGUAGE.search(text) is not None
+        and _ACCESS_EVIDENCE.search(text) is not None
     )
 
 
@@ -113,16 +119,18 @@ COMPACT_SIGNALS = [
 
 _COMPACT_SYSTEM_PROMPT = "\n".join(
     (
-        "Jup: classifique a mensagem para suporte de TI. Só interprete; "
-        "o backend decide e executa.",
-        "scenario: CDM_ACCESS=acesso ao CDM/Central de Dados Mestres ou materiais da revenda; "
-        "M365_SUPPORT=login/senha no Microsoft 365/Office/Outlook; OTHER_IT=outro TI; "
-        "UNKNOWN=incerto.",
-        "signal: ACCESS_REQUEST=acesso normal; PRIVILEGED_ACCESS=admin/superadmin; "
-        "LOGIN_PROBLEM=falha de acesso; PASSWORD_EVIDENCE=senha errada/esquecida; "
-        "SUCCESS=funcionou; FAILURE=não resolveu; UNKNOWN=demais.",
-        "BUSINESS_CONTEXT_CURRENT vem do backend; não amplie sistemas. Não invente identidade, "
-        "autorização, policy, aprovação, IDs, routing ou resultado. Retorne só o JSON do schema.",
+        "Jup: interprete suporte de TI; backend decide e executa.",
+        "scenario: CDM_ACCESS=acesso/permissão CDM; "
+        "M365_SUPPORT=login/senha Microsoft 365/Office/Outlook; "
+        "OTHER_IT=outro TI; UNKNOWN=incerto. "
+        "Cadastro de material sem acesso não é CDM_ACCESS.",
+        "signal: ACCESS_REQUEST=acesso; "
+        "PRIVILEGED_ACCESS=adm/admin/administrativo/administrador/superadmin; "
+        "LOGIN_PROBLEM=login; PASSWORD_EVIDENCE=senha; "
+        "SUCCESS=funcionou/deu certo; FAILURE=não resolveu/deu errado/não rolou; "
+        "UNKNOWN=demais.",
+        "Contexto vem do backend; não invente identidade, autorização, policy, aprovação, IDs, "
+        "routing ou resultado. Só JSON.",
     )
 )
 
@@ -174,15 +182,24 @@ def parse_compact_interpretation_response(payload: dict) -> tuple[str, str]:
 
 
 def _compact_intent(text: str, scenario: str, signal: str, has_system: bool) -> str:
-    if signal in {
-        "ACCESS_REQUEST",
-        "PRIVILEGED_ACCESS",
-        "LOGIN_PROBLEM",
-        "PASSWORD_EVIDENCE",
-    }:
-        return "PROBLEMA_ACESSO"
     normalized = normalize_text(text)
-    if re.search(r"\b(?:acesso|acessar|entrar|senha|permissao|permissoes)\b", normalized):
+    textual_access = _ACCESS_EVIDENCE.search(normalized) is not None
+    privileged_access = (
+        signal == "PRIVILEGED_ACCESS" and _PRIVILEGED_ROLE.search(normalized) is not None
+    )
+    if (
+        signal
+        in {
+            "ACCESS_REQUEST",
+            "LOGIN_PROBLEM",
+            "PASSWORD_EVIDENCE",
+        }
+        and textual_access
+    ):
+        return "PROBLEMA_ACESSO"
+    if privileged_access:
+        return "PROBLEMA_ACESSO"
+    if textual_access:
         return "PROBLEMA_ACESSO"
     if re.search(r"\b(?:instalar|instalacao)\b", normalized):
         return "INSTALACAO_SOFTWARE"
@@ -201,10 +218,12 @@ def compact_interpretation_to_classification(
 ) -> TicketClassification:
     systems = tuple(resolver.systems(text))
     system = systems[0] if len(systems) == 1 else ""
-    # O cenário do modelo não cria sistema sozinho. O resolver curado precisa sustentar o valor.
+    if not system and scenario == "CDM_ACCESS" and _focused_cdm_access(normalize_text(text)):
+        system = "CDM"
+    elif not system and scenario == "M365_SUPPORT":
+        system = "OFFICE 365"
     intent = _compact_intent(text, scenario, signal, bool(system))
-    entities = dict(resolver.entities(text))
-    return TicketClassification(intent, system, entities, 0.95)
+    return TicketClassification(intent, system, resolver.entities(text), 0.9)
 
 
 class DemoEmbedder:

@@ -1,0 +1,386 @@
+"""Conteúdo sintético aprovado exclusivo da apresentação do FAQ da Fase 14."""
+
+from pathlib import Path
+
+from ai_service_desk.web.demo_data import _write_jsonl
+
+# Proveniência funcional do tutorial CDM e decisão de produto estão na spec da Fase 14.
+# Esta fonte nunca deve alimentar o Knowledge Engine conversacional.
+FAQ_DEMO_ARTICLES = [
+    {
+        "knowledge_id": "KB-SYN-FAQ-CDM-REQUEST-001",
+        "title": "Como solicitar acesso ao CDM",
+        "question": "Como solicitar acesso ao CDM?",
+        "answer": (
+            "Para solicitar seu acesso ao CDM:\n\n"
+            "1. Acesse https://cdm.juparana.com.br/.\n"
+            "2. Na tela de entrada, clique em Solicitar Acesso.\n"
+            "3. Informe seu e-mail corporativo @juparana.com.br.\n"
+            "4. Selecione uma ou mais áreas de negócio relacionadas à sua atuação.\n"
+            "5. Clique em Enviar.\n"
+            "6. Sua solicitação será registrada e encaminhada para análise da governança do CDM.\n"
+            "7. Depois que o acesso for aprovado e provisionado, você receberá um e-mail "
+            "informando que o acesso ao CDM foi liberado.\n"
+            "8. No e-mail, utilize a opção Entrar no CDM ou acesse novamente o endereço do CDM.\n"
+            "9. Entre utilizando sua conta corporativa Microsoft 365.\n\n"
+            "Se aparecer um erro ou você não conseguir entrar após a liberação, informe a "
+            "mensagem ao suporte. Não envie sua senha."
+        ),
+        "system": "CDM",
+        "intent": "PROBLEMA_ACESSO",
+        "tags": ["faq-acessos-rotinas"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-CDM-LOGIN-001",
+        "title": "Como entrar no CDM depois da aprovação",
+        "question": "Como entrar no CDM depois da aprovação?",
+        "answer": (
+            "1. Confira o e-mail de liberação do acesso ao CDM.\n"
+            "2. Use a opção Entrar no CDM no e-mail.\n"
+            "3. Entre com sua conta corporativa Microsoft 365 e conclua a verificação "
+            "solicitada.\n\n"
+            "Se o acesso continuar indisponível, informe ao suporte o erro e que já recebeu a "
+            "liberação. Não compartilhe códigos de verificação."
+        ),
+        "system": "CDM",
+        "intent": "PROBLEMA_ACESSO",
+        "tags": ["faq-acessos-rotinas"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-JUP-TRACK-001",
+        "title": "Como acompanhar uma solicitação feita pelo Jup",
+        "question": "Como acompanhar uma solicitação feita pelo Jup?",
+        "answer": (
+            "1. Leia a resposta do Jup e guarde o identificador da solicitação, quando "
+            "apresentado.\n"
+            "2. Confira o estado exibido junto à resposta; uma solicitação pendente ainda "
+            "depende de análise.\n"
+            "3. Se precisar de atualização, informe o identificador ao suporte.\n\n"
+            "Se não houver confirmação de registro, peça ajuda ao suporte antes de repetir o "
+            "pedido. A conversa não garante liberação ou prazo."
+        ),
+        "system": "JUP",
+        "intent": "PROBLEMA_ACESSO",
+        "tags": ["faq-acessos-rotinas"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-SYSTEM-ACCESS-001",
+        "title": "Como pedir acesso a um sistema corporativo",
+        "question": "Como pedir acesso a um sistema corporativo?",
+        "answer": (
+            "1. Informe ao Jup o nome do sistema e o que precisa fazer nele.\n"
+            "2. Descreva sua área de atuação e a finalidade do acesso, sem enviar senha.\n"
+            "3. Acompanhe as perguntas e o estado apresentado no atendimento.\n\n"
+            "Se não souber o sistema ou houver bloqueio, peça orientação ao suporte. O acesso "
+            "depende das regras e aprovações aplicáveis."
+        ),
+        "system": "CORPORATIVO",
+        "intent": "PROBLEMA_ACESSO",
+        "tags": ["faq-acessos-rotinas"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-APP-START-001",
+        "title": "Sistema não abre ou fecha sozinho",
+        "question": "Sistema não abre ou fecha sozinho?",
+        "answer": (
+            "1. Salve o trabalho nos aplicativos que ainda respondem.\n"
+            "2. Feche apenas o aplicativo com problema e abra novamente uma vez.\n"
+            "3. Anote o nome do sistema, horário e mensagem de erro.\n\n"
+            "Se persistir, pare as tentativas e informe ao suporte. Não reinstale nem execute o "
+            "aplicativo como administrador."
+        ),
+        "system": "APLICATIVOS",
+        "intent": "ERRO_SISTEMA",
+        "tags": ["faq-erros-sistemas"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-CIGAM-START-001",
+        "title": "O CIGAM apresenta erro ao iniciar",
+        "question": "O CIGAM apresenta erro ao iniciar?",
+        "answer": (
+            "1. Registre a mensagem completa e o horário do erro.\n"
+            "2. Feche o CIGAM e tente abrir novamente uma vez.\n"
+            "3. Confira se outros aplicativos e a conexão estão funcionando.\n\n"
+            "Se o erro continuar, envie ao suporte a mensagem e a unidade onde está. Não "
+            "altere arquivos de configuração."
+        ),
+        "system": "CIGAM",
+        "intent": "ERRO_SISTEMA",
+        "tags": ["faq-erros-sistemas"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-WEB-BLANK-001",
+        "title": "Sistema web fica em tela branca",
+        "question": "Sistema web fica em tela branca?",
+        "answer": (
+            "1. Atualize a página uma vez, desde que não esteja confirmando uma operação "
+            "crítica.\n"
+            "2. Teste abrir o sistema em uma nova aba.\n"
+            "3. Confira se outros sites funcionam.\n"
+            "4. Registre o endereço do sistema, o horário e uma captura do erro sem dados "
+            "sensíveis.\n\n"
+            "Se persistir, acione o suporte. Não repita pagamentos, envios ou salvamentos sem "
+            "confirmar se a operação anterior foi registrada."
+        ),
+        "system": "SISTEMA WEB",
+        "intent": "ERRO_SISTEMA",
+        "tags": ["faq-erros-sistemas"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-ERROR-REPORT-001",
+        "title": "O que informar ao suporte quando uma tela apresenta erro",
+        "question": "O que informar ao suporte quando uma tela apresenta erro?",
+        "answer": (
+            "1. Informe o sistema e a ação que estava tentando realizar.\n"
+            "2. Anote horário, unidade e mensagem de erro.\n"
+            "3. Diga se aconteceu uma vez ou se voltou a acontecer.\n"
+            "4. Inclua uma captura que não exponha senhas, códigos ou dados pessoais "
+            "desnecessários.\n\n"
+            "Pare se novas tentativas puderem duplicar uma operação. Encaminhe essas "
+            "informações ao suporte."
+        ),
+        "system": "CORPORATIVO",
+        "intent": "ERRO_SISTEMA",
+        "tags": ["faq-erros-sistemas"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-SAVE-ERROR-001",
+        "title": "O sistema apresentou erro ao salvar uma operação",
+        "question": "O sistema apresentou erro ao salvar uma operação?",
+        "answer": (
+            "1. Anote o horário e a mensagem exibida.\n"
+            "2. Confira, sem reenviar, se o registro aparece na consulta do sistema.\n"
+            "3. Guarde o identificador do registro, caso exista.\n\n"
+            "Não clique em Salvar repetidamente. Se não conseguir confirmar o resultado, peça "
+            "ao suporte para verificar antes de tentar novamente."
+        ),
+        "system": "CORPORATIVO",
+        "intent": "ERRO_SISTEMA",
+        "tags": ["faq-erros-sistemas"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-PRINTER-OFFLINE-001",
+        "title": "Impressora aparece offline",
+        "question": "Impressora aparece offline?",
+        "answer": (
+            "1. Confirme se a impressora está ligada.\n"
+            "2. Confira papel e avisos no painel.\n"
+            "3. Verifique visualmente se o cabo está conectado ou se há indicação de rede.\n"
+            "4. Selecione a impressora correta no aplicativo.\n"
+            "5. Na fila, cancele apenas seus próprios trabalhos presos, se tiver certeza de "
+            "que não estão imprimindo.\n"
+            "6. Tente imprimir uma página de teste.\n\n"
+            "Se persistir, informe ao suporte o nome da impressora, local e erro. Não remova "
+            "trabalhos de outras pessoas nem altere configurações de rede."
+        ),
+        "system": "IMPRESSORA",
+        "intent": "PROBLEMA_IMPRESSAO",
+        "tags": ["faq-impressao-office-aplicativos"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-OUTLOOK-SYNC-001",
+        "title": "Outlook não envia ou recebe mensagens",
+        "question": "Outlook não envia ou recebe mensagens?",
+        "answer": (
+            "1. Confirme se a internet funciona em outro site.\n"
+            "2. Observe se o Outlook mostra Offline ou Desconectado; desative Trabalhar "
+            "Offline se estiver habilitado.\n"
+            "3. Se já utiliza o Outlook Web corporativo, confira se as mensagens aparecem "
+            "nele.\n"
+            "4. Salve rascunhos e reinicie o aplicativo.\n"
+            "5. Registre qualquer mensagem de erro.\n\n"
+            "Se persistir, informe o erro e o horário ao suporte. Não apague perfil, arquivos "
+            "de dados ou mensagens para tentar corrigir."
+        ),
+        "system": "OUTLOOK",
+        "intent": "ERRO_SISTEMA",
+        "tags": ["faq-impressao-office-aplicativos"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-TEAMS-AUDIO-001",
+        "title": "Teams está sem áudio ou microfone",
+        "question": "Teams está sem áudio ou microfone?",
+        "answer": (
+            "1. Confira o alto-falante e o microfone selecionados nas configurações do Teams.\n"
+            "2. Verifique o mute no Teams e no próprio dispositivo.\n"
+            "3. Use a chamada de teste, se disponível.\n"
+            "4. Confira se o Teams tem permissão de microfone nas configurações de "
+            "privacidade.\n"
+            "5. Reconecte o fone ou microfone e teste novamente.\n\n"
+            "Se uma configuração estiver bloqueada ou o problema persistir, acione o suporte "
+            "com o modelo do dispositivo. Não altere políticas corporativas."
+        ),
+        "system": "TEAMS",
+        "intent": "ERRO_SISTEMA",
+        "tags": ["faq-impressao-office-aplicativos"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-OFFICE-AUTH-001",
+        "title": "Aplicativo do Office pede autenticação repetidamente",
+        "question": "Aplicativo do Office pede autenticação repetidamente?",
+        "answer": (
+            "1. Confira se a conta exibida é a corporativa.\n"
+            "2. Confirme sua conexão com a internet.\n"
+            "3. Salve os documentos e feche o aplicativo.\n"
+            "4. Abra novamente e conclua a autenticação somente na tela oficial.\n\n"
+            "Se o pedido se repetir ou a verificação falhar, registre o erro e acione o "
+            "suporte. Não compartilhe códigos nem remova proteções da conta."
+        ),
+        "system": "OFFICE 365",
+        "intent": "PROBLEMA_ACESSO",
+        "tags": ["faq-impressao-office-aplicativos"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-WIFI-001",
+        "title": "Estou conectado ao Wi-Fi, mas sem internet",
+        "question": "Estou conectado ao Wi-Fi, mas sem internet?",
+        "answer": (
+            "1. Teste outro site conhecido.\n"
+            "2. Confira se outros dispositivos na mesma rede também apresentam falha.\n"
+            "3. Desconecte e reconecte o Wi-Fi na rede corporativa habitual.\n"
+            "4. Teste novamente.\n\n"
+            "Se persistir, informe local, nome da rede e horário ao suporte. Não altere IP ou "
+            "DNS manualmente."
+        ),
+        "system": "REDE",
+        "intent": "PROBLEMA_REDE",
+        "tags": ["faq-rede-internet"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-CABLE-001",
+        "title": "Computador conectado por cabo está sem rede",
+        "question": "Computador conectado por cabo está sem rede?",
+        "answer": (
+            "1. Confira se o cabo está bem conectado ao computador.\n"
+            "2. Observe se há sinal de conexão na porta e no sistema.\n"
+            "3. Teste abrir um site conhecido.\n"
+            "4. Verifique se colegas próximos também estão sem conexão.\n\n"
+            "Se persistir, informe local e identificação do computador ao suporte. Não mexa "
+            "em switches, tomadas de terceiros ou configurações de IP."
+        ),
+        "system": "REDE",
+        "intent": "PROBLEMA_REDE",
+        "tags": ["faq-rede-internet"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-ONE-SITE-001",
+        "title": "Apenas um site ou sistema não abre",
+        "question": "Apenas um site ou sistema não abre?",
+        "answer": (
+            "1. Abra outro site conhecido para conferir a conexão.\n"
+            "2. Confira se o endereço do sistema está correto.\n"
+            "3. Tente abrir o mesmo endereço em uma nova aba.\n"
+            "4. Anote horário e mensagem exibida.\n\n"
+            "Se persistir, informe o endereço ao suporte. Não ignore avisos de certificado nem "
+            "desative proteções do navegador."
+        ),
+        "system": "REDE",
+        "intent": "PROBLEMA_REDE",
+        "tags": ["faq-rede-internet"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+    {
+        "knowledge_id": "KB-SYN-FAQ-NETWORK-OR-SYSTEM-001",
+        "title": "Como identificar se o problema está na internet ou no sistema",
+        "question": "Como identificar se o problema está na internet ou no sistema?",
+        "answer": (
+            "1. Teste dois sites que costuma usar.\n"
+            "2. Se os sites funcionarem, confira se apenas o sistema desejado falha.\n"
+            "3. Pergunte a um colega da mesma rede se o mesmo sistema abre.\n"
+            "4. Informe ao suporte quais testes funcionaram e o horário.\n\n"
+            "Esses testes ajudam o diagnóstico, mas não confirmam a causa. Se a rotina estiver "
+            "impedida, peça ajuda sem alterar configurações de rede."
+        ),
+        "system": "REDE",
+        "intent": "PROBLEMA_REDE",
+        "tags": ["faq-rede-internet"],
+        "source": "SYNTHETIC_DEMO",
+        "status": "APPROVED",
+        "reviewed_by": "DEMO-REVIEWER",
+        "reviewed_at": "2026-09-13T09:00:00-03:00",
+        "version": 1,
+    },
+]
+
+
+def write_demo_faq_knowledge(path: str | Path) -> Path:
+    return _write_jsonl(path, FAQ_DEMO_ARTICLES)

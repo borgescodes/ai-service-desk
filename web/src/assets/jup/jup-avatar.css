@@ -1,8 +1,33 @@
 .jup-avatar {
+  width: 44px;
+  display: block;
   position: relative;
   max-width: 100%;
   aspect-ratio: 1;
   flex: none;
+}
+
+.jup-avatar__body { animation: jup-breathe 3s ease-in-out infinite; }
+.jup-avatar .jup-face { animation: jup-state-in 220ms ease-out; }
+[data-state='idle'] .jup-face__blink-slot { animation: jup-blink 4.2s ease-in-out infinite; }
+[data-state='listening'] .jup-avatar__body { animation: jup-listen 2s ease-in-out infinite; }
+[data-state='listening'] .jup-face__listen-waves { animation: jup-wave 1.4s ease-in-out infinite; }
+[data-state='thinking'] .jup-face__dot { animation: jup-thinking-dot 1.4s ease-in-out infinite; }
+[data-state='success'] .jup-avatar__body { animation: jup-success 500ms ease-out, jup-breathe 3s 500ms ease-in-out infinite; }
+[data-state='warning'] .jup-avatar__body { animation: jup-glitch 280ms ease-out; }
+[data-state='escalation'] .jup-face__escalation-chevron { animation: jup-wave 1.5s ease-in-out infinite; }
+[data-state='escalation'] .jup-face__escalation-chevron--two { animation-delay: 180ms; }
+[data-state='escalation'] .jup-face__escalation-chevron--three { animation-delay: 360ms; }
+@keyframes jup-breathe { 50% { transform: translateY(-1.5px) rotate(1deg); } }
+@keyframes jup-blink { 0%, 42%, 48%, 100% { transform: scaleY(1); } 45% { transform: scaleY(.12); } }
+@keyframes jup-listen { 50% { transform: rotate(-4deg) translateY(-1px); } }
+@keyframes jup-wave { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@keyframes jup-success { 50% { transform: translateY(-3px) rotate(-4deg); } }
+@keyframes jup-glitch { 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
+@keyframes jup-state-in { from { opacity: .4; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .jup-avatar *, .jup-avatar *::before, .jup-avatar *::after { animation: none !important; transition: none !important; }
+  .jup-avatar .jup-face__dot, .jup-avatar .jup-face__escalation-chevron { opacity: 1; }
 }
 
 .jup-avatar__body {
@@ -73,18 +98,6 @@
   z-index: 1;
 }
 
-.jup-avatar.is-switching .jup-avatar__face-layer--current {
-
-}
-
-.jup-avatar.is-switching .jup-avatar__face-layer--previous {
-
-}
-
-.jup-avatar.is-switching .jup-avatar__surface {
-
-}
-
 .jup-face__ink {
   --jup-ink: #0f5b3d;
   --jup-wave: #f5b800;
@@ -99,10 +112,6 @@
 .jup-face__state {
   transform-box: fill-box;
   transform-origin: center;
-
-}
-
-.jup-face__state--display {
 
 }
 
@@ -161,59 +170,6 @@
   stroke-linejoin: round;
 }
 
-.is-blinking .jup-face__blink-slot {
-
-}
-
-[data-state='idle'] .jup-avatar__body {
-
-}
-
-[data-state='idle'] .jup-face__mouth-line {
-
-}
-
-[data-state='listening'] .jup-avatar__body {
-
-}
-
-[data-state='listening'] .jup-face__open-face {
-
-}
-
-[data-state='listening'] .jup-face__brow-line--left,
-[data-state='listening'] .jup-face__brow-line--right {
-
-}
-
-[data-state='listening'] .jup-face__listen-waves--left {
-
-}
-
-[data-state='listening'] .jup-face__listen-waves--right {
-
-}
-
-[data-state='listening'] .jup-face__mouth-line {
-
-}
-
-[data-state='success'] .jup-avatar__body {
-
-}
-
-[data-state='success'] .jup-face__happy-eye-line {
-
-}
-
-[data-state='success'] .jup-face__mouth-line--success {
-
-}
-
-[data-state='thinking'] .jup-avatar__body {
-
-}
-
 [data-state='thinking'] .jup-face__dot {
   opacity: .42;
 
@@ -221,10 +177,6 @@
 
 [data-state='thinking'] .jup-face__dot--two { animation-delay: .18s; }
 [data-state='thinking'] .jup-face__dot--three { animation-delay: .36s; }
-
-[data-state='warning'] .jup-avatar__body {
-
-}
 
 [data-state='warning'] .jup-face__warning-triangle {
   fill: #ff634c;
@@ -244,34 +196,10 @@
   stroke-width: 44;
 }
 
-[data-state='escalation'] .jup-avatar__body {
-
-}
-
 .jup-face__escalation-chevron {
   stroke: var(--jup-wave);
   stroke-width: 42;
   opacity: .14;
-}
-
-[data-state='escalation'] .jup-face__escalation-group {
-
-}
-
-[data-state='escalation'] .jup-face__escalation-chevron--one {
-
-}
-
-[data-state='escalation'] .jup-face__escalation-chevron--two {
-
-}
-
-[data-state='escalation'] .jup-face__escalation-chevron--three {
-
-}
-
-.jup-avatar.is-paused *, .jup-avatar.is-paused .jup-avatar__body {
-
 }
 
 
@@ -324,21 +252,3 @@
   }
 }
 
-.jup-avatar { width: 220px; display: block; }
-.jup-avatar--compact { width: 56px; }
-.jup-avatar *, .jup-avatar .jup-avatar__body { animation: none; }
-.jup-avatar .jup-face__escalation-chevron { opacity: 1; }
-.jup-avatar[data-state="thinking"] .jup-face__dot { animation: jup-thinking-dot 1.6s ease-out 3; }
-.jup-avatar[data-state="thinking"] .jup-face__dot--two { animation-delay: 180ms; }
-.jup-avatar[data-state="thinking"] .jup-face__dot--three { animation-delay: 360ms; }
-.jup-avatar[data-state]:not([data-state="idle"]) .jup-face { animation: jup-face-layer-in 400ms ease-out 1; }
-.jup-avatar__surface { box-shadow: none; transition: background-color 400ms ease-out; }
-
-.jup-avatar { width: 220px; display: block; }
-.jup-avatar--compact { width: 56px; }
-.jup-avatar .jup-face__escalation-chevron { opacity: 1; }
-.jup-avatar[data-state="thinking"] .jup-face__dot { animation: jup-thinking-dot 1.6s ease-out 3; }
-.jup-avatar[data-state="thinking"] .jup-face__dot--two { animation-delay: 180ms; }
-.jup-avatar[data-state="thinking"] .jup-face__dot--three { animation-delay: 360ms; }
-.jup-avatar[data-state]:not([data-state="idle"]) .jup-face { animation: jup-face-layer-in 400ms ease-out 1; }
-@media (prefers-reduced-motion: reduce) { .jup-avatar * { animation: none !important; transition: none !important; } }

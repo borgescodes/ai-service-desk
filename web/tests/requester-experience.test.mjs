@@ -28,8 +28,8 @@ test('empty Jup workspace is concise and task-first', () => {
     loading: false,
     sourceContext: null,
   });
-  assert.match(html, /Como posso ajudar\?/);
-  assert.match(html, /Descreva o que aconteceu/);
+  assert.match(html, /Olá, eu sou o/);
+  assert.match(html, /Digite sua mensagem aqui/);
   assert.doesNotMatch(html, /Eu organizo o contexto|O que entendi|Contexto estruturado/i);
 });
 
@@ -49,16 +49,16 @@ test('structured request context is compact instead of a permanent side panel', 
 
 const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 test('desktop solutions use editorial columns and a readable article and chat measure', () => {
-  assert.match(css, /--content:\s*1220px/);
-  assert.match(css, /\.solution-groups\s*\{/);
+  assert.match(css, /\.solutions-home\s*\{/);
   assert.match(css, /\.solution-detail\s*\{/);
   assert.match(css, /prefers-reduced-motion/);
   assert.doesNotMatch(css, /linear-gradient|radial-gradient|backdrop-filter/);
 });
 test('Juparana brand tokens are exact', () => {
-  assert.match(css, /--brand-green:\s*#45813c/i);
-  assert.match(css, /--brand-yellow:\s*#eeb41e/i);
-  assert.match(css, /--brand-gray:\s*#808285/i);
+  const tokens = readFileSync(new URL('../src/tokens.css', import.meta.url), 'utf8');
+  assert.match(tokens, /--color-primary:\s*#45813c/i);
+  assert.match(tokens, /--color-accent:\s*#eeb41e/i);
+  assert.match(tokens, /--color-neutral:\s*#808285/i);
 });
 
 test('handoff keeps its technical summary behind a native disclosure', () => {

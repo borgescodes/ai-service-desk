@@ -1,0 +1,367 @@
+/* Desktop interaction polish: stable shell, compact FAQ accordion, and branded scrollbars. */
+/* The root paints the reserved native scrollbar gutter; the body paints the canvas. */
+html { scrollbar-gutter: stable; background: white; }
+body { min-height: 100dvh; }
+.app-header { width: 100%; }
+
+.header-actions {
+  min-width: 278px;
+  justify-content: flex-end;
+}
+
+.main-content--public:has(.solutions-home) { padding: 12px; }
+.solutions-home { min-height: 0; padding: clamp(18px, 2.8vh, 34px) clamp(24px, 3vw, 40px); }
+
+.faq-hero {
+  flex: none;
+  padding-bottom: clamp(12px, 2vh, 24px);
+}
+
+.faq-hero h1 {
+  font-size: clamp(40px, 3.5vw, 56px);
+}
+
+.faq-search-control {
+  margin-top: clamp(12px, 2vh, 20px);
+}
+
+.faq-category-pills {
+  margin-top: clamp(10px, 1.6vh, 16px);
+}
+
+.help-articles, #faq-results { width: 100%; }
+.directory-count { margin: 0 0 8px; }
+.faq-directory { display: block; }
+
+.faq-category {
+  flex: none;
+}
+
+.faq-category > summary {
+  min-height: clamp(50px, 6vh, 64px);
+  padding: clamp(8px, 1.25vh, 14px) 20px;
+  grid-template-columns: 38px minmax(0, 1fr) auto 18px;
+  gap: 13px;
+  transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.faq-category[open] > summary {
+  background: color-mix(in srgb, var(--color-primary-mist) 76%, white);
+  border-color: color-mix(in srgb, var(--color-primary-700) 22%, transparent);
+}
+
+.faq-category > summary > .nav-icon:last-child {
+  transition: transform 180ms ease;
+}
+
+.faq-category[open] > summary > .nav-icon:last-child {
+  transform: rotate(180deg);
+}
+
+.faq-category-icon {
+  width: 38px;
+  height: 38px;
+}
+
+.faq-category-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-4px);
+  overflow: hidden;
+  transition: grid-template-rows 220ms ease, opacity 170ms ease, transform 220ms ease;
+}
+
+.faq-category[open] > .faq-category-panel {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.faq-category-panel > .faq-category-items {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.faq-category-items {
+  padding: 0 20px 8px 70px;
+}
+
+.faq-item {
+  min-height: clamp(40px, 5vh, 50px);
+  padding: 5px 8px;
+}
+
+.faq-item--catalog {
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
+.faq-item--catalog:hover {
+  background: var(--color-primary-mist);
+}
+
+.solution-arrow {
+  display: inline-grid;
+  place-items: center;
+}
+
+.solution-arrow .nav-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.faq-item--catalog .solution-arrow {
+  opacity: .7;
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.faq-item--catalog:hover .solution-arrow {
+  opacity: 1;
+  transform: translateX(2px);
+}
+
+.faq-help-strip {
+  margin-top: 22px;
+  border: 0;
+  border-radius: 14px;
+  position: relative;
+  flex: none;
+  min-height: clamp(50px, 6vh, 64px);
+  padding: 8px 16px;
+}
+
+.faq-help-strip > .jup-avatar {
+  width: 38px;
+}
+
+.conversation-thread {
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-primary-700) transparent;
+}
+
+.conversation-thread::-webkit-scrollbar,
+.chat-support-rail::-webkit-scrollbar {
+  width: 7px;
+}
+
+.conversation-thread::-webkit-scrollbar-track,
+.chat-support-rail::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.conversation-thread::-webkit-scrollbar-thumb,
+.chat-support-rail::-webkit-scrollbar-thumb {
+  background: var(--color-primary-700);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+
+.conversation-thread::-webkit-scrollbar-thumb:hover,
+.chat-support-rail::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary-800);
+  background-clip: padding-box;
+}
+
+.chat-support-rail {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-primary-700) transparent;
+}
+
+.chat-welcome-avatar-stack {
+  position: relative;
+  width: 112px;
+  height: 112px;
+  margin-bottom: 8px;
+}
+
+.chat-welcome-avatar-state {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transition: opacity 180ms ease;
+}
+
+.chat-welcome-avatar-state > .jup-avatar {
+  width: 112px;
+  height: 112px;
+}
+
+.chat-welcome[data-listening='false'] .chat-welcome-avatar-state--idle,
+.chat-welcome[data-listening='true'] .chat-welcome-avatar-state--listening {
+  opacity: 1;
+}
+
+.chat-welcome[data-listening='false'] .chat-welcome-avatar-state--listening,
+.chat-welcome[data-listening='true'] .chat-welcome-avatar-state--idle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chat-welcome-tagline {
+  display: inline-block;
+  margin: 0;
+  color: var(--color-ink-soft);
+  font-size: 14px;
+  white-space: nowrap;
+  min-height: 21px;
+  animation: none;
+}
+
+@media (max-height: 820px) and (min-width: 1060px) {
+  .solutions-home {
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+
+  .faq-hero {
+    padding-bottom: 10px;
+  }
+
+  .faq-hero h1 {
+    font-size: 40px;
+  }
+
+  .faq-search-control {
+    margin-top: 10px;
+  }
+
+  .search-field {
+    padding-top: 3px;
+    padding-bottom: 3px;
+  }
+
+  .search-field input {
+    height: 40px;
+  }
+
+  .search-shortcut {
+    min-height: 40px;
+    padding: 8px 18px;
+  }
+
+  .faq-category-pills {
+    margin-top: 8px;
+  }
+
+  .faq-category-pills button {
+    min-height: 30px;
+    padding: 5px 12px;
+  }
+
+  .directory-count {
+    margin-bottom: 5px;
+  }
+
+  .faq-category > summary {
+    min-height: 48px;
+    padding: 7px 18px;
+    grid-template-columns: 34px minmax(0, 1fr) auto 16px;
+  }
+
+  .faq-category-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .faq-category > summary strong {
+    font-size: 15px;
+  }
+
+  .faq-category-items {
+    padding: 0 16px 5px 62px;
+  }
+
+  .faq-item {
+    min-height: 39px;
+    padding: 3px 6px;
+  }
+
+  .faq-item-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .faq-help-strip {
+    min-height: 46px;
+    padding: 5px 14px;
+  }
+
+  .faq-help-strip > .jup-avatar {
+    width: 32px;
+  }
+
+  .faq-help-strip h2 {
+    font-size: 14px;
+  }
+
+  .faq-help-strip .button {
+    min-height: 34px;
+    padding: 6px 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .faq-category-panel,
+  .faq-category > summary,
+  .faq-category > summary > .nav-icon:last-child,
+  .chat-welcome-avatar-state {
+    transition: none;
+  }
+
+  .chat-welcome-tagline {
+    animation: none;
+    clip-path: none;
+  }
+}
+
+@supports (interpolate-size: allow-keywords) {
+  .faq-category::details-content { interpolate-size: allow-keywords; height: 0; overflow: clip; transition: height 220ms ease, content-visibility 220ms allow-discrete; }
+  .faq-category[open]::details-content { height: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .faq-category::details-content { transition: none; } }
+
+/* Help pages read directly on the page, using rules rather than enclosing cards. */
+html:has(.main-content--public) { background: var(--color-neutral-100); }
+body:has(.main-content--public) { background: var(--color-white); }
+body:has(.main-content--public) .app-header { background: var(--color-neutral-100); }
+.main-content--public:has(.solutions-home), .main-content--public:has(.solution-detail) { padding: 0; }
+.solutions-home { background: transparent; border: 0; border-radius: 0; box-shadow: none; max-width: 1160px; padding: 40px 40px 48px; }
+.faq-directory { background: transparent; border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
+.faq-category { border-bottom: 1px solid var(--color-border); }
+.faq-category + .faq-category { border-top: 0; }
+.faq-category > summary { padding-left: 0; padding-right: 0; }
+.faq-category[open] > summary { background: transparent; }
+.faq-category-items { padding-left: 51px; padding-right: 0; }
+.faq-help-strip { background: transparent; border-radius: 0; padding: 24px 0 0; margin-top: 30px; border-top: 1px solid var(--color-border); }
+/* Hide only the help-center scrollbar's visual representation, preserving native scrolling. */
+html:has(.main-content--public) { scrollbar-width: none; }
+html:has(.main-content--public)::-webkit-scrollbar { display: none; }
+.solution-detail { max-width: 900px; margin: 0 auto; padding: 32px 40px 48px; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+.solution-detail .breadcrumb { margin-bottom: 32px; }
+.solution-detail .solution-article-header { max-width: 70ch; padding-bottom: 28px; }
+.solution-detail .knowledge-body { max-width: 70ch; background: transparent; border: 0; border-radius: 0; box-shadow: none; padding: 26px 0; margin: 0; border-top: 1px solid var(--color-border); }
+.solution-detail .security-note { background: var(--color-primary-mist); border: 0; border-left: 3px solid var(--color-primary); border-radius: 0; padding: 14px 18px; }
+.solution-detail .solution-outcome { background: transparent; border-radius: 0; border-top: 1px solid var(--color-border); padding: 24px 0 0; margin-top: 30px; }
+/* Reserve the welcome layout; facial motion remains independent from body placement. */
+.chat-welcome { width: 100%; }
+.chat-welcome-tagline { width: 100%; min-height: 22px; }
+
+.chat-welcome .chat-welcome-avatar-state--idle .jup-avatar__body { animation: welcome-body-settle 350ms ease-out both; }
+.chat-welcome .chat-welcome-avatar-state[aria-hidden='true'] * { animation-play-state: paused; }
+@keyframes welcome-body-settle { from { transform: translateY(2px); } to { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .chat-welcome-avatar-state { transition: none; } }
+
+/* Final FAQ controls stay available while the document scrolls underneath. */
+.solutions-home { padding-bottom: 120px; }
+.solutions-home .faq-category > summary { grid-template-columns: minmax(0, 1fr) auto 18px; }
+.solutions-home .faq-category-items { padding-left: 18px; }
+.solutions-home .faq-help-strip { position: fixed; inset: auto auto 0 50%; transform: translateX(-50%); width: calc(100% - 80px); max-width: 1080px; min-height: 80px; margin: 0; padding: 16px 0; background: var(--color-white); z-index: 15; }
+@media (max-width: 650px) {
+  .solutions-home { padding-bottom: 160px; }
+  .solutions-home .faq-help-strip { width: calc(100% - 32px); padding: 12px 0; }
+  .solutions-home .faq-category > summary > .nav-icon:last-child { display: block; }
+}

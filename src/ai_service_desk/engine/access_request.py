@@ -38,7 +38,16 @@ PREPARATION_REASON_CODES = frozenset(
 ROLE_NOMINAL_TERMS = {
     "SOLICITANTE": frozenset({"solicitante"}),
     "APROVADOR": frozenset({"aprovador", "aprovadora"}),
-    "ADMIN": frozenset({"admin"}),
+    "ADMIN": frozenset(
+        {
+            "adm",
+            "admin",
+            "administrador",
+            "administradora",
+            "administrativo",
+            "administrativa",
+        }
+    ),
     "SUPERADMIN": frozenset({"superadmin"}),
 }
 PRIVILEGED_INTENT_PHRASES = {

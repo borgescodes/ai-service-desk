@@ -23,3 +23,14 @@ export function selectIdentity(state, identityId) {
     pendingAction: null,
   };
 }
+
+export function resetConversation(state) {
+  return { ...state, messages: [], composerDraft: '', composerFocused: false,
+    understood: null, lastBackendStatus: null, messageError: null, faqContext: null,
+    pendingAction: null, transientError: null };
+}
+
+export function personaPath(identity) {
+  return ({ 'pedro-miranda': '/jup', 'tecnico-cdm': '/demo/operacao/cdm',
+    'tecnico-m365': '/demo/operacao/m365', 'tecnico-geral': '/demo/operacao/prevention' })[identity?.identity_id] ?? null;
+}

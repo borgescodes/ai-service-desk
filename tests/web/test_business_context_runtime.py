@@ -1,5 +1,7 @@
+import hashlib
 import json
 import os
+import re
 
 import pytest
 
@@ -9,9 +11,29 @@ from ai_service_desk.web import demo_runtime
 class SemanticGateway:
     def __init__(self):
         self.payloads = []
+        self.embed_requests = []
 
     def model_info(self, name):
-        return {"name": name}
+        return {"name": name, "digest": f"fake-{name}-digest"}
+
+    @staticmethod
+    def _embedding(text: str, dimensions: int = 1024) -> list[float]:
+        vector = [0.0] * dimensions
+        for token in re.findall(r"[a-z0-9]+", text.casefold()):
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            vector[int.from_bytes(digest[:4], "big") % dimensions] += 1.0
+        if not any(vector):
+            vector[0] = 1.0
+        return vector
+
+    def json_request(self, method, path, payload=None):
+        if method != "POST" or path != "/api/embed" or not isinstance(payload, dict):
+            raise AssertionError(f"Unexpected JSON request: {method} {path}")
+        texts = payload.get("input")
+        if not isinstance(texts, list):
+            raise AssertionError("Embedding input must be a list")
+        self.embed_requests.append(payload)
+        return {"embeddings": [self._embedding(text) for text in texts]}
 
     def close(self):
         pass
@@ -99,10 +121,11 @@ def test_runtime_consumes_single_vocabulary_without_redundant_clarification(
     assert result["business_context"]["product"] == product
 
 
-def test_runtime_contextual_cdm_does_not_fabricate_access_or_knowledge(runtime):
+def test_runtime_contextual_cdm_handoffs_without_fabricating_access_or_knowledge(runtime):
     result = runtime.send_message("pedro-miranda", "Preciso cadastrar material para revenda")
     assert runtime._triage["pedro-miranda"][1].system == "CDM"
-    assert result["status"] == "TRIAGE_ABSTAINED"
+    assert result["status"] == "SUPPORT_HANDOFF_PENDING"
+    assert result["support_handoff"]["technician"]["technician_id"] == "TECH-GENERAL"
     assert result["request_id"] is None
     assert runtime.created_request_ids == []
 
@@ -123,7 +146,7 @@ def test_prompt_context_does_not_replace_user_text_or_expand_approved_systems(ru
     runtime.send_message("pedro-miranda", message)
     payload = runtime._ollama_client.payloads[0]
     assert payload["messages"][-1]["content"] == message
-    assert "BUSINESS_CONTEXT_CURRENT" in payload["messages"][0]["content"]
+    assert "contexto vem do backend" in payload["messages"][0]["content"].casefold()
     assert runtime.knowledge_engine.available_systems("PROBLEMA_ACESSO") == ("CDM", "OFFICE 365")
     assert runtime._triage["pedro-miranda"][1].system == ""
 
@@ -142,8 +165,9 @@ def test_explicit_correction_to_new_system_is_not_overridden_by_old_alias(runtim
     assert first["reason"] == "AMBIGUOUS_SYSTEM"
     result = runtime.send_message("pedro-miranda", "Não é Office, é SAP")
     assert runtime._triage["pedro-miranda"][1].system == "SAP"
-    assert result["status"] == "TRIAGE_ABSTAINED"
-    assert result["reason"] == "SYSTEM_MISMATCH"
+    assert result["status"] == "SUPPORT_HANDOFF_PENDING"
+    assert result["support_handoff"]["technician"]["technician_id"] == "TECH-GENERAL"
+    assert result["business_context"]["system"] == "SAP"
 
 
 def test_vocabulary_cannot_promote_controlled_identity_or_execute(runtime):
@@ -153,7 +177,7 @@ def test_vocabulary_cannot_promote_controlled_identity_or_execute(runtime):
     )
     if result["request_id"]:
         record = runtime.request_repository.get(result["request_id"])
-        assert record.context.requester.username == "pedro.miranda"
+        assert record.context.requester.username == "fulano.tal"
         assert record.state != "COMPLETED"
     assert runtime.fake_cdm_store.access_count == 0
 

@@ -26,8 +26,8 @@ _PASSWORD_EVIDENCE = re.compile(
     r"nao lembro (?:a|minha) senha|trocar (?:a|minha) senha|redefinir (?:a|minha) senha)\b"
 )
 _PROCEDURE_FAILURE = re.compile(
-    r"\b(?:nao resolveu|nao funcionou|continua igual|"
-    r"ainda nao consigo (?:entrar|acessar)|continua sem (?:acessar|acesso))\b"
+    r"\b(?:deu errado|nao rolou|nao resolveu|nao funcionou|continua igual|"
+    r"ainda nao consigo (?:entrar|acessar)|continua sem (?:entrar|acessar|acesso))\b"
 )
 _PROCEDURE_SUCCESS = re.compile(
     r"\b(?:deu certo|funcionou|consegui entrar|agora foi|resolvido|entrou normalmente)\b"
@@ -109,9 +109,10 @@ class SupportHandoff:
     requester: SessionIdentity
     technical_summary: str
     source_conversation: SupportConversation
+    confidence: dict | None = None
 
     def as_result(self) -> dict:
-        return {
+        result = {
             "handoff_id": self.handoff_id,
             "system": self.system,
             "capability": self.capability,
@@ -126,12 +127,16 @@ class SupportHandoff:
                 "name": self.requester.name,
                 "email": self.requester.email,
                 "area": self.requester.area,
+                "identity_source": "BACKEND_SESSION_PROVIDER",
             },
             "technical_summary": self.technical_summary,
             "source_conversation": [
                 {"role": item.role, "text": item.text} for item in self.source_conversation.history
             ],
         }
+        if self.confidence is not None:
+            result["confidence"] = dict(self.confidence)
+        return result
 
 
 class SupportHandoffStore:
@@ -192,7 +197,7 @@ class DemoSupportState:
         interpreted_signal: LinguisticSignal | str | None = None,
         explicit_other_system: bool = False,
     ) -> SupportTurn | None:
-        """Processa um turno; o sinal opcional será fornecido pela interpretação da Task 8."""
+        """Processa um turno; o sinal opcional pode vir da interpretação semântica local."""
         if explicit_other_system:
             self.clear(identity_id)
             return None
@@ -365,14 +370,15 @@ class DemoSupportState:
     def _signal(
         message: str, interpreted_signal: LinguisticSignal | str | None
     ) -> LinguisticSignal:
+        normalized = normalize_text(message)
+        if _PASSWORD_EVIDENCE.search(normalized):
+            return LinguisticSignal.PASSWORD_EVIDENCE
+        # Evidência textual forte e controlada prevalece sobre um sinal semântico mais amplo.
         if interpreted_signal is not None:
             try:
                 return LinguisticSignal(interpreted_signal)
             except ValueError:
                 return LinguisticSignal.UNKNOWN
-        normalized = normalize_text(message)
-        if _PASSWORD_EVIDENCE.search(normalized):
-            return LinguisticSignal.PASSWORD_EVIDENCE
         # O troubleshooting focado desta demo é de autenticação/senha.
         # Teams genérico continua no fluxo de triagem existente, mesmo quando
         # a mensagem também menciona Office 365.

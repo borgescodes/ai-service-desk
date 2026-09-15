@@ -178,7 +178,7 @@ def _validate_policy_decision(policy: object) -> None:
 def _validate_confidence(confidence: object) -> None:
     if type(confidence) is not ConfidenceAssessment:
         _invalid_record("confidence deve ser ConfidenceAssessment imutavel exata.")
-    if type(confidence.level) is not str or confidence.level not in {"HIGH", "LOW"}:
+    if type(confidence.level) is not str or confidence.level not in {"HIGH", "MEDIUM", "LOW"}:
         _invalid_record("confidence.level fora do contrato fechado.")
     if type(confidence.reason_codes) is not tuple or not confidence.reason_codes:
         _invalid_record("confidence.reason_codes deve ser tuple nao vazio.")
