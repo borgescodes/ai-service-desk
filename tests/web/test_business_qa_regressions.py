@@ -5,6 +5,7 @@ import pytest
 from ai_service_desk.web import demo_runtime
 from ai_service_desk.web.business_context import BusinessVocabulary
 from ai_service_desk.web.conversation import operational_message
+from ai_service_desk.web.demo_ai import DemoEmbedder
 
 ONEDRIVE_SYNC = "O One Drive não está sincronizando minhas pastas."
 PASSWORD_PREFIX = "Cara, esqueci minha senha do Office e não consigo entrar. "
@@ -13,7 +14,13 @@ PASSWORD_SUFFIX = "O que eu faço?"
 
 class AccessGateway:
     def model_info(self, name):
-        return {"name": name}
+        return {"name": name, "digest": "fake-qwen-digest"}
+
+    def json_request(self, method, path, payload):
+        if method != "POST" or path != "/api/embed":
+            raise AssertionError(f"Unexpected fake request: {method} {path}")
+        rows = DemoEmbedder().embed(payload["input"])
+        return {"embeddings": [row.tolist() + [0.0] * 992 for row in rows]}
 
     def close(self):
         pass
