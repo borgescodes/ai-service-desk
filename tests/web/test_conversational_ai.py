@@ -32,27 +32,98 @@ class FakeOllamaClient:
 
     def chat(self, payload: dict) -> dict:
         properties = payload.get("format", {}).get("properties", {})
-        if "scenario" in properties:
+        text = payload["messages"][-1]["content"].casefold()
+
+        if "relation" in properties:
             self.classifier_calls.append(payload)
-            text = payload["messages"][-1]["content"].casefold()
-            if (
+
+            relation = "CONTINUATION" if text.strip(" .!?") in {"cdm", "funcionou"} else "NEW_GOAL"
+
+            if "bom dia" in text:
+                result = {
+                    "relation": relation,
+                    "domain": "SOCIAL",
+                    "goal": "",
+                    "intent": "OUTRO",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "NONE",
+                    "understood_topic": "saudacao",
+                }
+            elif (
                 "cdm" in text
                 or "central de dados mestres" in text
                 or ("material" in text and "revenda" in text)
             ):
-                signal = (
-                    "PRIVILEGED_ACCESS"
-                    if any(term in text for term in ("admin", "administrador", "superadmin"))
-                    else "ACCESS_REQUEST"
-                )
-                result = {"scenario": "CDM_ACCESS", "signal": signal}
+                privileged = any(term in text for term in ("admin", "administrador", "superadmin"))
+                result = {
+                    "relation": relation,
+                    "domain": "IT_SUPPORT",
+                    "goal": "REQUEST_ACCESS",
+                    "intent": "PROBLEMA_ACESSO",
+                    "entities": {"system": "CDM", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": text.strip(" .!?") == "cdm",
+                    "semantic_signal": ("PRIVILEGED_ACCESS" if privileged else "ACCESS_REQUEST"),
+                    "understood_topic": "acesso ao CDM",
+                }
             elif any(term in text for term in ("microsoft 365", "office 365", "office", "outlook")):
-                signal = "PASSWORD_EVIDENCE" if "senha" in text else "LOGIN_PROBLEM"
-                result = {"scenario": "M365_SUPPORT", "signal": signal}
+                password = "senha" in text
+                result = {
+                    "relation": relation,
+                    "domain": "IT_SUPPORT",
+                    "goal": "DIAGNOSE_ISSUE",
+                    "intent": "PROBLEMA_ACESSO",
+                    "entities": {"system": "OFFICE 365", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": ("PASSWORD_EVIDENCE" if password else "LOGIN_PROBLEM"),
+                    "understood_topic": "acesso ao Microsoft 365",
+                }
+            elif "funcionou" in text or "deu certo" in text:
+                result = {
+                    "relation": "CONTINUATION",
+                    "domain": "IT_SUPPORT",
+                    "goal": "DIAGNOSE_ISSUE",
+                    "intent": "PROBLEMA_ACESSO",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": True,
+                    "semantic_signal": "PROCEDURE_SUCCEEDED",
+                    "understood_topic": "resultado do procedimento",
+                }
             elif any(term in text for term in ("acesso", "acessar", "entrar")):
-                result = {"scenario": "OTHER_IT", "signal": "LOGIN_PROBLEM"}
+                result = {
+                    "relation": relation,
+                    "domain": "IT_SUPPORT",
+                    "goal": "REQUEST_ACCESS",
+                    "intent": "PROBLEMA_ACESSO",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "ACCESS_REQUEST",
+                    "understood_topic": "problema de acesso",
+                }
             else:
-                result = {"scenario": "OTHER_IT", "signal": "UNKNOWN"}
+                result = {
+                    "relation": relation,
+                    "domain": "IT_SUPPORT",
+                    "goal": "DIAGNOSE_ISSUE",
+                    "intent": "ERRO_SISTEMA",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "NONE",
+                    "understood_topic": "problema de TI",
+                }
+
             return {
                 "message": {"content": json.dumps(result)},
                 "done": True,
@@ -60,8 +131,26 @@ class FakeOllamaClient:
             }
 
         self.conversation_calls.append(payload)
-        message = payload["format"]["properties"]["assistant_message"]["enum"][0]
-        return {"message": {"content": json.dumps({"assistant_message": message})}}
+
+        if set(properties) == {"intro", "outro"}:
+            result = {
+                "intro": "Encontrei uma orientacao aprovada.",
+                "outro": "Me diga se resolveu.",
+            }
+        elif set(properties) == {"assistant_message"}:
+            result = {
+                "assistant_message": (
+                    "Entendi o contexto e posso ajudar a resolver isso com seguranca."
+                )
+            }
+        else:
+            raise AssertionError(f"Unexpected conversational schema: {properties}")
+
+        return {
+            "message": {"content": json.dumps(result)},
+            "done": True,
+            "done_reason": "stop",
+        }
 
     def close(self) -> None:
         self.closed = True
@@ -90,7 +179,8 @@ def test_greeting_is_social_and_does_not_enter_operational_triage(monkeypatch) -
         assert any(term in response for term in ("ajudar", "precisa", "resolver", "acessar"))
         assert runtime._triage == {}
         assert runtime.created_request_ids == []
-        assert client.classifier_calls == []
+        assert len(client.classifier_calls) == 1
+        assert len(client.conversation_calls) == 1
     finally:
         runtime.close()
 

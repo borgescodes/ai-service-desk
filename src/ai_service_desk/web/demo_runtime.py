@@ -46,10 +46,23 @@ from ai_service_desk.integrations.cdm import CDMAdapter
 from ai_service_desk.integrations.cdm_fake_api import CDMFakeStore, build_cdm_server
 from ai_service_desk.web.business_context import BusinessVocabulary
 from ai_service_desk.web.conversation import (
+    generate_natural_response,
     greeting_message,
     is_outside_it_support_scope,
     is_social_greeting,
     operational_message,
+)
+from ai_service_desk.web.conversation_grounding import ground_response
+from ai_service_desk.web.conversation_interpreter import (
+    build_interpretation_payload,
+    classification_from_context,
+    parse_interpretation_response,
+)
+from ai_service_desk.web.conversation_state import (
+    append_turn,
+    apply_backend_updates,
+    new_conversation_context,
+    reduce_conversation_context,
 )
 from ai_service_desk.web.demo_ai import (
     DemoClassifierClient,
@@ -242,6 +255,7 @@ class DemoRuntime:
         self.request_repository = InMemoryRequestRepository()
         self.routing_store = InMemoryRoutingAssignmentStore()
         self.conversations: dict[str, list[dict]] = {}
+        self._conversation_contexts = {}
         self._conversation_generations: dict[str, int] = {}
         self._triage: dict[str, tuple[TriageEngine, object]] = {}
         self.created_request_ids: list[str] = []
@@ -346,6 +360,224 @@ class DemoRuntime:
             session_id, self.knowledge_engine, classifier, resolver=self.business_vocabulary
         )
         return engine, engine.initial_state()
+
+    def _context_for(self, identity_id, requester):
+        current = self._conversation_contexts.get(identity_id)
+        if current is not None:
+            return current
+
+        identity = self.identity_provider.resolve(identity_id)
+        return new_conversation_context(
+            identity_id,
+            requester.name,
+            requester.email,
+            requester.area,
+            identity.role,
+        )
+
+    def _interpret_conversation(self, context, message):
+        if self._ollama_client is None:
+            raise WebDemoError(
+                "LOCAL_AI_UNAVAILABLE",
+                "Cliente LOCAL_AI não está disponível.",
+            )
+
+        payload = build_interpretation_payload(
+            context,
+            message,
+            self.business_vocabulary,
+        )
+
+        started = perf_counter()
+        self._local_ai_total_calls += 1
+        ok = False
+        try:
+            response = self._ollama_client.chat(payload)
+            delta = parse_interpretation_response(response)
+            ok = True
+            return delta
+        except OllamaError as exc:
+            raise WebDemoError(
+                "LOCAL_AI_INFERENCE_FAILED",
+                "A inferência local falhou; nenhuma decisão foi substituída por fallback.",
+            ) from exc
+        except (TypeError, ValueError, KeyError) as exc:
+            raise WebDemoError(
+                "LOCAL_AI_RESPONSE_INVALID",
+                "O modelo local retornou uma interpretação fora do contrato.",
+            ) from exc
+        finally:
+            duration_ms = max(
+                0.0,
+                (perf_counter() - started) * 1000,
+            )
+            if not ok:
+                self._local_ai_failed_calls += 1
+            self._local_ai_calls.append(
+                {
+                    "duration_ms": duration_ms,
+                    "ok": ok,
+                }
+            )
+
+    @staticmethod
+    def _apply_result_to_context(context, result):
+        return apply_backend_updates(
+            context,
+            {
+                "request_id": result.get("request_id"),
+                "request_state": result.get("state"),
+                "policy": result.get("policy"),
+            },
+        )
+
+    def _generate_response(self, message, context, grounding):
+        if self._ollama_client is None:
+            raise WebDemoError(
+                "LOCAL_AI_UNAVAILABLE",
+                "Cliente LOCAL_AI não está disponível.",
+            )
+
+        return generate_natural_response(
+            message,
+            context,
+            grounding,
+            self._ollama_client.chat,
+        )
+
+    def _resolve_local_ai_turn(
+        self,
+        identity_id,
+        requester,
+        message,
+        context,
+        delta,
+    ):
+        if delta.domain == "SOCIAL":
+            return {
+                "status": "SOCIAL",
+                "request_id": None,
+            }
+
+        if delta.domain == "OTHER":
+            return {
+                "status": "OUT_OF_SCOPE",
+                "request_id": None,
+                "support_handoff": None,
+                "understood_topic": delta.understood_topic,
+                "business_context": {
+                    "system": "",
+                    "product": "",
+                },
+            }
+
+        classification = classification_from_context(
+            context,
+            delta,
+            self.business_vocabulary,
+        )
+
+        result = self._send_operational_message(
+            identity_id,
+            message,
+            requester,
+            classification=classification,
+        )
+
+        state = self._triage[identity_id][1]
+        if result.get("status") == "TRIAGE_ABSTAINED" and delta.domain == "IT_SUPPORT":
+            system = state.system or context.dialogue.system.value
+            intent = state.intent or delta.intent or "OUTRO"
+
+            if system == "OFFICE 365":
+                handoff = self._materialize_m365_knowledge_gap_handoff(
+                    identity_id,
+                    requester,
+                    message,
+                    intent=intent,
+                )
+            else:
+                handoff = self._materialize_general_handoff(
+                    identity_id,
+                    requester,
+                    message,
+                    system=system or "GENERAL_IT",
+                    intent=intent,
+                )
+
+            result = {
+                "status": "SUPPORT_HANDOFF_PENDING",
+                "request_id": None,
+                "support_handoff": handoff.as_result(),
+            }
+
+        result["business_context"] = {
+            "system": state.system,
+            "product": state.entities.get("product", ""),
+        }
+        return result
+
+    def _send_local_ai_message(self, identity_id: str, message: str) -> dict:
+        requester = self._requester(identity_id)
+
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("Mensagem vazia.")
+
+        context_before = self._context_for(
+            identity_id,
+            requester,
+        )
+
+        delta = self._interpret_conversation(
+            context_before,
+            message,
+        )
+
+        context_after_delta = reduce_conversation_context(
+            context_before,
+            delta,
+            user_message=message,
+        )
+
+        result = self._resolve_local_ai_turn(
+            identity_id,
+            requester,
+            message,
+            context_after_delta,
+            delta,
+        )
+
+        context_after_backend = self._apply_result_to_context(
+            context_after_delta,
+            result,
+        )
+
+        grounding = ground_response(
+            result,
+            context_after_backend,
+            delta,
+        )
+
+        assistant_message = self._generate_response(
+            message,
+            context_after_backend,
+            grounding,
+        )
+
+        context_final = append_turn(
+            context_after_backend,
+            "USER",
+            message.strip(),
+        )
+        context_final = append_turn(
+            context_final,
+            "ASSISTANT",
+            assistant_message,
+        )
+
+        self._conversation_contexts[identity_id] = context_final
+        result["assistant_message"] = assistant_message
+        return result
 
     def _interpret_local_ai(self, text: str) -> tuple[str, str]:
         if self._ollama_client is None:
@@ -479,7 +711,7 @@ class DemoRuntime:
         before_calls = self._local_ai_total_calls
         started = perf_counter()
         try:
-            return self._send_message_impl(identity_id, message)
+            return self._send_local_ai_message(identity_id, message)
         finally:
             self._local_ai_turns.append(
                 {
@@ -862,12 +1094,23 @@ class DemoRuntime:
         lines.append(f"Encaminhamento: {technician_name}")
         return "\n".join(lines)
 
-    def _send_operational_message(self, identity_id: str, message: str, requester) -> dict:
+    def _send_operational_message(
+        self,
+        identity_id: str,
+        message: str,
+        requester,
+        *,
+        classification=None,
+    ) -> dict:
         current = self._triage.get(identity_id)
         if current is None or current[1].status != "ACTIVE":
             current = self._new_triage(identity_id)
         engine, state = current
-        next_state, knowledge_result = engine.step(state, message)
+        next_state, knowledge_result = engine.step(
+            state,
+            message,
+            classification=classification,
+        )
         self._triage[identity_id] = (engine, next_state)
         self.conversations.setdefault(identity_id, []).append(
             {"role": "USER", "text": message.strip(), "status": knowledge_result["status"]}
