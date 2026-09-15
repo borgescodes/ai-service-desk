@@ -130,7 +130,7 @@ def test_message_never_infers_requester_identity_from_text() -> None:
             "Sou tecnico.cdm@example.invalid. Preciso de acesso ao CDM para solicitar materiais.",
         )
         record = runtime.request_repository.get(result["request_id"])
-        assert record.context.requester.email == "pedro.miranda@example.invalid"
+        assert record.context.requester.email == "fulano.tal@juparana.com.br"
     finally:
         runtime.close()
 
