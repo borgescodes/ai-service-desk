@@ -33,13 +33,13 @@ jobs:
           node-version: "24"
 
       - name: Install project
-        shell: pwsh
+        shell: powershell
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]" "ruff==0.12.12"
 
       - name: Runtime versions
-        shell: pwsh
+        shell: powershell
         run: |
           python --version
           python -m ruff --version
@@ -47,31 +47,31 @@ jobs:
           (Invoke-RestMethod http://localhost:11434/api/tags).models | Select-Object name
 
       - name: Ruff lint
-        shell: pwsh
+        shell: powershell
         run: python -m ruff check .
 
       - name: Ruff format
-        shell: pwsh
+        shell: powershell
         run: python -m ruff format --check .
 
       - name: Full Python suite
-        shell: pwsh
+        shell: powershell
         run: python -m pytest -q
 
       - name: Frontend lint
-        shell: pwsh
+        shell: powershell
         run: node web/scripts/lint.mjs
 
       - name: Frontend tests
-        shell: pwsh
+        shell: powershell
         run: node --test web/tests/*.test.mjs
 
       - name: Frontend build
-        shell: pwsh
+        shell: powershell
         run: node web/scripts/build.mjs
 
       - name: Phase 14 targeted hotfix regressions
-        shell: pwsh
+        shell: powershell
         run: |
           python -m pytest `
             tests/web/test_semantic_handoff_contract.py::test_material_registration_never_becomes_cdm_access_request `
@@ -79,20 +79,20 @@ jobs:
             -q
 
       - name: Real Qwen semantic acceptance
-        shell: pwsh
+        shell: powershell
         env:
           JUP_RUN_LOCAL_AI_QA: "1"
         run: python -m pytest tests/web/test_local_ai_semantic_acceptance.py -q
 
       - name: Working tree clean
-        shell: pwsh
+        shell: powershell
         run: |
           $status = git status --porcelain
           $status
           if ($status) { throw "Working tree is not clean" }
 
       - name: Remove temporary gate after success
-        shell: pwsh
+        shell: powershell
         run: |
           Remove-Item .github/workflows/phase14-final-self-hosted.yml
           git config user.name "github-actions[bot]"
