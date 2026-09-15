@@ -5,6 +5,7 @@ import pytest
 
 from ai_service_desk.engine.ollama import OllamaError
 from ai_service_desk.web import demo_runtime
+from ai_service_desk.web.demo_ai import DemoEmbedder
 from ai_service_desk.web.demo_runtime import DemoRuntime
 from ai_service_desk.web.errors import WebDemoError
 
@@ -22,6 +23,12 @@ class FakeOllamaClient:
     def model_info(self, name: str) -> dict:
         self.model_checks.append(name)
         return {"name": name, "digest": "fake-qwen-digest"}
+
+    def json_request(self, method: str, path: str, payload: dict) -> dict:
+        if method != "POST" or path != "/api/embed":
+            raise AssertionError(f"Unexpected fake request: {method} {path}")
+        rows = DemoEmbedder().embed(payload["input"])
+        return {"embeddings": [row.tolist() + [0.0] * 992 for row in rows]}
 
     def chat(self, payload: dict) -> dict:
         properties = payload.get("format", {}).get("properties", {})
@@ -196,8 +203,8 @@ def test_conversation_text_cannot_change_controlled_identity(monkeypatch) -> Non
         )
         record = runtime.request_repository.get(result["request_id"])
 
-        assert record.context.requester.username == "pedro.miranda"
-        assert record.context.requester.email == "pedro.miranda@example.invalid"
+        assert record.context.requester.username == "fulano.tal"
+        assert record.context.requester.email == "fulano.tal@juparana.com.br"
     finally:
         runtime.close()
 
