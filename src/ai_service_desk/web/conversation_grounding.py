@@ -1,0 +1,282 @@
+from dataclasses import dataclass
+from enum import StrEnum
+
+
+class ConversationDisposition(StrEnum):
+    SOCIAL = "SOCIAL"
+    ASK_CLARIFICATION = "ASK_CLARIFICATION"
+    ANSWER_WITH_APPROVED_KNOWLEDGE = "ANSWER_WITH_APPROVED_KNOWLEDGE"
+    CREATE_ACCESS_REQUEST = "CREATE_ACCESS_REQUEST"
+    DENY_BY_POLICY = "DENY_BY_POLICY"
+    WAIT_FOR_APPROVAL = "WAIT_FOR_APPROVAL"
+    HANDOFF = "HANDOFF"
+    ACKNOWLEDGE_RESOLUTION = "ACKNOWLEDGE_RESOLUTION"
+    OUT_OF_SCOPE = "OUT_OF_SCOPE"
+
+
+@dataclass(frozen=True)
+class ProtectedContent:
+    kind: str
+    content: str
+
+
+@dataclass(frozen=True)
+class ResponseGrounding:
+    disposition: ConversationDisposition
+    response_goal: str
+    verbosity: str
+    facts: tuple[str, ...]
+    protected_content: tuple[ProtectedContent, ...]
+    forbidden_claims: tuple[str, ...]
+    required_information: tuple[str, ...]
+    fallback_message: str
+    allowed_operational_values: frozenset[str]
+
+
+def _consolidated_facts(context) -> tuple[str, ...]:
+    rendered = []
+    for fact in getattr(context, "facts", ()):
+        key = getattr(fact, "key", "")
+        value = getattr(fact, "value", "")
+        if key and value:
+            rendered.append(f"{key}: {value}")
+    return tuple(rendered)
+
+
+def ground_response(result, context, delta) -> ResponseGrounding:
+    status = result.get("status")
+    facts = list(_consolidated_facts(context))
+    protected_content = ()
+
+    allowed_values = frozenset(
+        str(value)
+        for value in (
+            result.get("request_id"),
+            result.get("state"),
+            result.get("policy"),
+        )
+        if value is not None and str(value).strip()
+    )
+
+    forbidden_claims = (
+        "Não invente request_id.",
+        "Não afirme aprovação sem confirmação do backend.",
+        "Não afirme execução sem confirmação do backend.",
+        "Não afirme que acesso foi liberado sem confirmação do backend.",
+    )
+
+    if status == "SOCIAL":
+        return ResponseGrounding(
+            disposition=ConversationDisposition.SOCIAL,
+            response_goal=(
+                "Responda socialmente de forma breve e natural e convide a pessoa "
+                "a contar o que precisa resolver em TI."
+            ),
+            verbosity="concise",
+            facts=tuple(facts),
+            protected_content=(),
+            forbidden_claims=forbidden_claims,
+            required_information=(),
+            fallback_message="Oi! Como posso ajudar com TI?",
+            allowed_operational_values=allowed_values,
+        )
+
+    if status == "NEEDS_CLARIFICATION":
+        question = result.get("question")
+        required_information = (question,) if isinstance(question, str) and question.strip() else ()
+        return ResponseGrounding(
+            disposition=ConversationDisposition.ASK_CLARIFICATION,
+            response_goal=(
+                "Reconheça naturalmente o contexto já entendido e peça somente "
+                "a informação que ainda falta."
+            ),
+            verbosity="concise",
+            facts=tuple(facts),
+            protected_content=(),
+            forbidden_claims=forbidden_claims,
+            required_information=required_information,
+            fallback_message=(
+                question
+                if isinstance(question, str) and question.strip()
+                else "Preciso de mais uma informação para continuar."
+            ),
+            allowed_operational_values=allowed_values,
+        )
+
+    state = result.get("state")
+    policy = result.get("policy")
+    request_id = result.get("request_id")
+
+    if status == "DENIED_POLICY" or state == "DENIED_POLICY":
+        if request_id:
+            facts.append(f"request_id confirmado: {request_id}")
+        if state:
+            facts.append(f"estado confirmado: {state}")
+        if policy:
+            facts.append(f"política confirmada: {policy}")
+
+        return ResponseGrounding(
+            disposition=ConversationDisposition.DENY_BY_POLICY,
+            response_goal=(
+                "Explique de forma natural que a solicitação foi negada pela "
+                "política confirmada pelo backend. Não sugira que o acesso foi liberado."
+            ),
+            verbosity="concise",
+            facts=tuple(facts),
+            protected_content=(),
+            forbidden_claims=forbidden_claims,
+            required_information=(),
+            fallback_message=("Esse tipo de acesso não pode ser liberado por este atendimento."),
+            allowed_operational_values=allowed_values,
+        )
+
+    if status == "REQUEST_CREATED" and state == "PENDING_APPROVAL":
+        if request_id:
+            facts.append(f"request_id confirmado: {request_id}")
+        facts.append(f"estado confirmado: {state}")
+        if policy:
+            facts.append(f"política confirmada: {policy}")
+
+        fallback = "A solicitação foi registrada e aguarda aprovação."
+        if request_id:
+            fallback = f"Sua solicitação {request_id} foi registrada e aguarda aprovação."
+
+        return ResponseGrounding(
+            disposition=ConversationDisposition.WAIT_FOR_APPROVAL,
+            response_goal=(
+                "Informe naturalmente que a solicitação foi registrada e que "
+                "continua aguardando aprovação. Não afirme que foi aprovada."
+            ),
+            verbosity="concise",
+            facts=tuple(facts),
+            protected_content=(),
+            forbidden_claims=forbidden_claims,
+            required_information=(),
+            fallback_message=fallback,
+            allowed_operational_values=allowed_values,
+        )
+
+    if status == "REQUEST_CREATED":
+        if request_id:
+            facts.append(f"request_id confirmado: {request_id}")
+        if state:
+            facts.append(f"estado confirmado: {state}")
+        if policy:
+            facts.append(f"política confirmada: {policy}")
+
+        fallback = "A solicitação foi registrada."
+        if request_id:
+            fallback = f"Sua solicitação {request_id} foi registrada."
+
+        return ResponseGrounding(
+            disposition=ConversationDisposition.CREATE_ACCESS_REQUEST,
+            response_goal=(
+                "Confirme somente que a solicitação foi criada e descreva apenas "
+                "o estado confirmado pelo backend."
+            ),
+            verbosity="concise",
+            facts=tuple(facts),
+            protected_content=(),
+            forbidden_claims=forbidden_claims,
+            required_information=(),
+            fallback_message=fallback,
+            allowed_operational_values=allowed_values,
+        )
+
+    if status == "SUPPORT_HANDOFF_PENDING":
+        handoff = result.get("support_handoff") or {}
+        system = handoff.get("system")
+        technician = handoff.get("technician") or {}
+        technician_name = technician.get("name")
+
+        if system:
+            facts.append(f"sistema do handoff confirmado: {system}")
+        if technician_name:
+            facts.append(f"técnico confirmado: {technician_name}")
+
+        return ResponseGrounding(
+            disposition=ConversationDisposition.HANDOFF,
+            response_goal=(
+                "Explique naturalmente que o atendimento foi encaminhado ao suporte "
+                "confirmado pelo backend e preserve o contexto já entendido."
+            ),
+            verbosity="concise",
+            facts=tuple(facts),
+            protected_content=(),
+            forbidden_claims=forbidden_claims,
+            required_information=(),
+            fallback_message=("Encaminhei o atendimento para o suporte técnico responsável."),
+            allowed_operational_values=allowed_values,
+        )
+
+    if status == "SUPPORT_RESOLVED":
+        return ResponseGrounding(
+            disposition=ConversationDisposition.ACKNOWLEDGE_RESOLUTION,
+            response_goal=(
+                "Reconheça brevemente que o problema foi resolvido conforme "
+                "o estado confirmado pelo backend."
+            ),
+            verbosity="concise",
+            facts=tuple(facts),
+            protected_content=(),
+            forbidden_claims=forbidden_claims,
+            required_information=(),
+            fallback_message="Ótimo, vou considerar este atendimento resolvido.",
+            allowed_operational_values=allowed_values,
+        )
+
+    if status == "KNOWLEDGE_FOUND":
+        answer = result.get("answer")
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError("KNOWLEDGE_FOUND requer answer aprovado.")
+
+        protected_content = (
+            ProtectedContent(
+                kind="APPROVED_PROCEDURE",
+                content=answer,
+            ),
+        )
+        knowledge_id = result.get("knowledge_id")
+        if knowledge_id:
+            facts.append(f"knowledge_id confirmado: {knowledge_id}")
+
+        return ResponseGrounding(
+            disposition=ConversationDisposition.ANSWER_WITH_APPROVED_KNOWLEDGE,
+            response_goal=(
+                "Introduza brevemente a orientação aprovada e finalize de forma "
+                "natural. O procedimento oficial será inserido literalmente pelo backend."
+            ),
+            verbosity="concise",
+            facts=tuple(facts),
+            protected_content=protected_content,
+            forbidden_claims=forbidden_claims,
+            required_information=(),
+            fallback_message=answer,
+            allowed_operational_values=allowed_values,
+        )
+
+    if status == "OUT_OF_SCOPE":
+        topic = result.get("understood_topic") or getattr(delta, "understood_topic", "")
+        if topic:
+            facts.append(f"Assunto entendido fora do escopo de TI: {topic}")
+
+        return ResponseGrounding(
+            disposition=ConversationDisposition.OUT_OF_SCOPE,
+            response_goal=(
+                "Reconheça naturalmente o assunto entendido, explique que ele está "
+                "fora do papel de suporte de TI do Jup e redirecione a conversa para "
+                "assuntos de TI. Não invente encaminhamento para técnico."
+            ),
+            verbosity="concise",
+            facts=tuple(facts),
+            protected_content=(),
+            forbidden_claims=forbidden_claims,
+            required_information=(),
+            fallback_message=(
+                "Esse assunto fica fora do meu papel aqui. "
+                "Posso ajudar com suporte e solicitações de TI."
+            ),
+            allowed_operational_values=allowed_values,
+        )
+
+    raise ValueError(f"Status ainda não mapeado pelo grounding: {status!r}")
