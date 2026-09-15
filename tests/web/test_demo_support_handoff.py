@@ -47,7 +47,7 @@ def test_m365_handoff_is_idempotent_and_records_one_routed_outcome() -> None:
         second_handoff = second["support_handoff"]
         assert first_handoff["handoff_id"] == second_handoff["handoff_id"]
         assert first_handoff["technician"]["technician_id"] == "TECH-M365"
-        assert first_handoff["requester"]["name"] == "Pedro Miranda"
+        assert first_handoff["requester"]["name"] == "Fulano de Tal"
         assert first_handoff["requester"]["area"] == "Revenda - Matriz"
         assert runtime.created_request_ids == []
         assert runtime.fake_cdm_store.access_count == 0
