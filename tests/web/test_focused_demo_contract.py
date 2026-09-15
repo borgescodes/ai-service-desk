@@ -4,6 +4,7 @@ import pytest
 
 from ai_service_desk.engine.knowledge import load_knowledge
 from ai_service_desk.web import demo_runtime
+from ai_service_desk.web.demo_ai import DemoEmbedder
 from ai_service_desk.web.demo_data import write_demo_knowledge
 
 
@@ -40,7 +41,7 @@ def test_normal_access_preserves_backend_authority(runtime, message):
     result = send(runtime, message)
     assert result.get("request_id")
     record = runtime.request_repository.get(result["request_id"])
-    assert record.context.requester.username == "pedro.miranda"
+    assert record.context.requester.username == "fulano.tal"
     assert record.context.requested_role == "SOLICITANTE"
     assert record.creation_policy.decision == "REQUIRE_APPROVAL"
     assert record.state == "PENDING_APPROVAL"
@@ -68,7 +69,7 @@ def test_privileged_access_is_denied_by_canonical_policy(runtime, message, role)
     assert result.get("state") == "DENIED_POLICY"
     record = runtime.request_repository.get(result["request_id"])
     assert record.context.requested_role == role
-    assert record.context.requester.username == "pedro.miranda"
+    assert record.context.requester.username == "fulano.tal"
     assert runtime.routing_store.snapshot() == ()
     assert runtime.list_approvals("tecnico-cdm") == []
     assert runtime.fake_cdm_store.access_count == 0
@@ -167,7 +168,6 @@ def test_procedure_success_resolves_without_request_or_handoff(runtime, message)
 
 def test_guidance_waits_for_user_confirmation_before_resolved_outcome(runtime):
     baseline = len(runtime.outcome_store.snapshot())
-
     guidance = send(runtime, "Esqueci minha senha do Microsoft 365.")
     assert guidance.get("knowledge_id") == "KB-SYN-M365-PASSWORD-001"
     assert len(runtime.outcome_store.snapshot()) == baseline
@@ -242,7 +242,7 @@ def test_procedure_failure_hands_off_without_repeating_guidance(runtime, message
     assert handoff["handoff_id"]
     assert handoff["capability"] == "MICROSOFT_365_SUPPORT_REQUEST"
     assert handoff["technician"]["technician_id"] == "TECH-M365"
-    assert handoff["requester"]["name"] == "Pedro Miranda"
+    assert handoff["requester"]["name"] == "Fulano de Tal"
     assert handoff["requester"]["area"] == "Revenda - Matriz"
     assert symptom in handoff["technical_summary"]
     assert "navegador" not in handoff["technical_summary"].casefold()
@@ -302,7 +302,13 @@ class CountingGateway:
         self.payloads = []
 
     def model_info(self, name):
-        return {"name": name}
+        return {"name": name, "digest": "fake-qwen-digest"}
+
+    def json_request(self, method, path, payload):
+        if method != "POST" or path != "/api/embed":
+            raise AssertionError(f"Unexpected fake request: {method} {path}")
+        rows = DemoEmbedder().embed(payload["input"])
+        return {"embeddings": [row.tolist() + [0.0] * 992 for row in rows]}
 
     def close(self):
         pass
