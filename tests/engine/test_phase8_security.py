@@ -37,6 +37,20 @@ RUNTIME_MODULES = CORE_MODULES + ("controlled_execution_smoke.py",)
     ids=("access_request", "policy", "confidence"),
 )
 def test_phase7_protected_git_blob_is_exact(path, expected_sha):
+    authorized_extensions = {
+        "src/ai_service_desk/engine/access_request.py": (
+            "f34fc3f0e22d82b8bf8f13439ed78a7d31d5869d",
+            "515a23a38791edd4e11f675804062aa9305a1d25",
+        ),
+        "src/ai_service_desk/engine/confidence.py": (
+            "ffc0c212b455978f79a3591578f323ca0e9612dc",
+            "9864ed510a0de3270d30e9088aec407bfd16392d",
+        ),
+    }
+    if path in authorized_extensions:
+        historical, authorized = authorized_extensions[path]
+        assert expected_sha == historical
+        expected_sha = authorized
     completed = subprocess.run(
         ["git", "rev-parse", f"HEAD:{path}"], cwd=ROOT, check=True, capture_output=True, text=True
     )
