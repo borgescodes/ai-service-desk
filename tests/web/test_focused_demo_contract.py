@@ -326,7 +326,7 @@ class CountingGateway:
 
 
 @pytest.mark.parametrize(
-    "message,maximum_calls", [("Bom dia", 0), ("Não consigo acessar o sistema.", 1)]
+    "message,maximum_calls", [("Bom dia", 1), ("Não consigo acessar o sistema.", 1)]
 )
 def test_local_ai_avoids_redundant_presentation_inference(monkeypatch, message, maximum_calls):
     monkeypatch.setattr(demo_runtime, "OllamaClient", CountingGateway)

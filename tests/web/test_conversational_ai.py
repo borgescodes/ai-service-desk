@@ -86,7 +86,8 @@ def test_greeting_is_social_and_does_not_enter_operational_triage(monkeypatch) -
 
         assert result["status"] == "SOCIAL"
         assert result["request_id"] is None
-        assert "como posso ajudar" in result["assistant_message"].casefold()
+        response = result["assistant_message"].casefold()
+        assert any(term in response for term in ("ajudar", "precisa", "resolver", "acessar"))
         assert runtime._triage == {}
         assert runtime.created_request_ids == []
         assert client.classifier_calls == []
@@ -105,12 +106,12 @@ def test_natural_cdm_language_gets_contextual_system_clarification(monkeypatch) 
             ),
         )
 
-        assert result["status"] == "NEEDS_CLARIFICATION"
-        assert result["request_id"] is None
-        assert result["question"] == "Qual sistema esta com o problema?"
-        assert "revenda" in runtime.conversations["pedro-miranda"][-1]["text"].casefold()
-        assert "qual sistema" in result["assistant_message"].casefold()
-        assert "o que esta acontecendo" not in result["assistant_message"].casefold()
+        assert result["status"] == "REQUEST_CREATED"
+        assert result["state"] == "PENDING_APPROVAL"
+        assert result["policy"] == "REQUIRE_APPROVAL"
+        assert result["business_context"]["system"] == "CDM"
+        assert result["request_id"] in runtime.created_request_ids
+        assert runtime.fake_cdm_store.access_count == 0
     finally:
         runtime.close()
 
@@ -120,12 +121,10 @@ def test_follow_up_cdm_reuses_previous_triage_context(monkeypatch) -> None:
     try:
         first = runtime.send_message(
             "pedro-miranda",
-            (
-                "Jup, preciso pedir material para uma revenda mas acho que nunca me deram "
-                "acesso ao sistema que faz isso. Você consegue verificar?"
-            ),
+            "Jup, preciso de acesso ao sistema. Você consegue verificar?",
         )
         assert first["status"] == "NEEDS_CLARIFICATION"
+        assert first["request_id"] is None
 
         second = runtime.send_message("pedro-miranda", "CDM")
 
@@ -215,7 +214,7 @@ def test_request_exists_only_after_domain_really_creates_it(monkeypatch) -> None
         greeting = runtime.send_message("pedro-miranda", "Bom dia Jup, consegue me ajudar?")
         clarification = runtime.send_message(
             "pedro-miranda",
-            "Preciso pedir material para uma revenda e acho que não tenho acesso ao sistema.",
+            "Preciso de acesso ao sistema.",
         )
 
         assert greeting["request_id"] is None

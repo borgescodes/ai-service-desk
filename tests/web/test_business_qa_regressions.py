@@ -76,8 +76,12 @@ def test_password_article_requires_evidence(access_runtime, message, system, pro
         assert result["status"] == "NEEDS_CLARIFICATION"
         assert result["question"]
     else:
-        assert result["status"] == "TRIAGE_ABSTAINED"
-        assert result["reason"] == "KNOWLEDGE_EVIDENCE_MISMATCH"
+        assert result["status"] == "SUPPORT_HANDOFF_PENDING"
+        handoff = result["support_handoff"]
+        assert handoff["technician"]["technician_id"] == "TECH-M365"
+        assert handoff["capability"] == "MICROSOFT_365_SUPPORT_REQUEST"
+        assert result["request_id"] is None
+        assert access_runtime.fake_cdm_store.access_count == 0
     assert "recuperação de senha" not in result["assistant_message"].casefold()
 
 
@@ -99,8 +103,9 @@ def test_product_follow_up_rejects_password_article(access_runtime):
 
     assert first["status"] == "NEEDS_CLARIFICATION"
     assert second["business_context"] == {"system": "OFFICE 365", "product": "TEAMS"}
-    assert second["status"] == "TRIAGE_ABSTAINED"
-    assert second["reason"] == "KNOWLEDGE_EVIDENCE_MISMATCH"
+    assert second["status"] == "SUPPORT_HANDOFF_PENDING"
+    assert second["support_handoff"]["technician"]["technician_id"] == "TECH-M365"
+    assert second["support_handoff"]["capability"] == "MICROSOFT_365_SUPPORT_REQUEST"
     assert "recuperação de senha" not in second["assistant_message"].casefold()
 
 

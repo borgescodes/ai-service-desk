@@ -41,7 +41,7 @@ export function renderTrackingDetail(item, { operational = false, pendingAction 
   const technicalRow = (label, value) => value ? `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>` : '';
   return `<article class="tracking-detail">
     <header class="tracking-detail-header"><div><p class="tracking-kicker">${esc(item.request_id)} <span>·</span> ${esc(item.system)}</p><h2>${operational ? 'Resumo do Jup' : 'Resumo'}</h2></div>${renderStatus(item)}</header>
-    <p class="tracking-summary">${esc(subject(item))}</p>
+    ${operational ? '' : `<p class="tracking-summary">${esc(subject(item))}</p>`}
     ${operational ? `<section class="tracking-requester-card" aria-label="Solicitante"><h3>Solicitante</h3><div class="tracking-person"><span class="tracking-person-icon" aria-hidden="true">${esc((item.requester?.name || '?').slice(0, 1))}</span><div><strong>${esc(item.requester?.name)}</strong><p>${esc(item.requester?.email || '')}</p><p>${esc(item.requester?.area || '')}</p><small>Identidade fornecida pelo backend/session provider</small></div></div></section>
     <section class="tracking-request-facts" aria-label="Pedido"><h3>Pedido</h3><dl>${technicalRow('Sistema', item.system)}${technicalRow('Perfil solicitado', roleLabel(item.requested_role))}${technicalRow('Finalidade', item.purpose)}</dl></section>
     <section class="tracking-analysis" aria-label="Análise do Jup"><h3>Análise do Jup</h3><div class="tracking-confidence"><span>Confiança</span>${renderConfidence(item.confidence)}</div><h4>Por que essa confiança?</h4>${renderConfidenceReasons(item.confidence)}</section>` : ''}

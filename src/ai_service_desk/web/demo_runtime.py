@@ -557,7 +557,19 @@ class DemoRuntime:
 
         result = self._send_operational_message(identity_id, message, requester)
         state = self._triage[identity_id][1]
-        if self._should_general_handoff(message, systems, result, state):
+        if result.get("status") == "TRIAGE_ABSTAINED" and state.system == "OFFICE 365":
+            handoff = self._materialize_m365_knowledge_gap_handoff(
+                identity_id,
+                requester,
+                message,
+                intent=state.intent or "OUTRO",
+            )
+            result = {
+                "status": "SUPPORT_HANDOFF_PENDING",
+                "request_id": None,
+                "support_handoff": handoff.as_result(),
+            }
+        elif self._should_general_handoff(message, systems, result, state):
             system = systems[0] if len(systems) == 1 else "GENERAL_IT"
             handoff = self._materialize_general_handoff(
                 identity_id,
@@ -668,6 +680,78 @@ class DemoRuntime:
                 step_id="",
                 outcome="ROUTED_TO_HUMAN",
                 reason_code="GUIDANCE_UNRESOLVED",
+            )
+        )
+        return stored
+
+    def _materialize_m365_knowledge_gap_handoff(
+        self,
+        identity_id: str,
+        requester,
+        message: str,
+        *,
+        intent: str,
+    ) -> SupportHandoff:
+        existing_id = self._support_handoff_ids.get(identity_id)
+        if existing_id is not None:
+            return self.support_handoff_store.get(existing_id)
+
+        technician = self.routing_registry.resolve("MICROSOFT_365", "MICROSOFT_365_SUPPORT_REQUEST")
+        assessment = assess_support_context(requester.area, "OFFICE 365", message)
+        confidence = present_confidence(assessment)
+        conversation_history = tuple(
+            SupportHistoryEntry("USER", item["text"])
+            for item in self.conversations.get(identity_id, [])
+            if item.get("role") == "USER" and item.get("text")
+        )
+        if not conversation_history or conversation_history[-1].text != message.strip():
+            conversation_history += (SupportHistoryEntry("USER", message.strip()),)
+        support = SupportConversation(
+            stage=SupportStage.HANDOFF,
+            original_symptom=message.strip(),
+            evidence=(message.strip(),),
+            history=conversation_history,
+        )
+        summary = "\n".join(
+            (
+                f"Solicitante: {requester.name}",
+                f"E-mail: {requester.email}",
+                f"Área: {requester.area}",
+                "Sistema/contexto: Microsoft 365",
+                f"Intenção interpretada: {intent or 'OUTRO'}",
+                f"Sintoma/pedido informado: {message.strip()}",
+                "Orientação aprovada encontrada: não",
+                f"Confiança de contexto: {confidence['label']}",
+                "Motivos: " + ", ".join(assessment.reason_codes),
+                f"Encaminhamento: {technician.name}",
+            )
+        )
+        handoff_id = f"DEMO-M365-HANDOFF-{len(self.support_handoff_store.snapshot()) + 1:03d}"
+        handoff = SupportHandoff(
+            handoff_id=handoff_id,
+            system="MICROSOFT_365",
+            capability="MICROSOFT_365_SUPPORT_REQUEST",
+            technician=technician,
+            requester=requester,
+            technical_summary=summary,
+            source_conversation=support,
+            confidence=confidence,
+        )
+        stored = self.support_handoff_store.put(handoff)
+        self._support_handoff_ids[identity_id] = stored.handoff_id
+        self.outcome_store.ingest(
+            OutcomeRecord(
+                interaction_id=f"{stored.handoff_id}-OUTCOME",
+                system=stored.system,
+                intent=intent or "OUTRO",
+                capability=stored.capability,
+                area=requester.area,
+                knowledge_id="",
+                playbook_id="",
+                playbook_version=None,
+                step_id="",
+                outcome="ROUTED_TO_HUMAN",
+                reason_code="NO_APPROVED_KNOWLEDGE",
             )
         )
         return stored
