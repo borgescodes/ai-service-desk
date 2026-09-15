@@ -227,16 +227,20 @@ def compact_interpretation_to_classification(
 
 
 class DemoEmbedder:
-    model = "demo-token-hash-v1"
+    model = "jup-demo-hash-v1"
+    digest = "phase12-demo-embedder-v1"
     dimensions = 32
-    digest = "demo-token-hash-v1"
 
-    def embed(self, texts: list[str]):
+    def embed(self, texts: list[str]) -> np.ndarray:
+        if not isinstance(texts, list) or any(not isinstance(text, str) for text in texts):
+            raise ValueError("DemoEmbedder exige lista de textos.")
         matrix = np.zeros((len(texts), self.dimensions), dtype=np.float32)
         for row, text in enumerate(texts):
-            tokens = re.findall(r"[a-z0-9]+", _normalize(text))
-            for token in tokens:
+            for token in re.findall(r"[a-z0-9]+", _normalize(text)):
                 digest = hashlib.sha256(token.encode("utf-8")).digest()
                 index = int.from_bytes(digest[:4], "big") % self.dimensions
                 matrix[row, index] += 1.0
+            norm = float(np.linalg.norm(matrix[row]))
+            if norm:
+                matrix[row] /= norm
         return matrix
