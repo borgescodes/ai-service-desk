@@ -13,7 +13,9 @@ from ai_service_desk.engine.access_request import normalize_requested_role
         ("quero superadmin no cdm", "SUPERADMIN"),
     ],
 )
-def test_privileged_role_aliases_are_normalized_before_policy(text: str, expected_role: str) -> None:
+def test_privileged_role_aliases_are_normalized_before_policy(
+    text: str, expected_role: str
+) -> None:
     role, reason = normalize_requested_role(text)
 
     assert role == expected_role

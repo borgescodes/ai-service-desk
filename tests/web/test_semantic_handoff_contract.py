@@ -83,9 +83,10 @@ def test_ubs_access_is_low_confidence_general_handoff_without_external_execution
         assert handoff["system"] == "UBS"
         assert handoff["technician"]["technician_id"] == "TECH-GENERAL"
         assert handoff["confidence"]["level"] == "LOW"
-        assert {
-            item["code"] for item in handoff["confidence"]["explanations"]
-        } >= {"AREA_SYSTEM_MISMATCH", "CONTEXT_INSUFFICIENT"}
+        assert {item["code"] for item in handoff["confidence"]["explanations"]} >= {
+            "AREA_SYSTEM_MISMATCH",
+            "CONTEXT_INSUFFICIENT",
+        }
         assert runtime.created_request_ids == []
         assert runtime.fake_cdm_store.access_count == 0
     finally:

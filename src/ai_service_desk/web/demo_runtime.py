@@ -158,7 +158,7 @@ class DemoRuntime:
         *,
         mode: str = DEFAULT_DEMO_MODE,
         fail_cdm_request_ids: set[str] | frozenset[str] | None = None,
-    ) -> "DemoRuntime":
+    ) -> DemoRuntime:
         return cls(mode=mode, fail_cdm_request_ids=fail_cdm_request_ids)
 
     def _close_knowledge_resources(self) -> None:
@@ -385,7 +385,10 @@ class DemoRuntime:
         )
 
     def _support_signal_local_ai(self, identity_id: str, message: str):
-        if self.mode != "LOCAL_AI" or self.support_state.get(identity_id).stage == SupportStage.IDLE:
+        if (
+            self.mode != "LOCAL_AI"
+            or self.support_state.get(identity_id).stage == SupportStage.IDLE
+        ):
             return None
         _, signal = self._interpret_local_ai(message)
         return _LOCAL_SUPPORT_SIGNALS.get(signal)
@@ -491,7 +494,11 @@ class DemoRuntime:
             raise ValueError("Mensagem vazia.")
 
         if is_social_greeting(message):
-            chat = self._ollama_client.chat if self.mode == "LOCAL_AI" and self._ollama_client else None
+            chat = (
+                self._ollama_client.chat
+                if self.mode == "LOCAL_AI" and self._ollama_client
+                else None
+            )
             return {
                 "status": "SOCIAL",
                 "request_id": None,
@@ -572,7 +579,9 @@ class DemoRuntime:
         return result
 
     @staticmethod
-    def _should_general_handoff(message: str, systems: tuple[str, ...], result: dict, state) -> bool:
+    def _should_general_handoff(
+        message: str, systems: tuple[str, ...], result: dict, state
+    ) -> bool:
         if result.get("status") not in {"NEEDS_CLARIFICATION", "TRIAGE_ABSTAINED"}:
             return False
         normalized = " ".join(message.casefold().split())

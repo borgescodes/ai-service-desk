@@ -4,7 +4,6 @@ import pytest
 
 from ai_service_desk.web.demo_runtime import DemoRuntime
 
-
 pytestmark = pytest.mark.skipif(
     os.environ.get("JUP_BUSINESS_LOCAL_QA") != "1",
     reason="QA explícita com Qwen e embedding locais; CI hospedado permanece determinístico",
