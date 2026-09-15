@@ -51,11 +51,12 @@ def valid_context() -> AccessRequestContext:
             "LOW",
             ("AREA_OUTSIDE_REVENDA", "PURPOSE_MATCH_MATERIAL_REQUEST"),
         ),
-        (
+        pytest.param(
             "Revenda Sintetica",
             "preciso de acesso ao CDM",
             "MEDIUM",
             ("AREA_MATCH_REVENDA", "PURPOSE_NOT_CONFIRMED"),
+            id="Revenda Sintetica-preciso de acesso ao CDM-LOW-reason_codes2",
         ),
         (
             "Financeiro Sintetico",
