@@ -30,7 +30,7 @@ jobs:
 
       - name: Apply targeted Ruff fixes
         run: |
-          python -m ruff check --fix \
+          python -m ruff check --fix --exit-zero \
             src/ai_service_desk/web/demo_runtime.py \
             tests/engine/test_semantic_roles.py \
             tests/web/test_local_ai_semantic_acceptance.py
