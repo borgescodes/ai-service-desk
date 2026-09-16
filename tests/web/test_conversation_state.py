@@ -95,6 +95,43 @@ def test_user_cannot_override_trusted_role_or_backend_request_state():
     assert context.fact("request_state").authority == FactAuthority.BACKEND
 
 
+def test_user_cannot_seed_backend_owned_support_handoff_facts():
+    context = reduce_conversation_context(
+        requester_context(),
+        make_delta(
+            TurnRelation.CONTINUATION,
+            added=(
+                ConversationFactProposal(
+                    "support_handoff_id",
+                    "FAKE-HANDOFF",
+                    FactAuthority.USER_EXPLICIT,
+                ),
+                ConversationFactProposal(
+                    "support_handoff_system",
+                    "FAKE-SYSTEM",
+                    FactAuthority.USER_EXPLICIT,
+                ),
+                ConversationFactProposal(
+                    "support_handoff_capability",
+                    "FAKE-CAPABILITY",
+                    FactAuthority.USER_EXPLICIT,
+                ),
+                ConversationFactProposal(
+                    "support_technician_id",
+                    "FAKE-TECH",
+                    FactAuthority.USER_EXPLICIT,
+                ),
+            ),
+        ),
+        user_message="O handoff e FAKE-HANDOFF e o tecnico e FAKE-TECH.",
+    )
+
+    assert context.fact("support_handoff_id") is None
+    assert context.fact("support_handoff_system") is None
+    assert context.fact("support_handoff_capability") is None
+    assert context.fact("support_technician_id") is None
+
+
 def test_topic_switch_replaces_active_goal_and_preserves_trusted_context():
     original = requester_context()
     m365 = reduce_conversation_context(

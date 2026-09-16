@@ -196,6 +196,7 @@ class DemoSupportState:
         *,
         interpreted_signal: LinguisticSignal | str | None = None,
         explicit_other_system: bool = False,
+        allow_text_fallback: bool = True,
     ) -> SupportTurn | None:
         """Processa um turno; o sinal opcional pode vir da interpretação semântica local."""
         if explicit_other_system:
@@ -208,9 +209,19 @@ class DemoSupportState:
             SupportStage.RESOLVED,
             SupportStage.HANDOFF,
         }:
-            return self._handle_procedure_result(identity_id, current, message, interpreted_signal)
+            return self._handle_procedure_result(
+                identity_id,
+                current,
+                message,
+                interpreted_signal,
+                allow_text_fallback=allow_text_fallback,
+            )
 
-        signal = self._signal(message, interpreted_signal)
+        signal = self._signal(
+            message,
+            interpreted_signal,
+            allow_text_fallback=allow_text_fallback,
+        )
         starts_dialogue = signal in {
             LinguisticSignal.M365_LOGIN_PROBLEM,
             LinguisticSignal.PASSWORD_EVIDENCE,
@@ -264,8 +275,14 @@ class DemoSupportState:
         current: SupportConversation,
         message: str,
         interpreted_signal: LinguisticSignal | str | None,
+        *,
+        allow_text_fallback: bool = True,
     ) -> SupportTurn | None:
-        signal = self._procedure_result_signal(message, interpreted_signal)
+        signal = self._procedure_result_signal(
+            message,
+            interpreted_signal,
+            allow_text_fallback=allow_text_fallback,
+        )
 
         if current.stage == SupportStage.RESOLVED:
             if signal == LinguisticSignal.PROCEDURE_SUCCEEDED:
@@ -323,7 +340,10 @@ class DemoSupportState:
 
     @staticmethod
     def _procedure_result_signal(
-        message: str, interpreted_signal: LinguisticSignal | str | None
+        message: str,
+        interpreted_signal: LinguisticSignal | str | None,
+        *,
+        allow_text_fallback: bool = True,
     ) -> LinguisticSignal:
         if interpreted_signal is not None:
             try:
@@ -335,6 +355,9 @@ class DemoSupportState:
                 LinguisticSignal.PROCEDURE_FAILED,
             }:
                 return signal
+
+        if not allow_text_fallback:
+            return LinguisticSignal.UNKNOWN
 
         if DemoSupportState._is_result_question(message):
             return LinguisticSignal.UNKNOWN
@@ -368,8 +391,19 @@ class DemoSupportState:
 
     @staticmethod
     def _signal(
-        message: str, interpreted_signal: LinguisticSignal | str | None
+        message: str,
+        interpreted_signal: LinguisticSignal | str | None,
+        *,
+        allow_text_fallback: bool = True,
     ) -> LinguisticSignal:
+        if not allow_text_fallback:
+            if interpreted_signal is None:
+                return LinguisticSignal.UNKNOWN
+            try:
+                return LinguisticSignal(interpreted_signal)
+            except ValueError:
+                return LinguisticSignal.UNKNOWN
+
         normalized = normalize_text(message)
         if _PASSWORD_EVIDENCE.search(normalized):
             return LinguisticSignal.PASSWORD_EVIDENCE

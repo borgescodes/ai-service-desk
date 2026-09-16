@@ -128,6 +128,10 @@ _PROTECTED_KEYS = frozenset(
         "routing",
         "execution",
         "knowledge_id",
+        "support_handoff_id",
+        "support_handoff_system",
+        "support_handoff_capability",
+        "support_technician_id",
     }
 )
 

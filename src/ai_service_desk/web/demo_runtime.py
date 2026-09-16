@@ -113,8 +113,8 @@ _ACCESS_REQUEST = re.compile(
 _LOCAL_SUPPORT_SIGNALS = {
     "LOGIN_PROBLEM": LinguisticSignal.M365_LOGIN_PROBLEM,
     "PASSWORD_EVIDENCE": LinguisticSignal.PASSWORD_EVIDENCE,
-    "SUCCESS": LinguisticSignal.PROCEDURE_SUCCEEDED,
-    "FAILURE": LinguisticSignal.PROCEDURE_FAILED,
+    "PROCEDURE_SUCCEEDED": LinguisticSignal.PROCEDURE_SUCCEEDED,
+    "PROCEDURE_FAILED": LinguisticSignal.PROCEDURE_FAILED,
 }
 
 
@@ -422,14 +422,38 @@ class DemoRuntime:
 
     @staticmethod
     def _apply_result_to_context(context, result):
-        return apply_backend_updates(
+        from dataclasses import replace
+
+        handoff = result.get("support_handoff") or {}
+        technician = handoff.get("technician") or {}
+
+        context = apply_backend_updates(
             context,
             {
                 "request_id": result.get("request_id"),
                 "request_state": result.get("state"),
                 "policy": result.get("policy"),
+                "support_handoff_id": handoff.get("handoff_id"),
+                "support_handoff_system": handoff.get("system"),
+                "support_handoff_capability": handoff.get("capability"),
+                "support_technician_id": technician.get("technician_id"),
             },
         )
+
+        if result.get("status") == "NEEDS_CLARIFICATION":
+            question = result.get("question")
+            if isinstance(question, str) and question.strip():
+                context = replace(
+                    context,
+                    dialogue=replace(
+                        context.dialogue,
+                        stage="DIAGNOSING",
+                        pending_information=(question.strip(),),
+                        last_question=question.strip(),
+                    ),
+                )
+
+        return context
 
     def _generate_response(self, message, context, grounding):
         if self._ollama_client is None:
@@ -471,6 +495,46 @@ class DemoRuntime:
                 },
             }
 
+        support_signal = _LOCAL_SUPPORT_SIGNALS.get(delta.semantic_signal)
+        active_system = context.dialogue.system.value or delta.entities.get("system", "")
+        support_turn = self.support_state.handle(
+            identity_id,
+            message,
+            interpreted_signal=support_signal,
+            explicit_other_system=bool(active_system and active_system != "OFFICE 365"),
+            allow_text_fallback=False,
+        )
+
+        if support_turn is not None and support_turn.status != "PASSWORD_EVIDENCE_COLLECTED":
+            if support_turn.status == "SUPPORT_RESOLVED":
+                self._record_support_resolution(identity_id, requester)
+
+            result = support_turn.as_result()
+            if support_turn.status == "SUPPORT_HANDOFF_PENDING":
+                handoff = self._materialize_support_handoff(
+                    identity_id,
+                    requester,
+                )
+                result["support_handoff"] = handoff.as_result()
+
+            result["business_context"] = {
+                "system": "OFFICE 365",
+                "product": context.dialogue.product.value,
+            }
+            return result
+
+        support = self.support_state.get(identity_id)
+        if support.stage == SupportStage.GUIDANCE_DELIVERED:
+            return {
+                "status": "NEEDS_CLARIFICATION",
+                "request_id": None,
+                "question": "O procedimento funcionou ou o problema continua?",
+                "business_context": {
+                    "system": "OFFICE 365",
+                    "product": context.dialogue.product.value,
+                },
+            }
+
         classification = classification_from_context(
             context,
             delta,
@@ -483,6 +547,20 @@ class DemoRuntime:
             requester,
             classification=classification,
         )
+
+        if (
+            result.get("status") == "KNOWLEDGE_FOUND"
+            and result.get("knowledge_id") == "KB-SYN-M365-PASSWORD-001"
+        ):
+            procedure = SupportProcedure(
+                knowledge_id=result["knowledge_id"],
+                answer=result["answer"],
+                url="https://mysignins.microsoft.com/security-info/password/change",
+            )
+            self.support_state.record_guidance(
+                identity_id,
+                procedure,
+            )
 
         state = self._triage[identity_id][1]
         if result.get("status") == "TRIAGE_ABSTAINED" and delta.domain == "IT_SUPPORT":
@@ -696,6 +774,7 @@ class DemoRuntime:
         self._requester(identity_id)
         self._triage.pop(identity_id, None)
         self.conversations.pop(identity_id, None)
+        self._conversation_contexts.pop(identity_id, None)
         self.support_state.clear(identity_id)
         self._support_resolution_outcomes.pop(identity_id, None)
         self._support_handoff_ids.pop(identity_id, None)
