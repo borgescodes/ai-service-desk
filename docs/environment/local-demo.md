@@ -55,6 +55,39 @@ Runner: `[self-hosted, Windows, X64, ai-service-desk, ollama]`
 
 O smoke verifica identidade do runner, Python local, `/api/tags`, presença dos dois modelos, chat com `think=false` e embedding com dimensão 1024.
 
+### Fase 15: conversational core local
+
+Arquivo: `.github/workflows/conversational-core-smoke.yml`
+
+Trigger: `workflow_dispatch`
+
+Runner: `[self-hosted, Windows, X64, ai-service-desk, ollama]`
+
+A homologação do conversational core usa explicitamente:
+
+```powershell
+$env:JUP_BUSINESS_LOCAL_QA = "1"
+python -m pytest tests\web\test_local_ai_conversational_acceptance.py -q -rA
+```
+
+O fluxo LOCAL_AI homologado é:
+
+```text
+ConversationInterpreter -> backend -> ResponseGrounding -> NaturalResponseGenerator
+```
+
+O Qwen interpreta contexto e produz a resposta natural, mas identidade, policy, approval, routing, estado de request, execução e knowledge oficial continuam sendo decisões autoritativas do backend.
+
+A telemetria do runtime registra somente tempos por estágio e contagem de chamadas Qwen. Prompt, mensagem, identidade e conteúdo conversacional não são armazenados nessa telemetria.
+
+O budget de latência para runtime aquecido é:
+
+- `P50 <= 8 s`
+- `P90 <= 12 s`
+- `P95 <= 15 s`
+
+O aquecimento inicial do modelo e a construção do índice ficam fora dessas amostras. O budget de desempenho não autoriza remover grounding, policy, contexto ou checks de segurança.
+
 ### Motor oficial com corpus sintético
 
 Arquivo: `.github/workflows/engine-smoke.yml`

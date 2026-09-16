@@ -256,3 +256,25 @@ def test_phase8_controlled_execution_workflow_is_exact_head_and_non_exporting():
     assert "write_text(" not in text
     assert text.index("path.write_bytes(blob)") < text.index("candidate_sha_after_fixture_restore=")
     assert text.index("candidate_sha_after_fixture_restore=") < text.index("python -m pytest -q")
+
+
+def test_conversational_core_smoke_is_windows_ollama_opt_in():
+    source = (ROOT / ".github" / "workflows" / "conversational-core-smoke.yml").read_text(
+        encoding="utf-8"
+    )
+
+    for required in (
+        "workflow_dispatch",
+        "self-hosted",
+        "Windows",
+        "X64",
+        "ai-service-desk",
+        "ollama",
+        "JUP_BUSINESS_LOCAL_QA",
+        "qwen3.5:4b",
+        "qwen3-embedding:0.6b",
+        "pytest",
+    ):
+        assert required in source
+
+    assert "upload-artifact" not in source

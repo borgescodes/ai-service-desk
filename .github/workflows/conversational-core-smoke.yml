@@ -1,0 +1,36 @@
+﻿name: Conversational core smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conversational-core:
+    runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
+    timeout-minutes: 20
+    env:
+      JUP_BUSINESS_LOCAL_QA: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Python and Ollama models
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python --version
+          $tags = Invoke-RestMethod http://localhost:11434/api/tags
+          $names = @($tags.models | ForEach-Object { [string]$_.name })
+          foreach ($required in @("qwen3.5:4b", "qwen3-embedding:0.6b")) {
+            if ($names -notcontains $required) {
+              throw "Missing model: $required"
+            }
+          }
+
+      - name: Run conversational acceptance
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install -e ".[dev]"
+          python -m pytest tests/web/test_local_ai_conversational_acceptance.py -q -rA
