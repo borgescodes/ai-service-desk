@@ -64,13 +64,7 @@ from ai_service_desk.web.conversation_state import (
     new_conversation_context,
     reduce_conversation_context,
 )
-from ai_service_desk.web.demo_ai import (
-    DemoClassifierClient,
-    DemoEmbedder,
-    build_compact_interpretation_payload,
-    compact_interpretation_to_classification,
-    parse_compact_interpretation_response,
-)
+from ai_service_desk.web.demo_ai import DemoClassifierClient, DemoEmbedder
 from ai_service_desk.web.demo_data import (
     demo_outcomes,
     write_demo_knowledge,
@@ -345,12 +339,11 @@ class DemoRuntime:
         )
 
         def classifier(text):
-            if self.mode == "LOCAL_AI":
-                classification = self._classify_local_ai(text)
-            else:
-                classification = classify_ticket(
-                    text, self.demo_classifier_client.chat, resolver=self.business_vocabulary
-                )
+            classification = classify_ticket(
+                text,
+                self.demo_classifier_client.chat,
+                resolver=self.business_vocabulary,
+            )
             normalized = " ".join(text.casefold().split())
             if classification.system.casefold() == "que" and "sistema que " in normalized:
                 return replace(classification, system="")
@@ -657,52 +650,6 @@ class DemoRuntime:
         result["assistant_message"] = assistant_message
         return result
 
-    def _interpret_local_ai(self, text: str) -> tuple[str, str]:
-        if self._ollama_client is None:
-            raise WebDemoError(
-                "LOCAL_AI_UNAVAILABLE",
-                "Cliente LOCAL_AI não está disponível.",
-            )
-        payload = build_compact_interpretation_payload(text)
-        started = perf_counter()
-        self._local_ai_total_calls += 1
-        ok = False
-        try:
-            response = self._ollama_client.chat(payload)
-            scenario, signal = parse_compact_interpretation_response(response)
-            ok = True
-            return scenario, signal
-        except OllamaError as exc:
-            raise WebDemoError(
-                "LOCAL_AI_INFERENCE_FAILED",
-                "A inferência local falhou; nenhuma decisão foi substituída por fallback.",
-            ) from exc
-        except (TypeError, ValueError, KeyError) as exc:
-            raise WebDemoError(
-                "LOCAL_AI_RESPONSE_INVALID",
-                "O modelo local retornou uma resposta fora do contrato compacto.",
-            ) from exc
-        finally:
-            duration_ms = max(0.0, (perf_counter() - started) * 1000)
-            if not ok:
-                self._local_ai_failed_calls += 1
-            self._local_ai_calls.append({"duration_ms": duration_ms, "ok": ok})
-
-    def _classify_local_ai(self, text: str):
-        scenario, signal = self._interpret_local_ai(text)
-        return compact_interpretation_to_classification(
-            text, scenario, signal, self.business_vocabulary
-        )
-
-    def _support_signal_local_ai(self, identity_id: str, message: str):
-        if (
-            self.mode != "LOCAL_AI"
-            or self.support_state.get(identity_id).stage == SupportStage.IDLE
-        ):
-            return None
-        _, signal = self._interpret_local_ai(message)
-        return _LOCAL_SUPPORT_SIGNALS.get(signal)
-
     def local_ai_metrics(self) -> dict:
         return {
             "startup_ms": self._local_ai_startup_ms,
@@ -827,11 +774,9 @@ class DemoRuntime:
             return result
 
         systems = self.business_vocabulary.systems(message)
-        interpreted_signal = self._support_signal_local_ai(identity_id, message)
         support_turn = self.support_state.handle(
             identity_id,
             message,
-            interpreted_signal=interpreted_signal,
             explicit_other_system=bool(systems and "OFFICE 365" not in systems),
         )
         if support_turn is not None and support_turn.status != "PASSWORD_EVIDENCE_COLLECTED":

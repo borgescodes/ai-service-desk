@@ -6,12 +6,10 @@ import pytest
 
 from ai_service_desk.engine.ollama import OllamaError
 from ai_service_desk.web import demo_runtime
-from ai_service_desk.web.business_context import BusinessVocabulary
-from ai_service_desk.web.demo_ai import compact_interpretation_to_classification
 from ai_service_desk.web.errors import WebDemoError
 
 
-class CompactGateway:
+class LocalAIGatewayBase:
     instances = []
 
     def __init__(self, *args, **kwargs):
@@ -48,50 +46,11 @@ class CompactGateway:
         self.embed_requests.append(payload)
         return {"embeddings": [self._embedding(text) for text in texts]}
 
-    def chat(self, payload):
-        self.payloads.append(payload)
-        properties = payload.get("format", {}).get("properties", {})
-        text = payload["messages"][-1]["content"].casefold()
-        if "assistant_message" in properties:
-            choices = properties["assistant_message"].get("enum", [])
-            if not choices:
-                raise AssertionError("Conversational payload must expose allowed choices")
-            result = {"assistant_message": choices[0]}
-        elif "scenario" in properties:
-            if (
-                "cdm" in text
-                or "central de dados mestres" in text
-                or ("material" in text and "revenda" in text)
-            ):
-                signal = (
-                    "PRIVILEGED_ACCESS"
-                    if any(term in text for term in ("admin", "administrador", "superadmin"))
-                    else "ACCESS_REQUEST"
-                )
-                result = {"scenario": "CDM_ACCESS", "signal": signal}
-            elif "365" in text or "office" in text or "outlook" in text:
-                result = {"scenario": "M365_SUPPORT", "signal": "PASSWORD_EVIDENCE"}
-            else:
-                result = {"scenario": "OTHER_IT", "signal": "UNKNOWN"}
-        else:
-            # Compatibilidade apenas para provar o RED contra o contrato antigo.
-            result = {
-                "intent": "PROBLEMA_ACESSO",
-                "system": "CDM" if "cdm" in text else "",
-                "entities": {},
-                "confidence": 0.95,
-            }
-        return {
-            "message": {"content": json.dumps(result)},
-            "done": True,
-            "done_reason": "stop",
-        }
-
     def close(self):
         self.closed = True
 
 
-class ConversationalGateway(CompactGateway):
+class ConversationalGateway(LocalAIGatewayBase):
     def chat(self, payload):
         self.payloads.append(payload)
         properties = payload.get("format", {}).get("properties", {})
@@ -233,25 +192,43 @@ class MalformedInterpreterGateway(ConversationalGateway):
         return super().chat(payload)
 
 
-class InvalidCompactGateway(CompactGateway):
+class InvalidInterpreterGateway(ConversationalGateway):
     mode = "extra"
 
     def chat(self, payload):
         properties = payload.get("format", {}).get("properties", {})
-        if "scenario" not in properties:
+        if "relation" not in properties:
             return super().chat(payload)
+
         self.payloads.append(payload)
+
         if self.mode == "malformed":
             content = "{not-json"
             done_reason = "stop"
-        elif self.mode == "extra":
-            content = json.dumps({"scenario": "OTHER_IT", "signal": "UNKNOWN", "confidence": 0.9})
-            done_reason = "stop"
-        elif self.mode == "truncated":
-            content = json.dumps({"scenario": "OTHER_IT", "signal": "UNKNOWN"})
-            done_reason = "length"
         else:
-            raise AssertionError(self.mode)
+            data = {
+                "relation": "NEW_GOAL",
+                "domain": "IT_SUPPORT",
+                "goal": "DIAGNOSE_ISSUE",
+                "intent": "ERRO_SISTEMA",
+                "entities": {"system": "", "product": ""},
+                "facts_added": [],
+                "facts_corrected": [],
+                "answered_pending_question": False,
+                "semantic_signal": "NONE",
+                "understood_topic": "problema de TI",
+            }
+
+            if self.mode == "extra":
+                data["unexpected"] = "field"
+                done_reason = "stop"
+            elif self.mode == "truncated":
+                done_reason = "length"
+            else:
+                raise AssertionError(self.mode)
+
+            content = json.dumps(data, ensure_ascii=False)
+
         return {
             "message": {"content": content},
             "done": True,
@@ -259,7 +236,7 @@ class InvalidCompactGateway(CompactGateway):
         }
 
 
-class FailingCompactGateway(CompactGateway):
+class FailingConversationalGateway(LocalAIGatewayBase):
     def chat(self, payload):
         self.payloads.append(payload)
         raise OllamaError("falha local simulada")
@@ -451,69 +428,21 @@ def test_local_ai_uses_contextual_interpreter_then_free_writer_contract(monkeypa
         runtime.close()
 
 
-@pytest.mark.parametrize(
-    "text,scenario,signal,expected_intent,expected_system",
-    [
-        (
-            "Preciso cadastrar um material para revenda",
-            "CDM_ACCESS",
-            "ACCESS_REQUEST",
-            "ORIENTACAO",
-            "CDM",
-        ),
-        (
-            "Bom dia! Preciso cadastrar material para revenda no SIAGRI",
-            "CDM_ACCESS",
-            "ACCESS_REQUEST",
-            "ORIENTACAO",
-            "SIAGRI",
-        ),
-        (
-            "Preciso de acesso ao CDM",
-            "CDM_ACCESS",
-            "ACCESS_REQUEST",
-            "PROBLEMA_ACESSO",
-            "CDM",
-        ),
-        (
-            "Nao consigo entrar no CDM",
-            "CDM_ACCESS",
-            "LOGIN_PROBLEM",
-            "PROBLEMA_ACESSO",
-            "CDM",
-        ),
-        (
-            "Preciso de acesso administrador ao CDM",
-            "CDM_ACCESS",
-            "PRIVILEGED_ACCESS",
-            "PROBLEMA_ACESSO",
-            "CDM",
-        ),
-        (
-            "Preciso instalar o Teams",
-            "OTHER_IT",
-            "UNKNOWN",
-            "INSTALACAO_SOFTWARE",
-            "OFFICE 365",
-        ),
-    ],
-)
-def test_compact_interpretation_requires_textual_access_evidence(
-    text,
-    scenario,
-    signal,
-    expected_intent,
-    expected_system,
-):
-    classification = compact_interpretation_to_classification(
-        text,
-        scenario,
-        signal,
-        BusinessVocabulary(),
-    )
+def test_local_ai_never_sends_scenario_signal_or_final_phrase_enum(monkeypatch):
+    runtime = _runtime(monkeypatch, ConversationalGateway)
+    try:
+        runtime.send_message("pedro-miranda", "Bom dia Jup")
+        runtime.reset_conversation("pedro-miranda")
+        runtime.send_message("pedro-miranda", "Como faço bolo de chocolate?")
 
-    assert classification.intent == expected_intent
-    assert classification.system == expected_system
+        for payload in runtime._ollama_client.payloads:
+            schema = json.dumps(payload.get("format", {}), ensure_ascii=False)
+            assert '"scenario"' not in schema
+            assert '"signal"' not in schema
+            assert "Olá, Fulano" not in schema
+            assert "Meu foco aqui é suporte de TI" not in schema
+    finally:
+        runtime.close()
 
 
 def test_local_ai_metrics_count_calls_turns_and_never_store_content(monkeypatch):
@@ -598,9 +527,9 @@ def test_local_ai_uses_interpreter_and_writer_for_operational_results(monkeypatc
 
 
 @pytest.mark.parametrize("mode", ["malformed", "extra", "truncated"])
-def test_local_ai_invalid_compact_response_fails_closed(monkeypatch, mode):
-    InvalidCompactGateway.mode = mode
-    runtime = _runtime(monkeypatch, InvalidCompactGateway)
+def test_local_ai_invalid_interpreter_response_fails_closed(monkeypatch, mode):
+    InvalidInterpreterGateway.mode = mode
+    runtime = _runtime(monkeypatch, InvalidInterpreterGateway)
     try:
         with pytest.raises(WebDemoError) as exc_info:
             runtime.send_message("pedro-miranda", "Nao consigo acessar o sistema.")
@@ -611,7 +540,7 @@ def test_local_ai_invalid_compact_response_fails_closed(monkeypatch, mode):
 
 
 def test_local_ai_transport_failure_is_explicit_and_counted(monkeypatch):
-    runtime = _runtime(monkeypatch, FailingCompactGateway)
+    runtime = _runtime(monkeypatch, FailingConversationalGateway)
     try:
         with pytest.raises(WebDemoError) as exc_info:
             runtime.send_message("pedro-miranda", "Nao consigo acessar o sistema.")

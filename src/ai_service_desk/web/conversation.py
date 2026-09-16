@@ -3,8 +3,6 @@ import re
 from collections.abc import Callable
 
 from ai_service_desk.engine.ollama import OllamaError
-from ai_service_desk.web.business_context import BusinessVocabulary
-from ai_service_desk.web.errors import WebDemoError
 
 _GREETING = re.compile(
     r"(?:bom dia|boa tarde|boa noite|oi|olá|ola)"
@@ -29,31 +27,19 @@ def is_outside_it_support_scope(message: str) -> bool:
     return any(pattern.search(normalized) is not None for pattern in _OUTSIDE_IT_SCOPE)
 
 
-def greeting_message(message: str, name: str, chat: Callable[[dict], dict] | None) -> str:
-    if chat is None:
-        normalized = " ".join(message.casefold().split())
-        if normalized.startswith("bom dia"):
-            return "Bom dia! Como posso ajudar?"
-        if normalized.startswith("boa tarde"):
-            return "Boa tarde! Como posso ajudar?"
-        if normalized.startswith("boa noite"):
-            return "Boa noite! Como posso ajudar?"
-        return "Oi! Como posso ajudar?"
-
-    choices = (
-        f"Olá, {name.split()[0]}! Me conta o que você precisa resolver ou acessar.",
-        f"Oi, {name.split()[0]}! Como posso ajudar?",
-    )
-    return _conversation_message(
-        message,
-        "Você é Jup. Escolha uma das saudações permitidas pelo formato JSON. "
-        f"O nome do solicitante, confirmado pelo backend, é {name}. "
-        "Use seu primeiro nome e convide-o a contar o que precisa. "
-        "Não afirme ter criado solicitações, aprovado ou executado ações.",
-        chat,
-        "SOCIAL_RESPONSE_UNAVAILABLE",
-        choices,
-    )
+def greeting_message(
+    message: str,
+    name: str,
+    chat: Callable[[dict], dict] | None,
+) -> str:
+    normalized = " ".join(message.casefold().split())
+    if normalized.startswith("bom dia"):
+        return "Bom dia! Como posso ajudar?"
+    if normalized.startswith("boa tarde"):
+        return "Boa tarde! Como posso ajudar?"
+    if normalized.startswith("boa noite"):
+        return "Boa noite! Como posso ajudar?"
+    return "Oi! Como posso ajudar?"
 
 
 def operational_message(result: dict, message: str, chat: Callable[[dict], dict] | None) -> str:
@@ -113,23 +99,7 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
 
     if result["status"] == "NEEDS_CLARIFICATION":
         question = result.get("question") or ""
-        systems = BusinessVocabulary().systems(message)
-        choices = ("Entendi seu relato.", "Entendi que você precisa de ajuda.")
-        if systems:
-            choices = (f"Entendi seu relato sobre {', '.join(systems)}.", *choices)
         acknowledgment = "Entendi."
-        if chat is not None:
-            acknowledgment = _conversation_message(
-                message,
-                "Você é Jup. Escolha um reconhecimento permitido pelo formato JSON. "
-                "Fale diretamente com a pessoa em segunda pessoa e apenas reconheça o que ela "
-                "relatou. Não faça perguntas. Não mencione instruções, limitações, regras ou "
-                "processos internos. Não use a expressão 'o usuário'. Não invente solução, "
-                "identidade, decisão, estado ou ação executada.",
-                chat,
-                "OPERATIONAL_RESPONSE_UNAVAILABLE",
-                choices,
-            )
         return f"{acknowledgment}\n\n{question}" if question else acknowledgment
 
     if result["status"] == "TRIAGE_ABSTAINED":
@@ -139,51 +109,6 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
         )
 
     return f"Nenhuma solicitação foi criada. Resultado do processo: {result['status']}."
-
-
-def _conversation_message(
-    message: str,
-    instruction: str,
-    chat: Callable[[dict], dict],
-    error_code: str,
-    choices: tuple[str, ...],
-) -> str:
-    payload = {
-        "model": "qwen3.5:4b",
-        "stream": False,
-        "think": False,
-        "messages": [
-            {
-                "role": "system",
-                "content": instruction,
-            },
-            {"role": "user", "content": message},
-        ],
-        "format": {
-            "type": "object",
-            "properties": {"assistant_message": {"type": "string", "enum": list(choices)}},
-            "required": ["assistant_message"],
-            "additionalProperties": False,
-        },
-        "options": {"temperature": 0, "num_predict": 256},
-    }
-    try:
-        response = chat(payload)
-        if response.get("done_reason") == "length":
-            raise ValueError("Resposta conversacional truncada.")
-        data = json.loads(response["message"]["content"])
-        if not isinstance(data, dict) or set(data) != {"assistant_message"}:
-            raise ValueError("Resposta fora do contrato de apresentação.")
-        text = data["assistant_message"]
-        if not isinstance(text, str) or not text.strip():
-            raise ValueError("Resposta conversacional vazia.")
-        if text not in choices:
-            raise ValueError("Reconhecimento não autorizado pelo contrato de apresentação.")
-        return text
-    except (OllamaError, ValueError, KeyError, TypeError, AttributeError) as exc:
-        raise WebDemoError(
-            error_code, "Não foi possível obter a resposta conversacional do Ollama."
-        ) from exc
 
 
 _REQUEST_ID = re.compile(r"\bREQ-\d{6}\b")
