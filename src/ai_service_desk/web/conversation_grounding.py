@@ -59,10 +59,10 @@ def ground_response(result, context, delta) -> ResponseGrounding:
     )
 
     forbidden_claims = (
-        "Não invente request_id.",
-        "Não afirme aprovação sem confirmação do backend.",
-        "Não afirme execução sem confirmação do backend.",
-        "Não afirme que acesso foi liberado sem confirmação do backend.",
+        "Nao invente request_id.",
+        "Nao afirme aprovacao sem confirmacao operacional.",
+        "Nao afirme execucao sem confirmacao operacional.",
+        "Nao afirme que acesso foi liberado sem confirmacao operacional.",
     )
 
     if status == "SOCIAL":
@@ -119,7 +119,7 @@ def ground_response(result, context, delta) -> ResponseGrounding:
             disposition=ConversationDisposition.DENY_BY_POLICY,
             response_goal=(
                 "Explique de forma natural que a solicitação foi negada pela "
-                "política confirmada pelo backend. Não sugira que o acesso foi liberado."
+                "política confirmada pelo processo. Não sugira que o acesso foi liberado."
             ),
             verbosity="concise",
             facts=tuple(facts),
@@ -172,7 +172,7 @@ def ground_response(result, context, delta) -> ResponseGrounding:
             disposition=ConversationDisposition.CREATE_ACCESS_REQUEST,
             response_goal=(
                 "Confirme somente que a solicitação foi criada e descreva apenas "
-                "o estado confirmado pelo backend."
+                "o estado confirmado pelo processo."
             ),
             verbosity="concise",
             facts=tuple(facts),
@@ -198,7 +198,7 @@ def ground_response(result, context, delta) -> ResponseGrounding:
             disposition=ConversationDisposition.HANDOFF,
             response_goal=(
                 "Explique naturalmente que o atendimento foi encaminhado ao suporte "
-                "confirmado pelo backend e preserve o contexto já entendido."
+                "confirmado pelo processo e preserve o contexto já entendido."
             ),
             verbosity="concise",
             facts=tuple(facts),
@@ -214,7 +214,7 @@ def ground_response(result, context, delta) -> ResponseGrounding:
             disposition=ConversationDisposition.ACKNOWLEDGE_RESOLUTION,
             response_goal=(
                 "Reconheça brevemente que o problema foi resolvido conforme "
-                "o estado confirmado pelo backend."
+                "o estado confirmado pelo processo."
             ),
             verbosity="concise",
             facts=tuple(facts),
@@ -230,12 +230,23 @@ def ground_response(result, context, delta) -> ResponseGrounding:
         if not isinstance(answer, str) or not answer.strip():
             raise ValueError("KNOWLEDGE_FOUND requer answer aprovado.")
 
-        protected_content = (
+        protected_items = [
             ProtectedContent(
                 kind="APPROVED_PROCEDURE",
                 content=answer,
             ),
-        )
+        ]
+
+        procedure_url = result.get("procedure_url")
+        if isinstance(procedure_url, str) and procedure_url.strip():
+            protected_items.append(
+                ProtectedContent(
+                    kind="OFFICIAL_URL",
+                    content=procedure_url.strip(),
+                )
+            )
+
+        protected_content = tuple(protected_items)
         knowledge_id = result.get("knowledge_id")
         if knowledge_id:
             facts.append(f"knowledge_id confirmado: {knowledge_id}")
@@ -243,15 +254,16 @@ def ground_response(result, context, delta) -> ResponseGrounding:
         return ResponseGrounding(
             disposition=ConversationDisposition.ANSWER_WITH_APPROVED_KNOWLEDGE,
             response_goal=(
-                "Introduza brevemente a orientação aprovada e finalize de forma "
-                "natural. O procedimento oficial será inserido literalmente pelo backend."
+                "Introduza brevemente a orientacao aprovada e finalize de forma natural. "
+                "O procedimento oficial e eventual link oficial serao apresentados "
+                "literalmente entre a introducao e o encerramento."
             ),
             verbosity="concise",
             facts=tuple(facts),
             protected_content=protected_content,
             forbidden_claims=forbidden_claims,
             required_information=(),
-            fallback_message=answer,
+            fallback_message="\n\n".join(item.content for item in protected_content),
             allowed_operational_values=allowed_values,
         )
 

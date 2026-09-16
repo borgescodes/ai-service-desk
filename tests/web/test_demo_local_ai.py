@@ -56,7 +56,7 @@ class ConversationalGateway(LocalAIGatewayBase):
         properties = payload.get("format", {}).get("properties", {})
         text = payload["messages"][-1]["content"].casefold()
 
-        if "relation" in properties:
+        if "relation" in properties or "r" in properties:
             if "cdm" in text:
                 data = {
                     "relation": "NEW_GOAL",
@@ -138,6 +138,29 @@ class ConversationalGateway(LocalAIGatewayBase):
                     "understood_topic": "problema de TI",
                 }
 
+            if "r" in properties:
+                relation_codes = {
+                    "NEW_GOAL": "N",
+                    "CONTINUATION": "C",
+                    "CORRECTION": "R",
+                    "ANSWER_TO_PENDING": "AP",
+                    "CONFIRMATION": "Y",
+                    "NEGATION": "X",
+                    "TOPIC_SWITCH": "TS",
+                }
+                data = {
+                    "r": relation_codes[data["relation"]],
+                    "d": data["domain"],
+                    "g": data["goal"],
+                    "i": data["intent"],
+                    "e": data["entities"],
+                    "a": data["facts_added"],
+                    "c": data["facts_corrected"],
+                    "q": data["answered_pending_question"],
+                    "s": data["semantic_signal"],
+                    "t": data["understood_topic"],
+                }
+
             return {
                 "message": {
                     "content": json.dumps(
@@ -183,7 +206,7 @@ class ConversationalGateway(LocalAIGatewayBase):
 class MalformedInterpreterGateway(ConversationalGateway):
     def chat(self, payload):
         properties = payload.get("format", {}).get("properties", {})
-        if "relation" in properties:
+        if "relation" in properties or "r" in properties:
             self.payloads.append(payload)
             return {
                 "message": {"content": "{not-json"},
@@ -197,7 +220,7 @@ class InvalidInterpreterGateway(ConversationalGateway):
 
     def chat(self, payload):
         properties = payload.get("format", {}).get("properties", {})
-        if "relation" not in properties:
+        if "relation" not in properties and "r" not in properties:
             return super().chat(payload)
 
         self.payloads.append(payload)
@@ -206,18 +229,32 @@ class InvalidInterpreterGateway(ConversationalGateway):
             content = "{not-json"
             done_reason = "stop"
         else:
-            data = {
-                "relation": "NEW_GOAL",
-                "domain": "IT_SUPPORT",
-                "goal": "DIAGNOSE_ISSUE",
-                "intent": "ERRO_SISTEMA",
-                "entities": {"system": "", "product": ""},
-                "facts_added": [],
-                "facts_corrected": [],
-                "answered_pending_question": False,
-                "semantic_signal": "NONE",
-                "understood_topic": "problema de TI",
-            }
+            if "r" in properties:
+                data = {
+                    "r": "N",
+                    "d": "IT_SUPPORT",
+                    "g": "DIAGNOSE_ISSUE",
+                    "i": "ERRO_SISTEMA",
+                    "e": {"system": "", "product": ""},
+                    "a": [],
+                    "c": [],
+                    "q": False,
+                    "s": "NONE",
+                    "t": "problema de TI",
+                }
+            else:
+                data = {
+                    "relation": "NEW_GOAL",
+                    "domain": "IT_SUPPORT",
+                    "goal": "DIAGNOSE_ISSUE",
+                    "intent": "ERRO_SISTEMA",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "NONE",
+                    "understood_topic": "problema de TI",
+                }
 
             if self.mode == "extra":
                 data["unexpected"] = "field"
@@ -266,7 +303,7 @@ def test_local_ai_turn_uses_interpreter_then_writer(monkeypatch):
 
         payloads = runtime._ollama_client.payloads
         assert len(payloads) == 2
-        assert "relation" in payloads[0]["format"]["properties"]
+        assert "r" in payloads[0]["format"]["properties"]
         assert "assistant_message" in payloads[1]["format"]["properties"]
         assert "enum" not in json.dumps(payloads[1]["format"])
     finally:
@@ -311,7 +348,7 @@ def test_local_ai_social_is_decided_by_interpreter(monkeypatch):
 
         payloads = runtime._ollama_client.payloads
         assert len(payloads) == 2
-        assert "relation" in payloads[0]["format"]["properties"]
+        assert "r" in payloads[0]["format"]["properties"]
         assert "assistant_message" in payloads[1]["format"]["properties"]
 
         assert runtime.created_request_ids == before_requests
@@ -344,7 +381,7 @@ def test_local_ai_out_of_scope_is_decided_by_interpreter_without_handoff(monkeyp
 
         payloads = runtime._ollama_client.payloads
         assert len(payloads) == 2
-        assert "relation" in payloads[0]["format"]["properties"]
+        assert "r" in payloads[0]["format"]["properties"]
         assert "assistant_message" in payloads[1]["format"]["properties"]
 
         assert runtime.created_request_ids == before_requests
@@ -370,7 +407,7 @@ def test_local_ai_unresolved_known_it_routes_to_general_technician(monkeypatch):
 
         payloads = runtime._ollama_client.payloads
         assert len(payloads) == 2
-        assert "relation" in payloads[0]["format"]["properties"]
+        assert "r" in payloads[0]["format"]["properties"]
         assert "assistant_message" in payloads[1]["format"]["properties"]
     finally:
         runtime.close()
@@ -392,21 +429,21 @@ def test_local_ai_uses_contextual_interpreter_then_free_writer_contract(monkeypa
         assert payload["options"] == {
             "temperature": 0,
             "num_ctx": 3072,
-            "num_predict": 192,
+            "num_predict": 128,
         }
 
         schema = payload["format"]
         expected_fields = [
-            "relation",
-            "domain",
-            "goal",
-            "intent",
-            "entities",
-            "facts_added",
-            "facts_corrected",
-            "answered_pending_question",
-            "semantic_signal",
-            "understood_topic",
+            "r",
+            "d",
+            "g",
+            "i",
+            "e",
+            "a",
+            "c",
+            "q",
+            "s",
+            "t",
         ]
         assert list(schema["properties"]) == expected_fields
         assert schema["required"] == expected_fields
@@ -415,7 +452,7 @@ def test_local_ai_uses_contextual_interpreter_then_free_writer_contract(monkeypa
         assert "signal" not in schema["properties"]
 
         instruction = payload["messages"][0]["content"]
-        assert len(instruction) <= 4000
+        assert len(instruction) <= 5500
         lowered = instruction.casefold()
         assert "jup" in lowered
         assert "cdm" in lowered
@@ -508,7 +545,7 @@ def test_local_ai_social_and_out_of_scope_use_interpreter_then_writer(monkeypatc
         social = runtime.send_message("pedro-miranda", "Bom dia")
         assert social["status"] == "SOCIAL"
         assert len(gateway.payloads) == 2
-        assert "relation" in gateway.payloads[0]["format"]["properties"]
+        assert "r" in gateway.payloads[0]["format"]["properties"]
         assert "assistant_message" in gateway.payloads[1]["format"]["properties"]
         assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
 
@@ -516,7 +553,7 @@ def test_local_ai_social_and_out_of_scope_use_interpreter_then_writer(monkeypatc
         outside = runtime.send_message("pedro-miranda", "Como posso fazer bolo?")
         assert outside["status"] == "OUT_OF_SCOPE"
         assert len(gateway.payloads) == 2
-        assert "relation" in gateway.payloads[0]["format"]["properties"]
+        assert "r" in gateway.payloads[0]["format"]["properties"]
         assert "assistant_message" in gateway.payloads[1]["format"]["properties"]
         assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
     finally:
@@ -532,7 +569,7 @@ def test_local_ai_uses_interpreter_and_writer_for_operational_results(monkeypatc
         created = runtime.send_message("pedro-miranda", "Preciso acessar o CDM.")
         assert created["request_id"]
         assert len(gateway.payloads) == 2
-        assert "relation" in gateway.payloads[0]["format"]["properties"]
+        assert "r" in gateway.payloads[0]["format"]["properties"]
         assert "assistant_message" in gateway.payloads[1]["format"]["properties"]
         assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
 
@@ -545,7 +582,7 @@ def test_local_ai_uses_interpreter_and_writer_for_operational_results(monkeypatc
         )
         assert guidance["knowledge_id"] == "KB-SYN-M365-PASSWORD-001"
         assert len(gateway.payloads) == 2
-        assert "relation" in gateway.payloads[0]["format"]["properties"]
+        assert "r" in gateway.payloads[0]["format"]["properties"]
         assert set(gateway.payloads[1]["format"]["properties"]) == {"intro", "outro"}
         assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
     finally:

@@ -66,6 +66,64 @@ FACT_SOURCES = (
     FactAuthority.MODEL_INFERRED.value,
 )
 
+WIRE_INTERPRETATION_FIELDS = frozenset(
+    {
+        "r",
+        "d",
+        "g",
+        "i",
+        "e",
+        "a",
+        "c",
+        "q",
+        "s",
+        "t",
+    }
+)
+
+_RELATION_TO_WIRE = {
+    "NEW_GOAL": "N",
+    "CONTINUATION": "C",
+    "CORRECTION": "R",
+    "ANSWER_TO_PENDING": "AP",
+    "CONFIRMATION": "Y",
+    "NEGATION": "X",
+    "TOPIC_SWITCH": "TS",
+}
+
+_DOMAIN_TO_WIRE = {
+    "SOCIAL": "S",
+    "IT_SUPPORT": "I",
+    "OTHER": "O",
+    "UNKNOWN": "U",
+}
+
+_INTENT_TO_WIRE = {
+    "LIBERACAO_ROTINA": "LR",
+    "PROBLEMA_ACESSO": "PA",
+    "ERRO_SISTEMA": "ES",
+    "INSTALACAO_SOFTWARE": "IS",
+    "PROBLEMA_IMPRESSAO": "PI",
+    "PROBLEMA_REDE": "PR",
+    "ORIENTACAO": "OR",
+    "OUTRO": "OT",
+}
+
+_SIGNAL_TO_WIRE = {
+    "ACCESS_REQUEST": "AR",
+    "PRIVILEGED_ACCESS": "PX",
+    "LOGIN_PROBLEM": "LG",
+    "PASSWORD_EVIDENCE": "PW",
+    "PROCEDURE_SUCCEEDED": "OK",
+    "PROCEDURE_FAILED": "FAIL",
+    "NONE": "N",
+}
+
+_WIRE_TO_RELATION = {value: key for key, value in _RELATION_TO_WIRE.items()}
+_WIRE_TO_DOMAIN = {value: key for key, value in _DOMAIN_TO_WIRE.items()}
+_WIRE_TO_INTENT = {value: key for key, value in _INTENT_TO_WIRE.items()}
+_WIRE_TO_SIGNAL = {value: key for key, value in _SIGNAL_TO_WIRE.items()}
+
 
 def _fact_schema():
     return {
@@ -95,57 +153,57 @@ def _interpretation_schema():
     return {
         "type": "object",
         "properties": {
-            "relation": {
+            "r": {
                 "type": "string",
-                "enum": [relation.value for relation in TurnRelation],
+                "enum": list(_RELATION_TO_WIRE.values()),
             },
-            "domain": {
+            "d": {
                 "type": "string",
                 "enum": list(DOMAINS),
             },
-            "goal": {
+            "g": {
                 "type": "string",
             },
-            "intent": {
+            "i": {
                 "type": "string",
                 "enum": list(INTENTS),
             },
-            "entities": {
+            "e": {
                 "type": "object",
                 "additionalProperties": {
                     "type": "string",
                 },
             },
-            "facts_added": {
+            "a": {
                 "type": "array",
                 "items": _fact_schema(),
             },
-            "facts_corrected": {
+            "c": {
                 "type": "array",
                 "items": _fact_schema(),
             },
-            "answered_pending_question": {
+            "q": {
                 "type": "boolean",
             },
-            "semantic_signal": {
+            "s": {
                 "type": "string",
                 "enum": list(SEMANTIC_SIGNALS),
             },
-            "understood_topic": {
+            "t": {
                 "type": "string",
             },
         },
         "required": [
-            "relation",
-            "domain",
-            "goal",
-            "intent",
-            "entities",
-            "facts_added",
-            "facts_corrected",
-            "answered_pending_question",
-            "semantic_signal",
-            "understood_topic",
+            "r",
+            "d",
+            "g",
+            "i",
+            "e",
+            "a",
+            "c",
+            "q",
+            "s",
+            "t",
         ],
         "additionalProperties": False,
     }
@@ -202,6 +260,62 @@ def build_interpretation_payload(context, user_message, vocabulary):
         _recent_turns(context),
         ensure_ascii=False,
     )
+    resolved_business = json.dumps(
+        {
+            "systems": list(vocabulary.systems(user_message)),
+            **vocabulary.entities(user_message),
+        },
+        ensure_ascii=False,
+    )
+
+    semantic_rules = (
+        "Regras semanticas obrigatorias: "
+        "1) SOCIAL: saudacoes e conversa social sem pedido de TI, exemplo 'Bom dia Jup'; "
+        "use domain SOCIAL, intent OUTRO e semantic_signal NONE. "
+        "2) OTHER: assunto fora de TI, por exemplo bolo, futebol, xadrez ou geografia geral; "
+        "use domain OTHER, intent OUTRO e semantic_signal NONE. "
+        "3) IT_SUPPORT: problema de TI, por exemplo notebook travando; use domain IT_SUPPORT. "
+        "Para notebook travando, falha de hardware ou desempenho sem evidencia de login ou acesso, "
+        "use intent ERRO_SISTEMA. "
+        "Nao classifique problema geral de hardware ou desempenho como PROBLEMA_ACESSO. "
+        "4) ACCESS_REQUEST: pedido de acesso ou perfil a sistema; para CDM use goal "
+        "REQUEST_ACCESS, intent PROBLEMA_ACESSO, system CDM. "
+        "5) PRIVILEGED_ACCESS: pedido admin, administrador ou superadmin no CDM; "
+        "PRIVILEGED_ACCESS tem prioridade sobre ACCESS_REQUEST quando houver pedido privilegiado. "
+        "Para pedido admin, administrador, superadmin ou outro acesso elevado no CDM, "
+        "semantic_signal deve ser PRIVILEGED_ACCESS e nunca ACCESS_REQUEST. "
+        "ACCESS_REQUEST fica somente para acesso comum, sem privilegio elevado. "
+        "apenas identifique o pedido, o backend decide policy. "
+        "6) LOGIN_PROBLEM: problema de login ou acesso M365 quando nao houver evidencia "
+        "mais especifica. Para Teams generico, preserve system OFFICE 365 e product TEAMS "
+        "e use semantic_signal NONE, salvo evidencia explicita de senha. "
+        "Para Office ou Microsoft 365 sem produto explicito, nao invente Teams, Outlook ou "
+        "OneDrive; mantenha product vazio e use semantic_signal LOGIN_PROBLEM quando o usuario "
+        "disser que nao entra. "
+        "7) PASSWORD_EVIDENCE: senha rejeitada, errada ou esquecida em contexto M365. "
+        "Se responder pergunta pendente, use relation ANSWER_TO_PENDING e "
+        "answered_pending_question true. "
+        "8) PROCEDURE_SUCCEEDED: depois de orientacao, mensagens como 'funcionou', "
+        "'consegui entrar' ou 'deu certo, consegui entrar' devem usar semantic_signal "
+        "PROCEDURE_SUCCEEDED. "
+        "9) PROCEDURE_FAILED: depois de orientacao, mensagens como 'nao rolou', "
+        "'nao resolveu', 'continua falhando' ou "
+        "'nao deu certo, continua dizendo que a senha esta errada' devem usar "
+        "semantic_signal PROCEDURE_FAILED. "
+        "10) TOPIC_SWITCH: troca explicita de assunto, por exemplo "
+        "'deixa isso, preciso de acesso ao CDM'; nao reutilize entidades antigas no novo goal. "
+        "11) CORRECTION: correcao explicita como 'nao, falei errado, e Outlook'; "
+        "proponha facts_corrected para system ou product quando aplicavel. "
+        "12) UBS: pedido de acesso ao UBS continua IT_SUPPORT, system UBS, "
+        "intent PROBLEMA_ACESSO e semantic_signal ACCESS_REQUEST; o backend decide o handoff. "
+        "13) Cadastrar material para revenda nao e instalacao de software e nao e pedido "
+        "de acesso por si so. Para 'cadastrar material para revenda', use IT_SUPPORT com "
+        "intent OUTRO ou ORIENTACAO e semantic_signal NONE. Somente pedido explicito de "
+        "acesso ao CDM usa ACCESS_REQUEST. "
+        "14) Instalar aplicativo ou programa e INSTALACAO_SOFTWARE. Para 'instalar o Teams', "
+        "use domain IT_SUPPORT, intent INSTALACAO_SOFTWARE e semantic_signal NONE. "
+        "15) Nunca use UNKNOWN quando a mensagem claramente cabe em SOCIAL, OTHER ou IT_SUPPORT."
+    )
 
     system_prompt = (
         "Voce e o ConversationInterpreter do Jup. "
@@ -213,13 +327,28 @@ def build_interpretation_payload(context, user_message, vocabulary):
         "approval, request state, request id, routing, tecnico, procedimento oficial "
         "ou execution. Essas decisoes pertencem exclusivamente ao backend. "
         "Nao declare que algo foi aprovado, executado ou liberado. "
-        "Use USER_EXPLICIT somente para fatos que o usuario afirmou explicitamente. "
+        "Use USER_EXPLICIT somente para fatos conversacionais permitidos que o usuario "
+        "afirmou explicitamente. "
         "Use MODEL_INFERRED somente para inferencias conversacionais. "
+        "facts_added e facts_corrected nunca devem conter identity, role, user_role, approval, "
+        "request state, request id, policy, routing, tecnico ou execution, mesmo quando "
+        "o usuario afirmar esses dados. "
+        "Mantenha as listas de facts vazias quando nao houver fato conversacional permitido. "
+        f"{semantic_rules}\n\n"
+        "Use chaves compactas do schema. "
+        "Somente relation usa codigos r N/C/R/AP/Y/X/TS. "
+        "Para domain, intent e semantic_signal use os valores completos permitidos pelo schema. "
+        "Campos: r relation, d domain, g goal, i intent, e entities, "
+        "a facts_added, c facts_corrected, q answered_pending_question, "
+        "s semantic_signal, t understood_topic. "
+        "Mantenha g e t curtos e a/c vazios quando nao forem necessarios. "
         "Retorne somente o JSON solicitado pelo schema.\n\n"
+        f"Resolved business context:\n{resolved_business}\n\n"
+        "O backend resolveu esse contexto. Preserve system/product resolvidos; "
+        "nao invente equivalencias.\n\n"
         f"Trusted session summary:\n{trusted}\n\n"
         f"Dialogue state:\n{dialogue}\n\n"
-        f"Recent turns, no maximo 8:\n{recent}\n\n"
-        f"Business vocabulary:\n{vocabulary.prompt()}"
+        f"Recent turns, no maximo 8:\n{recent}"
     )
 
     return {
@@ -230,7 +359,7 @@ def build_interpretation_payload(context, user_message, vocabulary):
         "options": {
             "temperature": 0,
             "num_ctx": 3072,
-            "num_predict": 192,
+            "num_predict": 128,
         },
         "messages": [
             {
@@ -284,7 +413,7 @@ def _parse_fact_list(value, field_name):
     return tuple(proposals)
 
 
-def parse_interpretation_response(response):
+def parse_interpretation_response(response, *, resolved_entities=None):
     if not isinstance(response, dict):
         raise ValueError("Resposta do interpreter invalida.")
 
@@ -303,6 +432,23 @@ def parse_interpretation_response(response):
         data = json.loads(content)
     except (json.JSONDecodeError, TypeError) as exc:
         raise ValueError("Interpreter nao retornou JSON valido.") from exc
+
+    if isinstance(data, dict) and set(data) == WIRE_INTERPRETATION_FIELDS:
+        try:
+            data = {
+                "relation": _WIRE_TO_RELATION[data["r"]],
+                "domain": _WIRE_TO_DOMAIN.get(data["d"], data["d"]),
+                "goal": data["g"],
+                "intent": _WIRE_TO_INTENT.get(data["i"], data["i"]),
+                "entities": data["e"],
+                "facts_added": data["a"],
+                "facts_corrected": data["c"],
+                "answered_pending_question": data["q"],
+                "semantic_signal": _WIRE_TO_SIGNAL.get(data["s"], data["s"]),
+                "understood_topic": data["t"],
+            }
+        except KeyError as exc:
+            raise ValueError("Codigo compacto fora do contrato.") from exc
 
     _require_exact_fields(
         data,
@@ -347,6 +493,18 @@ def parse_interpretation_response(response):
         not isinstance(key, str) or not isinstance(value, str) for key, value in entities.items()
     ):
         raise ValueError("Entidades interpretadas devem ser strings.")
+
+    if resolved_entities is not None:
+        if not isinstance(resolved_entities, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in resolved_entities.items()
+        ):
+            raise ValueError("Entidades resolvidas pelo backend devem ser strings.")
+
+        entities = {
+            **entities,
+            **{key: value.strip() for key, value in resolved_entities.items() if value.strip()},
+        }
 
     return ConversationDelta(
         relation=TurnRelation(relation),

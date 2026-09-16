@@ -34,7 +34,7 @@ class FakeOllamaClient:
         properties = payload.get("format", {}).get("properties", {})
         text = payload["messages"][-1]["content"].casefold()
 
-        if "relation" in properties:
+        if "relation" in properties or "r" in properties:
             self.classifier_calls.append(payload)
 
             relation = "CONTINUATION" if text.strip(" .!?") in {"cdm", "funcionou"} else "NEW_GOAL"
@@ -122,6 +122,29 @@ class FakeOllamaClient:
                     "answered_pending_question": False,
                     "semantic_signal": "NONE",
                     "understood_topic": "problema de TI",
+                }
+
+            if "r" in properties:
+                relation_codes = {
+                    "NEW_GOAL": "N",
+                    "CONTINUATION": "C",
+                    "CORRECTION": "R",
+                    "ANSWER_TO_PENDING": "AP",
+                    "CONFIRMATION": "Y",
+                    "NEGATION": "X",
+                    "TOPIC_SWITCH": "TS",
+                }
+                result = {
+                    "r": relation_codes[result["relation"]],
+                    "d": result["domain"],
+                    "g": result["goal"],
+                    "i": result["intent"],
+                    "e": result["entities"],
+                    "a": result["facts_added"],
+                    "c": result["facts_corrected"],
+                    "q": result["answered_pending_question"],
+                    "s": result["semantic_signal"],
+                    "t": result["understood_topic"],
                 }
 
             return {
@@ -289,10 +312,15 @@ def test_local_ai_does_not_use_text_fallback_when_semantic_signal_is_none(monkey
             response = super().chat(payload)
             properties = payload.get("format", {}).get("properties", {})
             text = payload["messages"][-1]["content"].casefold()
-            if "relation" in properties and "funcionou" in text:
+
+            if ("relation" in properties or "r" in properties) and "funcionou" in text:
                 data = json.loads(response["message"]["content"])
-                data["semantic_signal"] = "NONE"
+                if "r" in properties:
+                    data["s"] = "NONE"
+                else:
+                    data["semantic_signal"] = "NONE"
                 response["message"]["content"] = json.dumps(data)
+
             return response
 
     FakeOllamaClient.instances.clear()
@@ -331,17 +359,43 @@ def test_local_ai_m365_semantic_failure_hands_off_to_specialist(monkeypatch) -> 
             response = super().chat(payload)
             properties = payload.get("format", {}).get("properties", {})
             text = payload["messages"][-1]["content"].casefold()
-            if "relation" in properties and "nao resolveu" in text:
+
+            if ("relation" in properties or "r" in properties) and "nao resolveu" in text:
                 data = json.loads(response["message"]["content"])
-                data["relation"] = "CONTINUATION"
-                data["domain"] = "IT_SUPPORT"
-                data["goal"] = "DIAGNOSE_ISSUE"
-                data["intent"] = "PROBLEMA_ACESSO"
-                data["entities"] = {"system": "", "product": ""}
-                data["answered_pending_question"] = True
-                data["semantic_signal"] = "PROCEDURE_FAILED"
-                data["understood_topic"] = "resultado do procedimento"
+
+                if "r" in properties:
+                    data.update(
+                        {
+                            "r": "C",
+                            "d": "IT_SUPPORT",
+                            "g": "DIAGNOSE_ISSUE",
+                            "i": "PROBLEMA_ACESSO",
+                            "e": {"system": "", "product": ""},
+                            "a": [],
+                            "c": [],
+                            "q": True,
+                            "s": "PROCEDURE_FAILED",
+                            "t": "resultado do procedimento",
+                        }
+                    )
+                else:
+                    data.update(
+                        {
+                            "relation": "CONTINUATION",
+                            "domain": "IT_SUPPORT",
+                            "goal": "DIAGNOSE_ISSUE",
+                            "intent": "PROBLEMA_ACESSO",
+                            "entities": {"system": "", "product": ""},
+                            "facts_added": [],
+                            "facts_corrected": [],
+                            "answered_pending_question": True,
+                            "semantic_signal": "PROCEDURE_FAILED",
+                            "understood_topic": "resultado do procedimento",
+                        }
+                    )
+
                 response["message"]["content"] = json.dumps(data)
+
             return response
 
     FakeOllamaClient.instances.clear()
@@ -523,18 +577,40 @@ def test_local_ai_short_answer_to_pending_m365_question_reuses_context(
             properties = payload.get("format", {}).get("properties", {})
             text = payload["messages"][-1]["content"].casefold()
 
-            if "relation" in properties and "senha esta errada" in text:
+            if ("relation" in properties or "r" in properties) and "senha esta errada" in text:
                 data = json.loads(response["message"]["content"])
-                data["relation"] = "ANSWER_TO_PENDING"
-                data["domain"] = "IT_SUPPORT"
-                data["goal"] = "DIAGNOSE_ISSUE"
-                data["intent"] = "PROBLEMA_ACESSO"
-                data["entities"] = {"system": "", "product": ""}
-                data["facts_added"] = []
-                data["facts_corrected"] = []
-                data["answered_pending_question"] = True
-                data["semantic_signal"] = "PASSWORD_EVIDENCE"
-                data["understood_topic"] = "evidencia de senha incorreta"
+
+                if "r" in properties:
+                    data.update(
+                        {
+                            "r": "AP",
+                            "d": "IT_SUPPORT",
+                            "g": "DIAGNOSE_ISSUE",
+                            "i": "PROBLEMA_ACESSO",
+                            "e": {"system": "", "product": ""},
+                            "a": [],
+                            "c": [],
+                            "q": True,
+                            "s": "PASSWORD_EVIDENCE",
+                            "t": "evidencia de senha incorreta",
+                        }
+                    )
+                else:
+                    data.update(
+                        {
+                            "relation": "ANSWER_TO_PENDING",
+                            "domain": "IT_SUPPORT",
+                            "goal": "DIAGNOSE_ISSUE",
+                            "intent": "PROBLEMA_ACESSO",
+                            "entities": {"system": "", "product": ""},
+                            "facts_added": [],
+                            "facts_corrected": [],
+                            "answered_pending_question": True,
+                            "semantic_signal": "PASSWORD_EVIDENCE",
+                            "understood_topic": "evidencia de senha incorreta",
+                        }
+                    )
+
                 response["message"]["content"] = json.dumps(data)
 
             return response
@@ -684,3 +760,21 @@ def test_browser_source_never_targets_ollama_or_fake_cdm() -> None:
     assert "11434" not in source
     assert "fake cdm" not in source
     assert "phase12-demo-service-token" not in source
+
+
+def test_local_ai_m365_guidance_exposes_official_url_without_internal_terms(monkeypatch) -> None:
+    runtime = _local_runtime(monkeypatch)
+    try:
+        result = runtime.send_message(
+            "pedro-miranda",
+            "Esqueci minha senha do Microsoft 365.",
+        )
+
+        procedure_url = "https://mysignins.microsoft.com/security-info/password/change"
+
+        assert result["status"] == "KNOWLEDGE_FOUND"
+        assert result.get("procedure_url") == procedure_url
+        assert procedure_url in result["assistant_message"]
+        assert "backend" not in result["assistant_message"].casefold()
+    finally:
+        runtime.close()

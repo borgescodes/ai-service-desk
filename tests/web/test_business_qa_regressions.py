@@ -29,7 +29,7 @@ class AccessGateway:
         properties = payload["format"]["properties"]
         text = payload["messages"][-1]["content"].casefold()
 
-        if "relation" in properties:
+        if "relation" in properties or "r" in properties:
             if "teams" in text:
                 result = {
                     "relation": "ANSWER_TO_PENDING",
@@ -120,6 +120,29 @@ class AccessGateway:
                     "answered_pending_question": False,
                     "semantic_signal": "NONE",
                     "understood_topic": "problema de TI",
+                }
+
+            if "r" in properties:
+                relation_codes = {
+                    "NEW_GOAL": "N",
+                    "CONTINUATION": "C",
+                    "CORRECTION": "R",
+                    "ANSWER_TO_PENDING": "AP",
+                    "CONFIRMATION": "Y",
+                    "NEGATION": "X",
+                    "TOPIC_SWITCH": "TS",
+                }
+                result = {
+                    "r": relation_codes[result["relation"]],
+                    "d": result["domain"],
+                    "g": result["goal"],
+                    "i": result["intent"],
+                    "e": result["entities"],
+                    "a": result["facts_added"],
+                    "c": result["facts_corrected"],
+                    "q": result["answered_pending_question"],
+                    "s": result["semantic_signal"],
+                    "t": result["understood_topic"],
                 }
 
             return {

@@ -318,7 +318,7 @@ class CountingGateway:
         properties = payload.get("format", {}).get("properties", {})
         message = payload["messages"][-1]["content"].casefold()
 
-        if "relation" in properties:
+        if "relation" in properties or "r" in properties:
             if "bom dia" in message:
                 result = {
                     "relation": "NEW_GOAL",
@@ -359,6 +359,33 @@ class CountingGateway:
         else:
             raise AssertionError(f"Unexpected schema: {properties}")
 
+        if (
+            "r" in properties
+            and set(result) != {"assistant_message"}
+            and set(result) != {"intro", "outro"}
+        ):
+            relation_codes = {
+                "NEW_GOAL": "N",
+                "CONTINUATION": "C",
+                "CORRECTION": "R",
+                "ANSWER_TO_PENDING": "AP",
+                "CONFIRMATION": "Y",
+                "NEGATION": "X",
+                "TOPIC_SWITCH": "TS",
+            }
+            result = {
+                "r": relation_codes[result["relation"]],
+                "d": result["domain"],
+                "g": result["goal"],
+                "i": result["intent"],
+                "e": result["entities"],
+                "a": result["facts_added"],
+                "c": result["facts_corrected"],
+                "q": result["answered_pending_question"],
+                "s": result["semantic_signal"],
+                "t": result["understood_topic"],
+            }
+
         return {
             "message": {"content": json.dumps(result)},
             "done": True,
@@ -381,7 +408,7 @@ def test_local_ai_uses_only_interpreter_and_writer_calls(monkeypatch, message):
 
         assert result["assistant_message"]
         assert len(gateway.payloads) == 2
-        assert "relation" in gateway.payloads[0]["format"]["properties"]
+        assert "r" in gateway.payloads[0]["format"]["properties"]
         assert "assistant_message" in gateway.payloads[1]["format"]["properties"]
     finally:
         runtime.close()

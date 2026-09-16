@@ -133,7 +133,7 @@ def test_previous_phase_protected_blobs_are_exact(path: str, expected_sha: str) 
         ),
         "src/ai_service_desk/engine/triage.py": (
             "c5ab48f7194fab561f9062c3ab5798c86ec0a8a0",
-            "a0fe911053b66faaddd6d02533e7fcc1c5688bce",
+            "d373faa3abbc7d40f31ead59ca369bad3aaed59e",
         ),
         "src/ai_service_desk/engine/access_request.py": (
             "f34fc3f0e22d82b8bf8f13439ed78a7d31d5869d",

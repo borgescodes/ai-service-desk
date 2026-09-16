@@ -386,7 +386,19 @@ class DemoRuntime:
         ok = False
         try:
             response = self._ollama_client.chat(payload)
-            delta = parse_interpretation_response(response)
+
+            systems = self.business_vocabulary.systems(message)
+            resolved_entities = self.business_vocabulary.entities(message)
+            if len(systems) == 1:
+                resolved_entities = {
+                    "system": systems[0],
+                    **resolved_entities,
+                }
+
+            delta = parse_interpretation_response(
+                response,
+                resolved_entities=resolved_entities,
+            )
             ok = True
             return delta
         except OllamaError as exc:
@@ -512,11 +524,16 @@ class DemoRuntime:
 
         support_signal = _LOCAL_SUPPORT_SIGNALS.get(delta.semantic_signal)
         active_system = context.dialogue.system.value or delta.entities.get("system", "")
+        explicit_systems = self.business_vocabulary.systems(message)
+        explicit_other_system = bool(
+            (active_system and active_system != "OFFICE 365")
+            or any(system != "OFFICE 365" for system in explicit_systems)
+        )
         support_turn = self.support_state.handle(
             identity_id,
             message,
             interpreted_signal=support_signal,
-            explicit_other_system=bool(active_system and active_system != "OFFICE 365"),
+            explicit_other_system=explicit_other_system,
             allow_text_fallback=False,
         )
 
@@ -572,6 +589,7 @@ class DemoRuntime:
                 answer=result["answer"],
                 url="https://mysignins.microsoft.com/security-info/password/change",
             )
+            result["procedure_url"] = procedure.url
             self.support_state.record_guidance(
                 identity_id,
                 procedure,

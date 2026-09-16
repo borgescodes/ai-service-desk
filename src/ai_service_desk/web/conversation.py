@@ -130,6 +130,19 @@ _ACCESS_GRANTED_CLAIM = re.compile(
 )
 
 
+_INTERNAL_ARCHITECTURE_CLAIM = re.compile(
+    r"\b(?:backend|grounding|handler|policy engine)\b",
+    re.I,
+)
+
+_INVENTED_CAPABILITY_CLAIM = re.compile(
+    r"\b(?:tenho|temos) acesso ao sistema\b"
+    r"|"
+    r"\bt.cnico\b.{0,48}\b(?:est.|ficou) pronto\b",
+    re.I,
+)
+
+
 def _has_invalid_operational_claim(text, grounding):
     allowed = {value.casefold() for value in grounding.allowed_operational_values}
 
@@ -150,6 +163,12 @@ def _has_invalid_operational_claim(text, grounding):
         "access_granted",
         "granted",
     }.intersection(allowed):
+        return True
+
+    if _INTERNAL_ARCHITECTURE_CLAIM.search(text):
+        return True
+
+    if _INVENTED_CAPABILITY_CLAIM.search(text):
         return True
 
     return False
@@ -187,14 +206,16 @@ def _generate_natural_response(message, context, grounding, chat):
     ]
 
     instruction = (
-        "Você é Jup, agente conversacional de suporte de TI. "
-        "Escreva de forma natural e contextual, sem usar respostas de catálogo. "
-        "O backend é a única autoridade operacional. "
-        "Nunca preencha fatos operacionais ausentes usando conhecimento do modelo.\n\n"
+        "Voce e Jup, agente conversacional de suporte de TI. "
+        "Escreva de forma natural e contextual, sem usar respostas de catalogo. "
+        "Use somente os fatos operacionais confirmados fornecidos nesta instrucao. "
+        "Nunca preencha fatos operacionais ausentes usando conhecimento do modelo. "
+        "Nunca exponha componentes internos, mecanismos de decisao ou "
+        "detalhes de implementacao.\n\n"
         f"Objetivo da resposta: {grounding.response_goal}\n"
         f"Fatos confirmados: {list(grounding.facts)}\n"
-        f"Afirmações proibidas: {list(grounding.forbidden_claims)}\n"
-        f"Informações obrigatórias: {list(grounding.required_information)}\n"
+        f"Afirmacoes proibidas: {list(grounding.forbidden_claims)}\n"
+        f"Informacoes obrigatorias: {list(grounding.required_information)}\n"
         f"Turnos recentes: {recent_turns}"
     )
 
