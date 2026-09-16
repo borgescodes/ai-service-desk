@@ -460,15 +460,41 @@ def test_local_ai_metrics_count_calls_turns_and_never_store_content(monkeypatch)
             "turns",
         }
         assert metrics["startup_ms"] >= 0
-        assert metrics["total_calls"] == 1
+        assert metrics["total_calls"] == 2
         assert metrics["failed_calls"] == 0
-        assert len(metrics["calls"]) == 1
-        assert metrics["calls"][0]["duration_ms"] >= 0
-        assert metrics["calls"][0]["ok"] is True
-        assert metrics["turns"][-1]["call_count"] == 1
-        assert metrics["turns"][-1]["duration_ms"] >= 0
+        assert len(metrics["calls"]) == 2
+        assert all(call["duration_ms"] >= 0 for call in metrics["calls"])
+        assert all(call["ok"] is True for call in metrics["calls"])
+        assert metrics["turns"][-1]["qwen_call_count"] == 2
+        assert metrics["turns"][-1]["total_turn_ms"] >= 0
         assert marker not in json.dumps(metrics, ensure_ascii=False)
         assert "messages" not in json.dumps(metrics, ensure_ascii=False).casefold()
+    finally:
+        runtime.close()
+
+
+def test_local_ai_metrics_expose_stage_timings_without_content(monkeypatch):
+    runtime = _runtime(monkeypatch, ConversationalGateway)
+    try:
+        marker = "SEGREDO-NAO-TELEMETRIZAR-84721"
+        runtime.send_message("pedro-miranda", f"Meu computador trava. {marker}")
+
+        turn = runtime.local_ai_metrics()["turns"][-1]
+
+        assert set(turn) == {
+            "interpretation_ms",
+            "backend_ms",
+            "retrieval_ms",
+            "generation_ms",
+            "total_turn_ms",
+            "qwen_call_count",
+        }
+        assert turn["qwen_call_count"] == 2
+        assert all(turn[key] >= 0 for key in turn if key.endswith("_ms"))
+
+        serialized = json.dumps(runtime.local_ai_metrics(), ensure_ascii=False)
+        assert marker not in serialized
+        assert "messages" not in serialized.casefold()
     finally:
         runtime.close()
 
@@ -484,7 +510,7 @@ def test_local_ai_social_and_out_of_scope_use_interpreter_then_writer(monkeypatc
         assert len(gateway.payloads) == 2
         assert "relation" in gateway.payloads[0]["format"]["properties"]
         assert "assistant_message" in gateway.payloads[1]["format"]["properties"]
-        assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 1
+        assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
 
         gateway.payloads.clear()
         outside = runtime.send_message("pedro-miranda", "Como posso fazer bolo?")
@@ -492,7 +518,7 @@ def test_local_ai_social_and_out_of_scope_use_interpreter_then_writer(monkeypatc
         assert len(gateway.payloads) == 2
         assert "relation" in gateway.payloads[0]["format"]["properties"]
         assert "assistant_message" in gateway.payloads[1]["format"]["properties"]
-        assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 1
+        assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
     finally:
         runtime.close()
 
@@ -508,7 +534,7 @@ def test_local_ai_uses_interpreter_and_writer_for_operational_results(monkeypatc
         assert len(gateway.payloads) == 2
         assert "relation" in gateway.payloads[0]["format"]["properties"]
         assert "assistant_message" in gateway.payloads[1]["format"]["properties"]
-        assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 1
+        assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
 
         runtime.reset()
         gateway.payloads.clear()
@@ -521,7 +547,7 @@ def test_local_ai_uses_interpreter_and_writer_for_operational_results(monkeypatc
         assert len(gateway.payloads) == 2
         assert "relation" in gateway.payloads[0]["format"]["properties"]
         assert set(gateway.payloads[1]["format"]["properties"]) == {"intro", "outro"}
-        assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 1
+        assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
     finally:
         runtime.close()
 

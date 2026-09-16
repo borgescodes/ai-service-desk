@@ -1,5 +1,7 @@
 """Evidence gates for the synthetic Phase 12 knowledge set."""
 
+from time import perf_counter
+
 from ai_service_desk.engine.knowledge_retrieval import KnowledgeEngine
 from ai_service_desk.engine.validation import normalize_text
 
@@ -12,6 +14,16 @@ class DemoKnowledgeEngine(KnowledgeEngine):
     """Keep synthetic similarity matches behind explicit user evidence."""
 
     def search_classified(self, text, classification) -> dict:
+        started = perf_counter()
+        try:
+            return self._search_classified_impl(text, classification)
+        finally:
+            self.last_search_ms = max(
+                0.0,
+                (perf_counter() - started) * 1000,
+            )
+
+    def _search_classified_impl(self, text, classification) -> dict:
         retrieval_text = text
         if classification.system == "CDM" and classification.intent == "PROBLEMA_ACESSO":
             retrieval_text = f"{text} acesso CDM solicitar materiais revenda"

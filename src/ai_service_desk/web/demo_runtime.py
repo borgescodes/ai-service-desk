@@ -455,11 +455,33 @@ class DemoRuntime:
                 "Cliente LOCAL_AI não está disponível.",
             )
 
+        def tracked_chat(payload):
+            started = perf_counter()
+            self._local_ai_total_calls += 1
+            ok = False
+            try:
+                response = self._ollama_client.chat(payload)
+                ok = True
+                return response
+            finally:
+                duration_ms = max(
+                    0.0,
+                    (perf_counter() - started) * 1000,
+                )
+                if not ok:
+                    self._local_ai_failed_calls += 1
+                self._local_ai_calls.append(
+                    {
+                        "duration_ms": duration_ms,
+                        "ok": ok,
+                    }
+                )
+
         return generate_natural_response(
             message,
             context,
             grounding,
-            self._ollama_client.chat,
+            tracked_chat,
         )
 
     def _resolve_local_ai_turn(
@@ -588,7 +610,13 @@ class DemoRuntime:
         }
         return result
 
-    def _send_local_ai_message(self, identity_id: str, message: str) -> dict:
+    def _send_local_ai_message(
+        self,
+        identity_id: str,
+        message: str,
+        *,
+        telemetry: dict | None = None,
+    ) -> dict:
         requester = self._requester(identity_id)
 
         if not isinstance(message, str) or not message.strip():
@@ -599,10 +627,18 @@ class DemoRuntime:
             requester,
         )
 
-        delta = self._interpret_conversation(
-            context_before,
-            message,
-        )
+        interpretation_started = perf_counter()
+        try:
+            delta = self._interpret_conversation(
+                context_before,
+                message,
+            )
+        finally:
+            if telemetry is not None:
+                telemetry["interpretation_ms"] = max(
+                    0.0,
+                    (perf_counter() - interpretation_started) * 1000,
+                )
 
         context_after_delta = reduce_conversation_context(
             context_before,
@@ -610,13 +646,31 @@ class DemoRuntime:
             user_message=message,
         )
 
-        result = self._resolve_local_ai_turn(
-            identity_id,
-            requester,
-            message,
-            context_after_delta,
-            delta,
-        )
+        self.knowledge_engine.last_search_ms = 0.0
+        backend_started = perf_counter()
+        try:
+            result = self._resolve_local_ai_turn(
+                identity_id,
+                requester,
+                message,
+                context_after_delta,
+                delta,
+            )
+        finally:
+            backend_total_ms = max(
+                0.0,
+                (perf_counter() - backend_started) * 1000,
+            )
+            retrieval_ms = max(
+                0.0,
+                float(getattr(self.knowledge_engine, "last_search_ms", 0.0)),
+            )
+            if telemetry is not None:
+                telemetry["retrieval_ms"] = retrieval_ms
+                telemetry["backend_ms"] = max(
+                    0.0,
+                    backend_total_ms - retrieval_ms,
+                )
 
         context_after_backend = self._apply_result_to_context(
             context_after_delta,
@@ -629,11 +683,19 @@ class DemoRuntime:
             delta,
         )
 
-        assistant_message = self._generate_response(
-            message,
-            context_after_backend,
-            grounding,
-        )
+        generation_started = perf_counter()
+        try:
+            assistant_message = self._generate_response(
+                message,
+                context_after_backend,
+                grounding,
+            )
+        finally:
+            if telemetry is not None:
+                telemetry["generation_ms"] = max(
+                    0.0,
+                    (perf_counter() - generation_started) * 1000,
+                )
 
         context_final = append_turn(
             context_after_backend,
@@ -736,15 +798,25 @@ class DemoRuntime:
 
         before_calls = self._local_ai_total_calls
         started = perf_counter()
+        turn = {
+            "interpretation_ms": 0.0,
+            "backend_ms": 0.0,
+            "retrieval_ms": 0.0,
+            "generation_ms": 0.0,
+        }
         try:
-            return self._send_local_ai_message(identity_id, message)
-        finally:
-            self._local_ai_turns.append(
-                {
-                    "call_count": self._local_ai_total_calls - before_calls,
-                    "duration_ms": max(0.0, (perf_counter() - started) * 1000),
-                }
+            return self._send_local_ai_message(
+                identity_id,
+                message,
+                telemetry=turn,
             )
+        finally:
+            turn["total_turn_ms"] = max(
+                0.0,
+                (perf_counter() - started) * 1000,
+            )
+            turn["qwen_call_count"] = self._local_ai_total_calls - before_calls
+            self._local_ai_turns.append(turn)
 
     def _send_message_impl(self, identity_id: str, message: str) -> dict:
         requester = self._requester(identity_id)
