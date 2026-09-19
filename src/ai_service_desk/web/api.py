@@ -13,7 +13,7 @@ from ai_service_desk.engine.request_lifecycle import (
     InvalidStateTransitionError,
     RequestNotFoundError,
 )
-from ai_service_desk.web.demo_identity import IdentityNotFoundError
+from ai_service_desk.web.demo_identity import IdentityConfigurationError, IdentityNotFoundError
 from ai_service_desk.web.demo_runtime import DEFAULT_DEMO_MODE, DemoRuntime
 from ai_service_desk.web.errors import WebDemoError
 
@@ -30,6 +30,13 @@ class MessageBody(BaseModel):
 
 class DecisionBody(BaseModel):
     expected_version: int = Field(gt=0)
+
+
+class DemoRequesterBody(BaseModel):
+    name: str = Field(max_length=180)
+    email: str = Field(max_length=320)
+    job_title: str = Field(max_length=180)
+    area: str = Field(max_length=180)
 
 
 def _error(status_code: int, code: str, message: str) -> JSONResponse:
@@ -81,6 +88,10 @@ def create_app(
     async def identity_not_found_handler(_request: Request, exc: IdentityNotFoundError):
         return _error(401, exc.code, "Identidade de demonstração não reconhecida.")
 
+    @app.exception_handler(IdentityConfigurationError)
+    async def identity_configuration_handler(_request: Request, exc: IdentityConfigurationError):
+        return _error(422, exc.code, str(exc))
+
     @app.exception_handler(WebDemoError)
     async def web_demo_error_handler(_request: Request, exc: WebDemoError):
         if exc.code == "IDENTITY_REQUIRED":
@@ -130,7 +141,7 @@ def create_app(
         if host not in _LOOPBACK_HOSTS:
             raise WebDemoError(
                 "LOOPBACK_REQUIRED",
-                "Reset da demonstração exige acesso local.",
+                "Esta ação de demonstração exige acesso local.",
             )
 
     @app.get("/api/health")
@@ -140,6 +151,19 @@ def create_app(
     @app.get("/api/session/identities")
     def identities():
         return app.state.runtime.identity_provider.public_identities()
+
+    if demo_mode:
+
+        @app.post("/api/session/identities", status_code=201)
+        def configure_identity(request: Request, body: DemoRequesterBody):
+            require_loopback(request)
+            identity = app.state.runtime.identity_provider.configure_requester(
+                name=body.name,
+                email=body.email,
+                job_title=body.job_title,
+                area=body.area,
+            )
+            return app.state.runtime.identity_provider.public_identity(identity)
 
     @app.get("/api/faq")
     def faq():

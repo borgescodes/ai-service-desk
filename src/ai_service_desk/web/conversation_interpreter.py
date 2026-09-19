@@ -216,6 +216,7 @@ def _trusted_summary(context):
         "name": trusted.name,
         "email": trusted.email,
         "area": trusted.area,
+        "job_title": trusted.job_title,
         "role": trusted.role,
     }
 

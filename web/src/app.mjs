@@ -45,6 +45,7 @@ let state = {
   faqCategory: '',
   lastBackendStatus: null,
   messageError: null,
+  identityConfigError: null,
   messages: [],
   understood: null,
   loading: false,
@@ -110,9 +111,10 @@ function render() {
   const focused = document.activeElement?.id === 'jup-message';
   app.innerHTML = `${renderAppHeader({
     activeRoute: state.route,
-    identities: state.identities, identity: selectedIdentity() ?? {}, pending: Boolean(state.pendingAction),
+    identities: state.identities, identity: selectedIdentity() ?? {}, pending: state.pendingAction || false,
     operational: ['approvals', 'prevention'].includes(state.route),
     operationPath: operationPath(),
+    identityError: state.identityConfigError,
   })}<main id="main-content" class="main-content main-content--${['solutions', 'solution'].includes(state.route) ? 'public' : 'workspace'}" tabindex="-1">${renderRoute()}</main>`;
   app.setAttribute('aria-busy', String(state.loading));
   bindInteractions();
@@ -152,7 +154,12 @@ function friendlyError(error) {
 }
 
 function syncRouteIdentity() {
-  const desiredIdentityId = demoIdentityForPath(window.location.pathname);
+  const routeIdentityId = demoIdentityForPath(window.location.pathname);
+  const currentIdentity = selectedIdentity();
+  const desiredIdentityId = ['solutions', 'solution', 'jup', 'requests'].includes(state.route)
+    && currentIdentity?.role === 'REQUESTER'
+    ? currentIdentity.identity_id
+    : routeIdentityId;
   if (!state.identities.some((item) => item.identity_id === desiredIdentityId)) {
     throw new Error('Identidade de demonstração esperada não está disponível.');
   }
@@ -447,15 +454,51 @@ async function newChat() {
   }
 }
 
+async function configureDemoIdentity(form) {
+  if (state.pendingAction) return;
+  const formData = new FormData(form);
+  const body = Object.fromEntries(['name', 'email', 'job_title', 'area'].map(key => [key, formData.get(key)]));
+  state.pendingAction = 'identity';
+  state.identityConfigError = null;
+  render();
+  try {
+    const configured = await apiRequest('/api/session/identities', { method: 'POST', body });
+    identityRevision += 1;
+    state = resetConversation(selectIdentity({
+      ...state,
+      identities: [...state.identities, configured],
+    }, configured.identity_id));
+    state.identityConfigError = null;
+    renderedMessageCount = 0;
+    welcomeEntry.reset();
+    await navigate('/jup');
+  } catch (error) {
+    state.pendingAction = null;
+    state.identityConfigError = friendlyError(error).message;
+    render();
+  }
+}
+
 function bindInteractions() {
   bindRouteLinks(app);
   app.querySelector('[data-action="new-chat"]')?.addEventListener('click', newChat);
+  app.querySelector('#demo-identity-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    void configureDemoIdentity(event.currentTarget);
+  });
   app.querySelectorAll('[data-persona]').forEach(button => {
     button.addEventListener('click', async () => {
       if (state.pendingAction) return;
       const identity = state.identities.find(item => item.identity_id === button.dataset.persona);
       const path = personaPath(identity);
-      if (path) await navigate(path);
+      if (!path) return;
+      if (identity?.role === 'REQUESTER' && identity.identity_id !== state.identityId) {
+        identityRevision += 1;
+        state = resetConversation(selectIdentity(state, identity.identity_id));
+        renderedMessageCount = 0;
+        welcomeEntry.reset();
+      }
+      await navigate(path);
     });
   });
   app.querySelectorAll('[data-category]').forEach(button => {

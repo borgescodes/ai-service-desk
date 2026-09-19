@@ -4,9 +4,10 @@ import { readFileSync } from 'node:fs';
 
 const appSource = readFileSync(new URL('../src/app.mjs', import.meta.url), 'utf8');
 
-test('public identity is route controlled instead of a visible persisted selector', () => {
+test('configured identity stays backend controlled without browser persistence', () => {
   assert.doesNotMatch(appSource, /jup-demo-identity/);
-  assert.doesNotMatch(appSource, /#demo-identity/);
+  assert.doesNotMatch(appSource, /localStorage|sessionStorage/);
+  assert.match(appSource, /api\/session\/identities/);
 });
 
 import { renderAppHeader, renderJupWorkspace } from '../src/components.mjs';
@@ -28,7 +29,7 @@ test('empty Jup workspace is concise and task-first', () => {
     loading: false,
     sourceContext: null,
   });
-  assert.match(html, /Olá, eu sou o/);
+  assert.match(html, /Olá, <strong>Pedro<\/strong>! Como posso ajudar\?/);
   assert.match(html, /Digite sua mensagem aqui/);
   assert.doesNotMatch(html, /Eu organizo o contexto|O que entendi|Contexto estruturado/i);
 });

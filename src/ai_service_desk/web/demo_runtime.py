@@ -366,6 +366,7 @@ class DemoRuntime:
             requester.email,
             requester.area,
             identity.role,
+            requester.job_title,
         )
 
     def _interpret_conversation(self, context, message):

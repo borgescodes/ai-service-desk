@@ -6,25 +6,33 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 let serial = 0;
 async function boot(path, respond) {
   const events = {};
+  const identityValues = { name: 'Ana da Silva', email: 'ana.silva@juparana.com.br', job_title: 'Analista UBS', area: 'UBS' };
+  const identityForm = { addEventListener(name, handler) { events.configureIdentity = handler; } };
   const newChat = { addEventListener(name, handler) { events.newChat = handler; } };
   const queueRow = { dataset: { requestId: 'R-1' }, addEventListener(name, handler) { events.selectApproval = handler; } };
   const approve = { addEventListener(name, handler) { events.approve = handler; } };
   const persona = { dataset: { persona: 'tecnico-cdm' }, addEventListener(name, handler) { events.persona = handler; } };
   const field = { value: '', addEventListener() {} };
   const form = { addEventListener(name, handler) { events[name] = handler; }, querySelector() { return field; } };
-  const root = { innerHTML: '', setAttribute() {}, querySelectorAll(selector) { return selector === '.queue-row[data-request-id]' ? [queueRow] : selector === '[data-persona]' ? [persona] : []; }, querySelector(selector) { return selector === '[data-action="approve"]' ? approve : selector === '[data-action="new-chat"]' ? newChat : selector === '#jup-form' ? form : selector === '#jup-message' ? field : null; } };
+  const root = { innerHTML: '', setAttribute() {}, querySelectorAll(selector) { return selector === '.queue-row[data-request-id]' ? [queueRow] : selector === '[data-persona]' ? [persona] : []; }, querySelector(selector) { return selector === '[data-action="approve"]' ? approve : selector === '[data-action="new-chat"]' ? newChat : selector === '#demo-identity-form' ? identityForm : selector === '#jup-form' ? form : selector === '#jup-message' ? field : null; } };
   const win = { location: new URL(`http://demo${path}`), addEventListener(name, fn) { events[name] = fn; } };
   win.history = { pushState(_a, _b, path) { win.location = new URL(path, win.location); } };
   globalThis.document = { querySelector(selector) { return selector === '#app' ? root : null; } };
   globalThis.window = win;
+  globalThis.FormData = class { get(name) { return identityValues[name]; } };
   globalThis.fetch = async (url, options) => {
-    const payload = url === '/api/session/identities'
-      ? ['pedro-miranda', 'tecnico-cdm', 'tecnico-m365', 'tecnico-geral'].map(identity_id => ({ identity_id }))
+    const payload = url === '/api/session/identities' && (!options || options.method === 'GET')
+      ? [
+          { identity_id: 'pedro-miranda', name: 'Fulano de Tal', email: 'fulano.tal@juparana.com.br', job_title: 'Colaborador', area: 'Revenda - Matriz', role: 'REQUESTER' },
+          { identity_id: 'tecnico-cdm', name: 'Técnico CDM', role: 'TECHNICIAN' },
+          { identity_id: 'tecnico-m365', name: 'Técnico Microsoft 365', role: 'TECHNICIAN' },
+          { identity_id: 'tecnico-geral', name: 'Técnico Geral', role: 'TECHNICIAN' },
+        ]
       : await respond(url, options);
     return new Response(JSON.stringify(payload), { status: 200 });
   };
   await import(`../src/app.mjs?test=${++serial}`); await tick();
-  return { root, field, async approve() { await events.approve(); await tick(); }, async selectApproval() { events.selectApproval(); await tick(); }, async reset() { await events.newChat?.(); await tick(); }, async switchPersona() { await events.persona?.(); await tick(); }, async go(path) { win.location = new URL(`http://demo${path}`); events.popstate(); await tick(); }, async send(text) { field.value = text; events.submit({ preventDefault() {}, currentTarget: form }); await tick(); } };
+  return { root, field, async approve() { await events.approve(); await tick(); }, async selectApproval() { events.selectApproval(); await tick(); }, async reset() { await events.newChat?.(); await tick(); }, async configureIdentity() { events.configureIdentity?.({ preventDefault() {}, currentTarget: identityForm }); await tick(); }, async switchPersona() { await events.persona?.(); await tick(); }, async go(path) { win.location = new URL(`http://demo${path}`); events.popstate(); await tick(); }, async send(text) { field.value = text; events.submit({ preventDefault() {}, currentTarget: form }); await tick(); } };
 }
 
 test('late FAQ response cannot replace an article after navigation', async () => {
@@ -78,6 +86,33 @@ test('persona control loads the assigned technician queue with backend identity'
   const queue = calls.find(([url]) => url === '/api/operations/approvals');
   assert.ok(queue);
   assert.equal(queue[1].headers['X-Demo-Identity'], 'tecnico-cdm');
+});
+
+test('demo identity form creates and activates a trusted requester', async () => {
+  const calls = [];
+  const configured = { identity_id: 'demo-requester-1', name: 'Ana da Silva', email: 'ana.silva@juparana.com.br', job_title: 'Analista UBS', area: 'UBS', role: 'REQUESTER' };
+  const ui = await boot('/jup', (url, options) => {
+    calls.push([url, options]);
+    if (url === '/api/session/identities') return configured;
+    return {};
+  });
+
+  await ui.configureIdentity();
+
+  const creation = calls.find(([url]) => url === '/api/session/identities');
+  assert.ok(creation);
+  assert.deepEqual(JSON.parse(creation[1].body), {
+    name: 'Ana da Silva',
+    email: 'ana.silva@juparana.com.br',
+    job_title: 'Analista UBS',
+    area: 'UBS',
+  });
+  assert.match(ui.root.innerHTML, /Ana da Silva/);
+  assert.match(ui.root.innerHTML, /Olá, <strong>Ana<\/strong>! Como posso ajudar\?/);
+
+  await ui.reset();
+  const reset = calls.find(([url]) => url === '/api/jup/conversation/reset');
+  assert.equal(reset[1].headers['X-Demo-Identity'], 'demo-requester-1');
 });
 
 test('fast successful replies wait for bounded presentation time', async (t) => {

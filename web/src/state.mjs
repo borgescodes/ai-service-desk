@@ -31,6 +31,7 @@ export function resetConversation(state) {
 }
 
 export function personaPath(identity) {
+  if (identity?.role === 'REQUESTER') return '/jup';
   return ({ 'pedro-miranda': '/jup', 'tecnico-cdm': '/demo/operacao/cdm',
     'tecnico-m365': '/demo/operacao/m365', 'tecnico-geral': '/demo/operacao/prevention' })[identity?.identity_id] ?? null;
 }

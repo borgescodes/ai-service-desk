@@ -27,6 +27,7 @@ def m365_context():
         email="fulano.tal@juparana.com.br",
         area="Revenda - Matriz",
         role="REQUESTER",
+        job_title="Analista de Negócios",
     )
     return reduce_conversation_context(
         context,
@@ -101,6 +102,7 @@ def test_payload_contains_context_and_no_operational_authority():
         "num_ctx": 3072,
         "num_predict": 128,
     }
+    assert '"job_title": "Analista de Negócios"' in payload["messages"][0]["content"]
 
     schema = payload["format"]
     properties = schema["properties"]

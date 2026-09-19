@@ -82,6 +82,7 @@ class SessionIdentity:
     name: str
     email: str
     area: str
+    job_title: str = "Colaborador"
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,7 @@ def validate_session_identity(identity: SessionIdentity) -> None:
     _required_text(identity.name, "name", 180)
     _required_text(identity.email, "email", 320)
     _required_text(identity.area, "area", 180)
+    _required_text(identity.job_title, "job_title", 180)
 
 
 def validate_access_request_context(context: AccessRequestContext) -> None:

@@ -24,16 +24,22 @@ test('persona destinations use only supported identities returned by the provide
   assert.equal(session.personaPath({ identity_id: 'pedro-miranda' }), '/jup');
   assert.equal(session.personaPath({ identity_id: 'tecnico-cdm' }), '/demo/operacao/cdm');
   assert.equal(session.personaPath({ identity_id: 'tecnico-m365' }), '/demo/operacao/m365');
+  assert.equal(session.personaPath({ identity_id: 'demo-requester-1', role: 'REQUESTER' }), '/jup');
   assert.equal(session.personaPath({ identity_id: 'unknown' }), null);
 });
 
 test('header exposes backend persona choices and a real new-chat control', () => {
-  const identities = [{ identity_id: 'pedro-miranda', name: 'Pedro Miranda' }, { identity_id: 'tecnico-cdm', name: 'Técnico CDM' }];
+  const identities = [{ identity_id: 'pedro-miranda', name: 'Pedro Miranda', email: 'pedro@juparana.com.br', job_title: 'Analista', area: 'Revenda', role: 'REQUESTER' }, { identity_id: 'tecnico-cdm', name: 'Técnico CDM', role: 'TECHNICIAN' }];
   const html = renderAppHeader({ activeRoute: 'jup', identities, identity: identities[0] });
   assert.match(html, /Pedro Miranda/);
   assert.match(html, /data-persona="tecnico-cdm"/);
   assert.match(html, /data-action="new-chat"/);
   assert.match(html, /Acompanhar chamado/);
+  assert.match(html, /id="demo-identity-form"/);
+  assert.match(html, /Configurar usuário da demo/);
+  assert.match(html, /pattern="\[\^@\]\+@juparana\[\.\]com\[\.\]br"/);
+  assert.match(html, /name="job_title"/);
+  assert.match(html, /name="area"[^>]*type="text"/);
 });
 
 test('central presents only the available CDM tutorial, including search results', () => {

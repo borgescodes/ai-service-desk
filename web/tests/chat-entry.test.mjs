@@ -4,9 +4,9 @@ import { renderJupWorkspace } from '../src/components.mjs';
 import { resetConversation } from '../src/state.mjs';
 
 test('empty chat welcomes inside the conversation without a synthetic message or fixed hero', () => {
-  const html = renderJupWorkspace();
+  const html = renderJupWorkspace({ identity: { name: 'Ana da Silva' } });
   assert.match(html, /class="chat-welcome"/);
-  assert.match(html, /Olá, eu sou o <strong>Jup/);
+  assert.match(html, /Olá, <strong>Ana<\/strong>! Como posso ajudar\?/);
   assert.match(html, /Seu assistente virtual, sempre pronto para ajudar/);
   assert.doesNotMatch(html, /conversation-header|conversation-message--jup/);
   assert.match(html, /<textarea[^>]*(?<!disabled)>/);
@@ -15,13 +15,14 @@ test('empty chat welcomes inside the conversation without a synthetic message or
 test('first submission animates the welcome out before the first incoming messages', () => {
   const html = renderJupWorkspace({ messages: [{ role: 'USER', text: 'acesso CDM' }], loading: true, animateFrom: 0 });
   assert.match(html, /chat-welcome--leaving/);
-  assert.match(html, /aria-hidden="true"[^>]*>[^]*?Olá, eu sou/);
+  assert.match(html, /aria-hidden="true"[^>]*>[^]*?Como posso ajudar/);
   assert.match(html, /Buscando contexto CDM/);
 });
 
 test('ongoing chat does not restore welcome and short replies retain known context', () => {
-  const html = renderJupWorkspace({ messages: [{ role: 'USER', text: 'Office não abre' }, { role: 'JUP', text: 'Qual erro?' }, { role: 'USER', text: 'senha' }], loading: true });
+  const html = renderJupWorkspace({ identity: { name: 'Ana da Silva' }, messages: [{ role: 'USER', text: 'Office não abre' }, { role: 'JUP', text: 'Qual erro?' }, { role: 'USER', text: 'senha' }], loading: true });
   assert.doesNotMatch(html, /chat-welcome/);
+  assert.doesNotMatch(html, /Olá, <strong>Ana<\/strong>/);
   assert.match(html, /Buscando contexto 365/);
 });
 
