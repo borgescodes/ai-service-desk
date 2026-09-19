@@ -316,26 +316,99 @@ class CountingGateway:
     def chat(self, payload):
         self.payloads.append(payload)
         properties = payload.get("format", {}).get("properties", {})
-        if "assistant_message" in properties:
-            result = {"assistant_message": properties["assistant_message"]["enum"][0]}
-        elif "scenario" in properties:
-            result = {"scenario": "M365_SUPPORT", "signal": "UNKNOWN"}
+        message = payload["messages"][-1]["content"].casefold()
+
+        if "relation" in properties or "r" in properties:
+            if "bom dia" in message:
+                result = {
+                    "relation": "NEW_GOAL",
+                    "domain": "SOCIAL",
+                    "goal": "",
+                    "intent": "OUTRO",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "NONE",
+                    "understood_topic": "saudacao",
+                }
+            else:
+                result = {
+                    "relation": "NEW_GOAL",
+                    "domain": "IT_SUPPORT",
+                    "goal": "REQUEST_ACCESS",
+                    "intent": "PROBLEMA_ACESSO",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "ACCESS_REQUEST",
+                    "understood_topic": "problema de acesso",
+                }
+        elif set(properties) == {"assistant_message"}:
+            result = {
+                "assistant_message": (
+                    "Entendi o contexto e posso ajudar a resolver isso com seguranca."
+                )
+            }
+        elif set(properties) == {"intro", "outro"}:
+            result = {
+                "intro": "Encontrei uma orientacao aprovada.",
+                "outro": "Me diga se resolveu.",
+            }
         else:
-            result = {"intent": "PROBLEMA_ACESSO", "system": "", "entities": {}, "confidence": 0.95}
-        return {"message": {"content": json.dumps(result)}, "done": True, "done_reason": "stop"}
+            raise AssertionError(f"Unexpected schema: {properties}")
+
+        if (
+            "r" in properties
+            and set(result) != {"assistant_message"}
+            and set(result) != {"intro", "outro"}
+        ):
+            relation_codes = {
+                "NEW_GOAL": "N",
+                "CONTINUATION": "C",
+                "CORRECTION": "R",
+                "ANSWER_TO_PENDING": "AP",
+                "CONFIRMATION": "Y",
+                "NEGATION": "X",
+                "TOPIC_SWITCH": "TS",
+            }
+            result = {
+                "r": relation_codes[result["relation"]],
+                "d": result["domain"],
+                "g": result["goal"],
+                "i": result["intent"],
+                "e": result["entities"],
+                "a": result["facts_added"],
+                "c": result["facts_corrected"],
+                "q": result["answered_pending_question"],
+                "s": result["semantic_signal"],
+                "t": result["understood_topic"],
+            }
+
+        return {
+            "message": {"content": json.dumps(result)},
+            "done": True,
+            "done_reason": "stop",
+        }
 
 
 @pytest.mark.parametrize(
-    "message,maximum_calls", [("Bom dia", 1), ("Não consigo acessar o sistema.", 1)]
+    "message",
+    ["Bom dia", "N?o consigo acessar o sistema."],
 )
-def test_local_ai_avoids_redundant_presentation_inference(monkeypatch, message, maximum_calls):
+def test_local_ai_uses_only_interpreter_and_writer_calls(monkeypatch, message):
     monkeypatch.setattr(demo_runtime, "OllamaClient", CountingGateway)
     runtime = demo_runtime.DemoRuntime.create(mode="LOCAL_AI")
     try:
         gateway = runtime._ollama_client
         gateway.payloads.clear()
+
         result = send(runtime, message)
+
         assert result["assistant_message"]
-        assert len(gateway.payloads) <= maximum_calls
+        assert len(gateway.payloads) == 2
+        assert "r" in gateway.payloads[0]["format"]["properties"]
+        assert "assistant_message" in gateway.payloads[1]["format"]["properties"]
     finally:
         runtime.close()

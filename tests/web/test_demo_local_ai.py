@@ -6,12 +6,10 @@ import pytest
 
 from ai_service_desk.engine.ollama import OllamaError
 from ai_service_desk.web import demo_runtime
-from ai_service_desk.web.business_context import BusinessVocabulary
-from ai_service_desk.web.demo_ai import compact_interpretation_to_classification
 from ai_service_desk.web.errors import WebDemoError
 
 
-class CompactGateway:
+class LocalAIGatewayBase:
     instances = []
 
     def __init__(self, *args, **kwargs):
@@ -48,68 +46,226 @@ class CompactGateway:
         self.embed_requests.append(payload)
         return {"embeddings": [self._embedding(text) for text in texts]}
 
-    def chat(self, payload):
-        self.payloads.append(payload)
-        properties = payload.get("format", {}).get("properties", {})
-        text = payload["messages"][-1]["content"].casefold()
-        if "assistant_message" in properties:
-            choices = properties["assistant_message"].get("enum", [])
-            if not choices:
-                raise AssertionError("Conversational payload must expose allowed choices")
-            result = {"assistant_message": choices[0]}
-        elif "scenario" in properties:
-            if (
-                "cdm" in text
-                or "central de dados mestres" in text
-                or ("material" in text and "revenda" in text)
-            ):
-                signal = (
-                    "PRIVILEGED_ACCESS"
-                    if any(term in text for term in ("admin", "administrador", "superadmin"))
-                    else "ACCESS_REQUEST"
-                )
-                result = {"scenario": "CDM_ACCESS", "signal": signal}
-            elif "365" in text or "office" in text or "outlook" in text:
-                result = {"scenario": "M365_SUPPORT", "signal": "PASSWORD_EVIDENCE"}
-            else:
-                result = {"scenario": "OTHER_IT", "signal": "UNKNOWN"}
-        else:
-            # Compatibilidade apenas para provar o RED contra o contrato antigo.
-            result = {
-                "intent": "PROBLEMA_ACESSO",
-                "system": "CDM" if "cdm" in text else "",
-                "entities": {},
-                "confidence": 0.95,
-            }
-        return {
-            "message": {"content": json.dumps(result)},
-            "done": True,
-            "done_reason": "stop",
-        }
-
     def close(self):
         self.closed = True
 
 
-class InvalidCompactGateway(CompactGateway):
+class ConversationalGateway(LocalAIGatewayBase):
+    def chat(self, payload):
+        self.payloads.append(payload)
+        properties = payload.get("format", {}).get("properties", {})
+        text = payload["messages"][-1]["content"].casefold()
+
+        if "relation" in properties or "r" in properties:
+            if "cdm" in text:
+                data = {
+                    "relation": "NEW_GOAL",
+                    "domain": "IT_SUPPORT",
+                    "goal": "REQUEST_ACCESS",
+                    "intent": "PROBLEMA_ACESSO",
+                    "entities": {"system": "CDM", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "ACCESS_REQUEST",
+                    "understood_topic": "acesso ao CDM",
+                }
+            elif "bolo" in text:
+                data = {
+                    "relation": "NEW_GOAL",
+                    "domain": "OTHER",
+                    "goal": "",
+                    "intent": "OUTRO",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "NONE",
+                    "understood_topic": "receita culinária",
+                }
+            elif "bom dia" in text:
+                data = {
+                    "relation": "NEW_GOAL",
+                    "domain": "SOCIAL",
+                    "goal": "",
+                    "intent": "OUTRO",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "NONE",
+                    "understood_topic": "saudação",
+                }
+            elif any(term in text for term in ("microsoft 365", "office 365", "office", "outlook")):
+                data = {
+                    "relation": "NEW_GOAL",
+                    "domain": "IT_SUPPORT",
+                    "goal": "DIAGNOSE_ISSUE",
+                    "intent": "PROBLEMA_ACESSO",
+                    "entities": {"system": "OFFICE 365", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": (
+                        "PASSWORD_EVIDENCE" if "senha" in text else "LOGIN_PROBLEM"
+                    ),
+                    "understood_topic": "acesso ao Microsoft 365",
+                }
+            elif "ubs" in text:
+                data = {
+                    "relation": "NEW_GOAL",
+                    "domain": "IT_SUPPORT",
+                    "goal": "DIAGNOSE_ISSUE",
+                    "intent": "ERRO_SISTEMA",
+                    "entities": {"system": "UBS", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "NONE",
+                    "understood_topic": "erro no UBS",
+                }
+            else:
+                data = {
+                    "relation": "NEW_GOAL",
+                    "domain": "IT_SUPPORT",
+                    "goal": "DIAGNOSE_ISSUE",
+                    "intent": "ERRO_SISTEMA",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "NONE",
+                    "understood_topic": "problema de TI",
+                }
+
+            if "r" in properties:
+                relation_codes = {
+                    "NEW_GOAL": "N",
+                    "CONTINUATION": "C",
+                    "CORRECTION": "R",
+                    "ANSWER_TO_PENDING": "AP",
+                    "CONFIRMATION": "Y",
+                    "NEGATION": "X",
+                    "TOPIC_SWITCH": "TS",
+                }
+                data = {
+                    "r": relation_codes[data["relation"]],
+                    "d": data["domain"],
+                    "g": data["goal"],
+                    "i": data["intent"],
+                    "e": data["entities"],
+                    "a": data["facts_added"],
+                    "c": data["facts_corrected"],
+                    "q": data["answered_pending_question"],
+                    "s": data["semantic_signal"],
+                    "t": data["understood_topic"],
+                }
+
+            return {
+                "message": {
+                    "content": json.dumps(
+                        data,
+                        ensure_ascii=False,
+                    )
+                },
+                "done_reason": "stop",
+            }
+
+        if set(properties) == {"intro", "outro"}:
+            return {
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "intro": "Encontrei uma orientação aprovada.",
+                            "outro": "Me diga se resolveu.",
+                        },
+                        ensure_ascii=False,
+                    )
+                },
+                "done_reason": "stop",
+            }
+
+        if set(properties) == {"assistant_message"}:
+            return {
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "assistant_message": (
+                                "Entendi o contexto e vou seguir pelo caminho seguro."
+                            )
+                        },
+                        ensure_ascii=False,
+                    )
+                },
+                "done_reason": "stop",
+            }
+
+        raise AssertionError(f"Unexpected conversational schema: {properties}")
+
+
+class MalformedInterpreterGateway(ConversationalGateway):
+    def chat(self, payload):
+        properties = payload.get("format", {}).get("properties", {})
+        if "relation" in properties or "r" in properties:
+            self.payloads.append(payload)
+            return {
+                "message": {"content": "{not-json"},
+                "done_reason": "stop",
+            }
+        return super().chat(payload)
+
+
+class InvalidInterpreterGateway(ConversationalGateway):
     mode = "extra"
 
     def chat(self, payload):
         properties = payload.get("format", {}).get("properties", {})
-        if "scenario" not in properties:
+        if "relation" not in properties and "r" not in properties:
             return super().chat(payload)
+
         self.payloads.append(payload)
+
         if self.mode == "malformed":
             content = "{not-json"
             done_reason = "stop"
-        elif self.mode == "extra":
-            content = json.dumps({"scenario": "OTHER_IT", "signal": "UNKNOWN", "confidence": 0.9})
-            done_reason = "stop"
-        elif self.mode == "truncated":
-            content = json.dumps({"scenario": "OTHER_IT", "signal": "UNKNOWN"})
-            done_reason = "length"
         else:
-            raise AssertionError(self.mode)
+            if "r" in properties:
+                data = {
+                    "r": "N",
+                    "d": "IT_SUPPORT",
+                    "g": "DIAGNOSE_ISSUE",
+                    "i": "ERRO_SISTEMA",
+                    "e": {"system": "", "product": ""},
+                    "a": [],
+                    "c": [],
+                    "q": False,
+                    "s": "NONE",
+                    "t": "problema de TI",
+                }
+            else:
+                data = {
+                    "relation": "NEW_GOAL",
+                    "domain": "IT_SUPPORT",
+                    "goal": "DIAGNOSE_ISSUE",
+                    "intent": "ERRO_SISTEMA",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "NONE",
+                    "understood_topic": "problema de TI",
+                }
+
+            if self.mode == "extra":
+                data["unexpected"] = "field"
+                done_reason = "stop"
+            elif self.mode == "truncated":
+                done_reason = "length"
+            else:
+                raise AssertionError(self.mode)
+
+            content = json.dumps(data, ensure_ascii=False)
+
         return {
             "message": {"content": content},
             "done": True,
@@ -117,13 +273,13 @@ class InvalidCompactGateway(CompactGateway):
         }
 
 
-class FailingCompactGateway(CompactGateway):
+class FailingConversationalGateway(LocalAIGatewayBase):
     def chat(self, payload):
         self.payloads.append(payload)
         raise OllamaError("falha local simulada")
 
 
-def _runtime(monkeypatch, gateway_cls=CompactGateway):
+def _runtime(monkeypatch, gateway_cls=ConversationalGateway):
     gateway_cls.instances.clear()
     monkeypatch.setattr(demo_runtime, "OllamaClient", gateway_cls)
     return demo_runtime.DemoRuntime.create(mode="LOCAL_AI")
@@ -135,116 +291,195 @@ def _first_inference_payload(runtime):
     return gateway.payloads[0]
 
 
-def test_local_ai_uses_compact_scenario_signal_contract_and_small_payload(monkeypatch):
-    runtime = _runtime(monkeypatch)
+def test_local_ai_turn_uses_interpreter_then_writer(monkeypatch):
+    runtime = _runtime(monkeypatch, ConversationalGateway)
     try:
-        runtime.send_message("pedro-miranda", "Nao consigo acessar o sistema.")
-        payload = _first_inference_payload(runtime)
+        result = runtime.send_message(
+            "pedro-miranda",
+            "Preciso acessar o CDM",
+        )
 
-        assert payload["model"] == "qwen3.5:4b"
-        assert payload["think"] is False
-        assert payload["stream"] is False
-        assert payload["keep_alive"] == "30m"
-        assert payload["options"]["temperature"] == 0
-        assert 32 <= payload["options"]["num_predict"] <= 48
-        assert payload["options"]["num_ctx"] <= 1024
+        assert result["request_id"]
 
-        schema = payload["format"]
-        assert set(schema["properties"]) == {"scenario", "signal"}
-        assert schema["required"] == ["scenario", "signal"]
-        assert schema["additionalProperties"] is False
-        assert schema["properties"]["scenario"]["enum"] == [
-            "CDM_ACCESS",
-            "M365_SUPPORT",
-            "OTHER_IT",
-            "UNKNOWN",
-        ]
-        assert schema["properties"]["signal"]["enum"] == [
-            "ACCESS_REQUEST",
-            "PRIVILEGED_ACCESS",
-            "LOGIN_PROBLEM",
-            "PASSWORD_EVIDENCE",
-            "SUCCESS",
-            "FAILURE",
-            "UNKNOWN",
-        ]
-
-        instruction = payload["messages"][0]["content"]
-        assert len(instruction) <= 700
-        lowered = instruction.casefold()
-        assert "jup" in lowered
-        assert "ti" in lowered
-        assert "cdm" in lowered
-        assert "microsoft 365" in lowered
-        for broad_system in ("siagri", "cigam", "portal rh", "metadados"):
-            assert broad_system not in lowered
+        payloads = runtime._ollama_client.payloads
+        assert len(payloads) == 2
+        assert "r" in payloads[0]["format"]["properties"]
+        assert "assistant_message" in payloads[1]["format"]["properties"]
+        assert "enum" not in json.dumps(payloads[1]["format"])
     finally:
         runtime.close()
 
 
-@pytest.mark.parametrize(
-    "text,scenario,signal,expected_intent,expected_system",
-    [
-        (
-            "Preciso cadastrar um material para revenda",
-            "CDM_ACCESS",
-            "ACCESS_REQUEST",
-            "ORIENTACAO",
-            "CDM",
-        ),
-        (
-            "Bom dia! Preciso cadastrar material para revenda no SIAGRI",
-            "CDM_ACCESS",
-            "ACCESS_REQUEST",
-            "ORIENTACAO",
-            "SIAGRI",
-        ),
-        (
-            "Preciso de acesso ao CDM",
-            "CDM_ACCESS",
-            "ACCESS_REQUEST",
-            "PROBLEMA_ACESSO",
-            "CDM",
-        ),
-        (
-            "Nao consigo entrar no CDM",
-            "CDM_ACCESS",
-            "LOGIN_PROBLEM",
-            "PROBLEMA_ACESSO",
-            "CDM",
-        ),
-        (
-            "Preciso de acesso administrador ao CDM",
-            "CDM_ACCESS",
-            "PRIVILEGED_ACCESS",
-            "PROBLEMA_ACESSO",
-            "CDM",
-        ),
-        (
-            "Preciso instalar o Teams",
-            "OTHER_IT",
-            "UNKNOWN",
-            "INSTALACAO_SOFTWARE",
-            "OFFICE 365",
-        ),
-    ],
-)
-def test_compact_interpretation_requires_textual_access_evidence(
-    text,
-    scenario,
-    signal,
-    expected_intent,
-    expected_system,
-):
-    classification = compact_interpretation_to_classification(
-        text,
-        scenario,
-        signal,
-        BusinessVocabulary(),
-    )
+def test_invalid_interpreter_persists_no_turn_or_operation(monkeypatch):
+    runtime = _runtime(monkeypatch, MalformedInterpreterGateway)
+    try:
+        before_requests = list(runtime.created_request_ids)
+        before_handoffs = runtime.support_handoff_store.snapshot()
+        before_contexts = dict(runtime._conversation_contexts)
 
-    assert classification.intent == expected_intent
-    assert classification.system == expected_system
+        with pytest.raises(WebDemoError) as exc_info:
+            runtime.send_message(
+                "pedro-miranda",
+                "Preciso acessar o CDM",
+            )
+
+        assert exc_info.value.code == "LOCAL_AI_RESPONSE_INVALID"
+        assert runtime.created_request_ids == before_requests
+        assert runtime.support_handoff_store.snapshot() == before_handoffs
+        assert runtime._conversation_contexts == before_contexts
+    finally:
+        runtime.close()
+
+
+def test_local_ai_social_is_decided_by_interpreter(monkeypatch):
+    runtime = _runtime(monkeypatch, ConversationalGateway)
+    try:
+        before_requests = list(runtime.created_request_ids)
+        before_handoffs = runtime.support_handoff_store.snapshot()
+
+        result = runtime.send_message(
+            "pedro-miranda",
+            "Bom dia",
+        )
+
+        assert result["status"] == "SOCIAL"
+        assert result["request_id"] is None
+        assert result["assistant_message"]
+
+        payloads = runtime._ollama_client.payloads
+        assert len(payloads) == 2
+        assert "r" in payloads[0]["format"]["properties"]
+        assert "assistant_message" in payloads[1]["format"]["properties"]
+
+        assert runtime.created_request_ids == before_requests
+        assert runtime.support_handoff_store.snapshot() == before_handoffs
+        assert "pedro-miranda" not in runtime._triage
+    finally:
+        runtime.close()
+
+
+def test_local_ai_out_of_scope_is_decided_by_interpreter_without_handoff(monkeypatch):
+    runtime = _runtime(monkeypatch, ConversationalGateway)
+    try:
+        before_requests = list(runtime.created_request_ids)
+        before_handoffs = runtime.support_handoff_store.snapshot()
+
+        result = runtime.send_message(
+            "pedro-miranda",
+            "Como posso fazer bolo?",
+        )
+
+        assert result["status"] == "OUT_OF_SCOPE"
+        assert result["request_id"] is None
+        assert result["support_handoff"] is None
+        assert result["understood_topic"] == "receita culinária"
+        assert result["business_context"] == {
+            "system": "",
+            "product": "",
+        }
+        assert result["assistant_message"]
+
+        payloads = runtime._ollama_client.payloads
+        assert len(payloads) == 2
+        assert "r" in payloads[0]["format"]["properties"]
+        assert "assistant_message" in payloads[1]["format"]["properties"]
+
+        assert runtime.created_request_ids == before_requests
+        assert runtime.support_handoff_store.snapshot() == before_handoffs
+        assert "pedro-miranda" not in runtime._triage
+    finally:
+        runtime.close()
+
+
+def test_local_ai_unresolved_known_it_routes_to_general_technician(monkeypatch):
+    runtime = _runtime(monkeypatch, ConversationalGateway)
+    try:
+        result = runtime.send_message(
+            "pedro-miranda",
+            "Estou com erro no UBS",
+        )
+
+        assert result["status"] == "SUPPORT_HANDOFF_PENDING"
+        assert result["request_id"] is None
+        assert result["support_handoff"]["system"] == "UBS"
+        assert result["support_handoff"]["technician"]["technician_id"] == "TECH-GENERAL"
+        assert result["assistant_message"]
+
+        payloads = runtime._ollama_client.payloads
+        assert len(payloads) == 2
+        assert "r" in payloads[0]["format"]["properties"]
+        assert "assistant_message" in payloads[1]["format"]["properties"]
+    finally:
+        runtime.close()
+
+
+def test_local_ai_uses_contextual_interpreter_then_free_writer_contract(monkeypatch):
+    runtime = _runtime(monkeypatch)
+    try:
+        runtime.send_message("pedro-miranda", "Nao consigo acessar o sistema.")
+
+        payloads = runtime._ollama_client.payloads
+        assert len(payloads) == 2
+
+        payload = payloads[0]
+        assert payload["model"] == "qwen3.5:4b"
+        assert payload["think"] is False
+        assert payload["stream"] is False
+        assert payload["keep_alive"] == "30m"
+        assert payload["options"] == {
+            "temperature": 0,
+            "num_ctx": 3072,
+            "num_predict": 128,
+        }
+
+        schema = payload["format"]
+        expected_fields = [
+            "r",
+            "d",
+            "g",
+            "i",
+            "e",
+            "a",
+            "c",
+            "q",
+            "s",
+            "t",
+        ]
+        assert list(schema["properties"]) == expected_fields
+        assert schema["required"] == expected_fields
+        assert schema["additionalProperties"] is False
+        assert "scenario" not in schema["properties"]
+        assert "signal" not in schema["properties"]
+
+        instruction = payload["messages"][0]["content"]
+        assert len(instruction) <= 5500
+        lowered = instruction.casefold()
+        assert "jup" in lowered
+        assert "cdm" in lowered
+        assert "microsoft 365" in lowered
+
+        writer_schema = payloads[1]["format"]
+        assert set(writer_schema["properties"]) == {"assistant_message"}
+        assert "enum" not in writer_schema["properties"]["assistant_message"]
+    finally:
+        runtime.close()
+
+
+def test_local_ai_never_sends_scenario_signal_or_final_phrase_enum(monkeypatch):
+    runtime = _runtime(monkeypatch, ConversationalGateway)
+    try:
+        runtime.send_message("pedro-miranda", "Bom dia Jup")
+        runtime.reset_conversation("pedro-miranda")
+        runtime.send_message("pedro-miranda", "Como faço bolo de chocolate?")
+
+        for payload in runtime._ollama_client.payloads:
+            schema = json.dumps(payload.get("format", {}), ensure_ascii=False)
+            assert '"scenario"' not in schema
+            assert '"signal"' not in schema
+            assert "Olá, Fulano" not in schema
+            assert "Meu foco aqui é suporte de TI" not in schema
+    finally:
+        runtime.close()
 
 
 def test_local_ai_metrics_count_calls_turns_and_never_store_content(monkeypatch):
@@ -262,40 +497,70 @@ def test_local_ai_metrics_count_calls_turns_and_never_store_content(monkeypatch)
             "turns",
         }
         assert metrics["startup_ms"] >= 0
-        assert metrics["total_calls"] == 1
+        assert metrics["total_calls"] == 2
         assert metrics["failed_calls"] == 0
-        assert len(metrics["calls"]) == 1
-        assert metrics["calls"][0]["duration_ms"] >= 0
-        assert metrics["calls"][0]["ok"] is True
-        assert metrics["turns"][-1]["call_count"] == 1
-        assert metrics["turns"][-1]["duration_ms"] >= 0
+        assert len(metrics["calls"]) == 2
+        assert all(call["duration_ms"] >= 0 for call in metrics["calls"])
+        assert all(call["ok"] is True for call in metrics["calls"])
+        assert metrics["turns"][-1]["qwen_call_count"] == 2
+        assert metrics["turns"][-1]["total_turn_ms"] >= 0
         assert marker not in json.dumps(metrics, ensure_ascii=False)
         assert "messages" not in json.dumps(metrics, ensure_ascii=False).casefold()
     finally:
         runtime.close()
 
 
-def test_local_ai_social_presentation_does_not_count_as_decision_inference(monkeypatch):
+def test_local_ai_metrics_expose_stage_timings_without_content(monkeypatch):
+    runtime = _runtime(monkeypatch, ConversationalGateway)
+    try:
+        marker = "SEGREDO-NAO-TELEMETRIZAR-84721"
+        runtime.send_message("pedro-miranda", f"Meu computador trava. {marker}")
+
+        turn = runtime.local_ai_metrics()["turns"][-1]
+
+        assert set(turn) == {
+            "interpretation_ms",
+            "backend_ms",
+            "retrieval_ms",
+            "generation_ms",
+            "total_turn_ms",
+            "qwen_call_count",
+        }
+        assert turn["qwen_call_count"] == 2
+        assert all(turn[key] >= 0 for key in turn if key.endswith("_ms"))
+
+        serialized = json.dumps(runtime.local_ai_metrics(), ensure_ascii=False)
+        assert marker not in serialized
+        assert "messages" not in serialized.casefold()
+    finally:
+        runtime.close()
+
+
+def test_local_ai_social_and_out_of_scope_use_interpreter_then_writer(monkeypatch):
     runtime = _runtime(monkeypatch)
     try:
         gateway = runtime._ollama_client
         gateway.payloads.clear()
 
-        runtime.send_message("pedro-miranda", "Bom dia")
-        assert len(gateway.payloads) == 1
-        social_schema = gateway.payloads[0]["format"]
-        assert set(social_schema["properties"]) == {"assistant_message"}
-        assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 0
+        social = runtime.send_message("pedro-miranda", "Bom dia")
+        assert social["status"] == "SOCIAL"
+        assert len(gateway.payloads) == 2
+        assert "r" in gateway.payloads[0]["format"]["properties"]
+        assert "assistant_message" in gateway.payloads[1]["format"]["properties"]
+        assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
 
         gateway.payloads.clear()
-        runtime.send_message("pedro-miranda", "Quanto foi o jogo do Flamengo?")
-        assert gateway.payloads == []
-        assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 0
+        outside = runtime.send_message("pedro-miranda", "Como posso fazer bolo?")
+        assert outside["status"] == "OUT_OF_SCOPE"
+        assert len(gateway.payloads) == 2
+        assert "r" in gateway.payloads[0]["format"]["properties"]
+        assert "assistant_message" in gateway.payloads[1]["format"]["properties"]
+        assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
     finally:
         runtime.close()
 
 
-def test_local_ai_uses_one_interpretation_and_no_render_inference_for_support_result(monkeypatch):
+def test_local_ai_uses_interpreter_and_writer_for_operational_results(monkeypatch):
     runtime = _runtime(monkeypatch)
     try:
         gateway = runtime._ollama_client
@@ -303,30 +568,31 @@ def test_local_ai_uses_one_interpretation_and_no_render_inference_for_support_re
 
         created = runtime.send_message("pedro-miranda", "Preciso acessar o CDM.")
         assert created["request_id"]
-        assert len(gateway.payloads) == 1
-        assert set(gateway.payloads[0]["format"]["properties"]) == {"scenario", "signal"}
-        assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 1
+        assert len(gateway.payloads) == 2
+        assert "r" in gateway.payloads[0]["format"]["properties"]
+        assert "assistant_message" in gateway.payloads[1]["format"]["properties"]
+        assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
 
         runtime.reset()
         gateway.payloads.clear()
-        guidance = runtime.send_message("pedro-miranda", "Esqueci minha senha do Microsoft 365.")
-        assert guidance["knowledge_id"] == "KB-SYN-M365-PASSWORD-001"
-        assert len(gateway.payloads) <= 1
 
-        gateway.payloads.clear()
-        resolved = runtime.send_message("pedro-miranda", "Funcionou.")
-        assert resolved["resolved"] is True
-        assert len(gateway.payloads) == 1
-        assert set(gateway.payloads[0]["format"]["properties"]) == {"scenario", "signal"}
-        assert runtime.local_ai_metrics()["turns"][-1]["call_count"] == 1
+        guidance = runtime.send_message(
+            "pedro-miranda",
+            "Esqueci minha senha do Microsoft 365.",
+        )
+        assert guidance["knowledge_id"] == "KB-SYN-M365-PASSWORD-001"
+        assert len(gateway.payloads) == 2
+        assert "r" in gateway.payloads[0]["format"]["properties"]
+        assert set(gateway.payloads[1]["format"]["properties"]) == {"intro", "outro"}
+        assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
     finally:
         runtime.close()
 
 
 @pytest.mark.parametrize("mode", ["malformed", "extra", "truncated"])
-def test_local_ai_invalid_compact_response_fails_closed(monkeypatch, mode):
-    InvalidCompactGateway.mode = mode
-    runtime = _runtime(monkeypatch, InvalidCompactGateway)
+def test_local_ai_invalid_interpreter_response_fails_closed(monkeypatch, mode):
+    InvalidInterpreterGateway.mode = mode
+    runtime = _runtime(monkeypatch, InvalidInterpreterGateway)
     try:
         with pytest.raises(WebDemoError) as exc_info:
             runtime.send_message("pedro-miranda", "Nao consigo acessar o sistema.")
@@ -337,7 +603,7 @@ def test_local_ai_invalid_compact_response_fails_closed(monkeypatch, mode):
 
 
 def test_local_ai_transport_failure_is_explicit_and_counted(monkeypatch):
-    runtime = _runtime(monkeypatch, FailingCompactGateway)
+    runtime = _runtime(monkeypatch, FailingConversationalGateway)
     try:
         with pytest.raises(WebDemoError) as exc_info:
             runtime.send_message("pedro-miranda", "Nao consigo acessar o sistema.")

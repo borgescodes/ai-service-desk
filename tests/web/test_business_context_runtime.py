@@ -6,6 +6,7 @@ import re
 import pytest
 
 from ai_service_desk.web import demo_runtime
+from ai_service_desk.web.business_context import BusinessVocabulary
 
 
 class SemanticGateway:
@@ -40,41 +41,165 @@ class SemanticGateway:
 
     def chat(self, payload):
         self.payloads.append(payload)
-        properties = payload["format"]["properties"]
-        if "scenario" not in properties:
-            options = properties["assistant_message"].get("enum")
+        properties = payload.get("format", {}).get("properties", {})
+        text = payload["messages"][-1]["content"].casefold()
+
+        if "r" in properties:
+            vocabulary = BusinessVocabulary()
+            systems = list(vocabulary.systems(text))
+            entities = vocabulary.entities(text)
+
+            correction_target = ""
+            if "," in text:
+                tail = text.split(",", 1)[1].strip()
+                if tail.startswith("\u00e9 "):
+                    correction_target = tail[2:].strip(" .!?")
+                elif tail.startswith("e "):
+                    correction_target = tail[2:].strip(" .!?")
+
+            corrected_system = (
+                vocabulary.canonical(correction_target) if correction_target else None
+            )
+
+            system = corrected_system or (systems[0] if len(systems) == 1 else "")
+            product = entities.get("product", "")
+            short_reply = len(text.strip(" .!?").split()) <= 4
+
+            access_language = any(
+                term in text
+                for term in (
+                    "acesso",
+                    "acessar",
+                    "liberar",
+                    "liberacao",
+                    "perfil",
+                )
+            )
+            privileged = any(
+                term in text
+                for term in (
+                    "admin",
+                    "administrador",
+                    "superadmin",
+                )
+            )
+            password = "senha" in text
+            login_problem = any(
+                term in text
+                for term in (
+                    "nao entra",
+                    "n\u00e3o entra",
+                    "nao entram",
+                    "n\u00e3o entram",
+                    "nao consigo entrar",
+                    "n\u00e3o consigo entrar",
+                    "nao consigo acessar",
+                    "n\u00e3o consigo acessar",
+                )
+            )
+
+            if privileged and access_language and system == "CDM":
+                semantic_signal = "PRIVILEGED_ACCESS"
+            elif system == "CDM" and (access_language or short_reply):
+                semantic_signal = "ACCESS_REQUEST"
+            elif access_language and not system:
+                semantic_signal = "ACCESS_REQUEST"
+            elif password:
+                semantic_signal = "PASSWORD_EVIDENCE"
+            elif product == "TEAMS":
+                semantic_signal = "NONE"
+            elif login_problem:
+                semantic_signal = "LOGIN_PROBLEM"
+            else:
+                semantic_signal = "NONE"
+
+            if semantic_signal in {"ACCESS_REQUEST", "PRIVILEGED_ACCESS"}:
+                goal = "REQUEST_ACCESS"
+                intent = "PROBLEMA_ACESSO"
+            elif semantic_signal in {"LOGIN_PROBLEM", "PASSWORD_EVIDENCE"}:
+                goal = "DIAGNOSE_ISSUE"
+                intent = "PROBLEMA_ACESSO"
+            elif system == "CDM":
+                goal = "DIAGNOSE_ISSUE"
+                intent = "ORIENTACAO"
+            else:
+                goal = "DIAGNOSE_ISSUE"
+                intent = "ERRO_SISTEMA"
+
+            facts_corrected = []
+            if corrected_system:
+                facts_corrected.append(
+                    {
+                        "key": "system",
+                        "value": corrected_system,
+                        "source": "USER_EXPLICIT",
+                    }
+                )
+
+            intent_codes = {
+                "LIBERACAO_ROTINA": "LR",
+                "PROBLEMA_ACESSO": "PA",
+                "ERRO_SISTEMA": "ES",
+                "INSTALACAO_SOFTWARE": "IS",
+                "PROBLEMA_IMPRESSAO": "PI",
+                "PROBLEMA_REDE": "PR",
+                "ORIENTACAO": "OR",
+                "OUTRO": "OT",
+            }
+            signal_codes = {
+                "ACCESS_REQUEST": "AR",
+                "PRIVILEGED_ACCESS": "PX",
+                "LOGIN_PROBLEM": "LG",
+                "PASSWORD_EVIDENCE": "PW",
+                "PROCEDURE_SUCCEEDED": "OK",
+                "PROCEDURE_FAILED": "FAIL",
+                "NONE": "N",
+            }
+
+            result = {
+                "r": "C" if short_reply else "N",
+                "d": "I",
+                "g": goal,
+                "i": intent_codes[intent],
+                "e": {
+                    "system": system,
+                    "product": product,
+                },
+                "a": [],
+                "c": facts_corrected,
+                "q": short_reply,
+                "s": signal_codes[semantic_signal],
+                "t": system or "problema de TI",
+            }
+
             return {
                 "message": {
                     "content": json.dumps(
-                        {
-                            "assistant_message": options[0] if options else "Entendi seu relato.",
-                        }
+                        result,
+                        ensure_ascii=False,
                     )
-                }
+                },
+                "done": True,
+                "done_reason": "stop",
             }
-        text = payload["messages"][-1]["content"].casefold()
-        if "cdm" in text or "central de dados mestres" in text:
-            result = {"scenario": "CDM_ACCESS", "signal": "ACCESS_REQUEST"}
-        elif any(
-            term in text
-            for term in ("office", "microsoft 365", "outlook", "teams", "one drive", "onedrive")
-        ):
-            signal = (
-                "PASSWORD_EVIDENCE"
-                if "senha" in text
-                else (
-                    "LOGIN_PROBLEM"
-                    if any(term in text for term in ("entra", "acesso", "acessar"))
-                    else "UNKNOWN"
-                )
-            )
-            result = {"scenario": "M365_SUPPORT", "signal": signal}
-        elif any(term in text for term in ("acesso", "acessar", "entrar")):
-            result = {"scenario": "OTHER_IT", "signal": "LOGIN_PROBLEM"}
+
+        if set(properties) == {"intro", "outro"}:
+            result = {
+                "intro": "Encontrei uma orientacao aprovada.",
+                "outro": "Me diga se resolveu.",
+            }
+        elif set(properties) == {"assistant_message"}:
+            result = {"assistant_message": "Entendi seu relato e vou seguir pelo caminho seguro."}
         else:
-            result = {"scenario": "OTHER_IT", "signal": "UNKNOWN"}
+            raise AssertionError(f"Unexpected conversational schema: {properties}")
+
         return {
-            "message": {"content": json.dumps(result)},
+            "message": {
+                "content": json.dumps(
+                    result,
+                    ensure_ascii=False,
+                )
+            },
             "done": True,
             "done_reason": "stop",
         }
@@ -146,7 +271,10 @@ def test_prompt_context_does_not_replace_user_text_or_expand_approved_systems(ru
     runtime.send_message("pedro-miranda", message)
     payload = runtime._ollama_client.payloads[0]
     assert payload["messages"][-1]["content"] == message
-    assert "contexto vem do backend" in payload["messages"][0]["content"].casefold()
+    assert (
+        "decisoes pertencem exclusivamente ao backend"
+        in payload["messages"][0]["content"].casefold()
+    )
     assert runtime.knowledge_engine.available_systems("PROBLEMA_ACESSO") == ("CDM", "OFFICE 365")
     assert runtime._triage["pedro-miranda"][1].system == ""
 
@@ -232,3 +360,31 @@ def test_real_qwen_distinguishes_business_registration_from_software_installatio
         assert instance.fake_cdm_store.access_count == 0
     finally:
         instance.close()
+
+
+def test_runtime_passes_backend_resolved_entities_to_interpreter_parser(
+    runtime,
+    monkeypatch,
+):
+    original = demo_runtime.parse_interpretation_response
+    observed = {}
+
+    def capture(response, **kwargs):
+        observed.update(kwargs.get("resolved_entities") or {})
+        return original(response, **kwargs)
+
+    monkeypatch.setattr(
+        demo_runtime,
+        "parse_interpretation_response",
+        capture,
+    )
+
+    runtime.send_message(
+        "pedro-miranda",
+        "Meu Outlook nao entra",
+    )
+
+    assert observed == {
+        "system": "OFFICE 365",
+        "product": "OUTLOOK",
+    }

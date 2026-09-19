@@ -27,29 +27,156 @@ class AccessGateway:
 
     def chat(self, payload):
         properties = payload["format"]["properties"]
-        if "scenario" in properties:
-            text = payload["messages"][-1]["content"].casefold()
-            if any(
-                term in text
-                for term in ("microsoft 365", "office", "outlook", "onedrive", "one drive")
-            ):
-                signal = "PASSWORD_EVIDENCE" if "senha" in text else "LOGIN_PROBLEM"
-                result = {"scenario": "M365_SUPPORT", "signal": signal}
+        text = payload["messages"][-1]["content"].casefold()
+
+        if "relation" in properties or "r" in properties:
+            if "teams" in text:
+                result = {
+                    "relation": "ANSWER_TO_PENDING",
+                    "domain": "IT_SUPPORT",
+                    "goal": "DIAGNOSE_ISSUE",
+                    "intent": "PROBLEMA_ACESSO",
+                    "entities": {"system": "OFFICE 365", "product": "TEAMS"},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": True,
+                    "semantic_signal": "NONE",
+                    "understood_topic": "problema no Teams",
+                }
             elif "cdm" in text:
-                result = {"scenario": "CDM_ACCESS", "signal": "ACCESS_REQUEST"}
+                result = {
+                    "relation": "ANSWER_TO_PENDING",
+                    "domain": "IT_SUPPORT",
+                    "goal": "REQUEST_ACCESS",
+                    "intent": "PROBLEMA_ACESSO",
+                    "entities": {"system": "CDM", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": True,
+                    "semantic_signal": "ACCESS_REQUEST",
+                    "understood_topic": "acesso ao CDM",
+                }
+            elif any(
+                term in text
+                for term in (
+                    "microsoft 365",
+                    "office",
+                    "outlook",
+                    "onedrive",
+                    "one drive",
+                )
+            ):
+                product = ""
+                if "outlook" in text:
+                    product = "OUTLOOK"
+                elif "onedrive" in text or "one drive" in text:
+                    product = "ONEDRIVE"
+
+                password = "senha" in text
+                application_error = bool(product) and not password
+
+                result = {
+                    "relation": "NEW_GOAL",
+                    "domain": "IT_SUPPORT",
+                    "goal": "DIAGNOSE_ISSUE",
+                    "intent": ("ERRO_SISTEMA" if application_error else "PROBLEMA_ACESSO"),
+                    "entities": {
+                        "system": "OFFICE 365",
+                        "product": product,
+                    },
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": (
+                        "PASSWORD_EVIDENCE"
+                        if password
+                        else ("NONE" if product else "LOGIN_PROBLEM")
+                    ),
+                    "understood_topic": "suporte Microsoft 365",
+                }
             elif any(term in text for term in ("acesso", "acessar", "entrar")):
-                result = {"scenario": "OTHER_IT", "signal": "LOGIN_PROBLEM"}
+                access_request = "preciso de acesso" in text
+                result = {
+                    "relation": "NEW_GOAL",
+                    "domain": "IT_SUPPORT",
+                    "goal": ("REQUEST_ACCESS" if access_request else "DIAGNOSE_ISSUE"),
+                    "intent": "PROBLEMA_ACESSO",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": ("ACCESS_REQUEST" if access_request else "NONE"),
+                    "understood_topic": "problema de acesso",
+                }
             else:
-                result = {"scenario": "OTHER_IT", "signal": "UNKNOWN"}
+                result = {
+                    "relation": "NEW_GOAL",
+                    "domain": "IT_SUPPORT",
+                    "goal": "DIAGNOSE_ISSUE",
+                    "intent": "ERRO_SISTEMA",
+                    "entities": {"system": "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "NONE",
+                    "understood_topic": "problema de TI",
+                }
+
+            if "r" in properties:
+                relation_codes = {
+                    "NEW_GOAL": "N",
+                    "CONTINUATION": "C",
+                    "CORRECTION": "R",
+                    "ANSWER_TO_PENDING": "AP",
+                    "CONFIRMATION": "Y",
+                    "NEGATION": "X",
+                    "TOPIC_SWITCH": "TS",
+                }
+                result = {
+                    "r": relation_codes[result["relation"]],
+                    "d": result["domain"],
+                    "g": result["goal"],
+                    "i": result["intent"],
+                    "e": result["entities"],
+                    "a": result["facts_added"],
+                    "c": result["facts_corrected"],
+                    "q": result["answered_pending_question"],
+                    "s": result["semantic_signal"],
+                    "t": result["understood_topic"],
+                }
+
             return {
-                "message": {"content": json.dumps(result, ensure_ascii=False)},
+                "message": {
+                    "content": json.dumps(result, ensure_ascii=False),
+                },
                 "done": True,
                 "done_reason": "stop",
             }
-        schema = properties["assistant_message"]
-        choices = schema.get("enum") or ["Entendi seu relato."]
-        result = {"assistant_message": choices[0]}
-        return {"message": {"content": json.dumps(result, ensure_ascii=False)}}
+
+        if set(properties) == {"intro", "outro"}:
+            result = {
+                "intro": "Encontrei uma orientacao aprovada para esse caso.",
+                "outro": "",
+            }
+            return {
+                "message": {
+                    "content": json.dumps(result, ensure_ascii=False),
+                },
+                "done": True,
+                "done_reason": "stop",
+            }
+
+        if set(properties) == {"assistant_message"}:
+            result = {"assistant_message": ("Entendi o contexto e vou seguir pelo caminho seguro.")}
+            return {
+                "message": {
+                    "content": json.dumps(result, ensure_ascii=False),
+                },
+                "done": True,
+                "done_reason": "stop",
+            }
+
+        raise AssertionError(f"Unexpected conversational schema: {properties}")
 
 
 @pytest.fixture

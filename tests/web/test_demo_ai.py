@@ -3,6 +3,7 @@ import json
 import numpy as np
 
 from ai_service_desk.engine.classification import classify_ticket
+from ai_service_desk.web.conversation import greeting_message, operational_message
 from ai_service_desk.web.demo_ai import DemoClassifierClient, DemoEmbedder
 
 
@@ -56,3 +57,53 @@ def test_demo_embedder_is_fixed_deterministic_float32_matrix() -> None:
     assert first.shape == (2, 32)
     assert first.dtype == np.float32
     np.testing.assert_array_equal(first, second)
+
+
+def test_compact_local_ai_contract_symbols_are_retired() -> None:
+    from ai_service_desk.web import demo_ai
+    from ai_service_desk.web.demo_runtime import DemoRuntime
+
+    obsolete_module_symbols = (
+        "COMPACT_" + "SCENARIOS",
+        "COMPACT_" + "SIGNALS",
+        "build_compact_" + "interpretation_payload",
+        "parse_compact_" + "interpretation_response",
+        "compact_interpretation_" + "to_classification",
+    )
+    obsolete_runtime_methods = (
+        "_interpret_local_ai",
+        "_classify_local_ai",
+        "_support_signal_local_ai",
+    )
+
+    remaining_module_symbols = [name for name in obsolete_module_symbols if hasattr(demo_ai, name)]
+    remaining_runtime_methods = [
+        name for name in obsolete_runtime_methods if hasattr(DemoRuntime, name)
+    ]
+
+    assert remaining_module_symbols == []
+    assert remaining_runtime_methods == []
+
+
+def test_fixed_response_helpers_are_deterministic_and_never_call_model() -> None:
+    calls = []
+
+    def chat(payload):
+        calls.append(payload)
+        raise AssertionError("Fixed response helper must not call the model.")
+
+    greeting = greeting_message("Bom dia Jup", "Fulano de Tal", chat)
+
+    clarification = operational_message(
+        {
+            "status": "NEEDS_CLARIFICATION",
+            "request_id": None,
+            "question": "Qual sistema apresenta o problema?",
+        },
+        "Nao consigo acessar o sistema.",
+        chat,
+    )
+
+    assert calls == []
+    assert greeting == "Bom dia! Como posso ajudar?"
+    assert clarification == ("Entendi.\n\nQual sistema apresenta o problema?")

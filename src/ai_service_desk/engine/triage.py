@@ -397,7 +397,13 @@ class TriageEngine:
     def initial_state(self) -> TriageState:
         return new_triage_state(self.session_id)
 
-    def step(self, state: TriageState, message: str) -> tuple[TriageState, dict]:
+    def step(
+        self,
+        state: TriageState,
+        message: str,
+        *,
+        classification: TicketClassification | None = None,
+    ) -> tuple[TriageState, dict]:
         if state.session_id != self.session_id:
             raise ValueError("session_id nao corresponde a esta triagem.")
         if state.status != "ACTIVE":
@@ -407,8 +413,15 @@ class TriageEngine:
         if not isinstance(message, str) or not message.strip() or len(message) > 3000:
             raise ValueError("Mensagem de triagem invalida.")
 
-        classification = self.classifier(message)
-        evidence = _analyze_turn(state, message, classification, self.resolver)
+        resolved_classification = (
+            classification if classification is not None else self.classifier(message)
+        )
+        evidence = _analyze_turn(
+            state,
+            message,
+            resolved_classification,
+            self.resolver,
+        )
         counted = replace(state, turn_count=state.turn_count + 1)
         merged = _merge_turn(counted, message.strip(), evidence, self.resolver)
 

@@ -46,18 +46,25 @@ from ai_service_desk.integrations.cdm import CDMAdapter
 from ai_service_desk.integrations.cdm_fake_api import CDMFakeStore, build_cdm_server
 from ai_service_desk.web.business_context import BusinessVocabulary
 from ai_service_desk.web.conversation import (
+    generate_natural_response,
     greeting_message,
     is_outside_it_support_scope,
     is_social_greeting,
     operational_message,
 )
-from ai_service_desk.web.demo_ai import (
-    DemoClassifierClient,
-    DemoEmbedder,
-    build_compact_interpretation_payload,
-    compact_interpretation_to_classification,
-    parse_compact_interpretation_response,
+from ai_service_desk.web.conversation_grounding import ground_response
+from ai_service_desk.web.conversation_interpreter import (
+    build_interpretation_payload,
+    classification_from_context,
+    parse_interpretation_response,
 )
+from ai_service_desk.web.conversation_state import (
+    append_turn,
+    apply_backend_updates,
+    new_conversation_context,
+    reduce_conversation_context,
+)
+from ai_service_desk.web.demo_ai import DemoClassifierClient, DemoEmbedder
 from ai_service_desk.web.demo_data import (
     demo_outcomes,
     write_demo_knowledge,
@@ -100,8 +107,8 @@ _ACCESS_REQUEST = re.compile(
 _LOCAL_SUPPORT_SIGNALS = {
     "LOGIN_PROBLEM": LinguisticSignal.M365_LOGIN_PROBLEM,
     "PASSWORD_EVIDENCE": LinguisticSignal.PASSWORD_EVIDENCE,
-    "SUCCESS": LinguisticSignal.PROCEDURE_SUCCEEDED,
-    "FAILURE": LinguisticSignal.PROCEDURE_FAILED,
+    "PROCEDURE_SUCCEEDED": LinguisticSignal.PROCEDURE_SUCCEEDED,
+    "PROCEDURE_FAILED": LinguisticSignal.PROCEDURE_FAILED,
 }
 
 
@@ -242,6 +249,7 @@ class DemoRuntime:
         self.request_repository = InMemoryRequestRepository()
         self.routing_store = InMemoryRoutingAssignmentStore()
         self.conversations: dict[str, list[dict]] = {}
+        self._conversation_contexts = {}
         self._conversation_generations: dict[str, int] = {}
         self._triage: dict[str, tuple[TriageEngine, object]] = {}
         self.created_request_ids: list[str] = []
@@ -331,12 +339,11 @@ class DemoRuntime:
         )
 
         def classifier(text):
-            if self.mode == "LOCAL_AI":
-                classification = self._classify_local_ai(text)
-            else:
-                classification = classify_ticket(
-                    text, self.demo_classifier_client.chat, resolver=self.business_vocabulary
-                )
+            classification = classify_ticket(
+                text,
+                self.demo_classifier_client.chat,
+                resolver=self.business_vocabulary,
+            )
             normalized = " ".join(text.casefold().split())
             if classification.system.casefold() == "que" and "sistema que " in normalized:
                 return replace(classification, system="")
@@ -347,21 +354,53 @@ class DemoRuntime:
         )
         return engine, engine.initial_state()
 
-    def _interpret_local_ai(self, text: str) -> tuple[str, str]:
+    def _context_for(self, identity_id, requester):
+        current = self._conversation_contexts.get(identity_id)
+        if current is not None:
+            return current
+
+        identity = self.identity_provider.resolve(identity_id)
+        return new_conversation_context(
+            identity_id,
+            requester.name,
+            requester.email,
+            requester.area,
+            identity.role,
+        )
+
+    def _interpret_conversation(self, context, message):
         if self._ollama_client is None:
             raise WebDemoError(
                 "LOCAL_AI_UNAVAILABLE",
                 "Cliente LOCAL_AI não está disponível.",
             )
-        payload = build_compact_interpretation_payload(text)
+
+        payload = build_interpretation_payload(
+            context,
+            message,
+            self.business_vocabulary,
+        )
+
         started = perf_counter()
         self._local_ai_total_calls += 1
         ok = False
         try:
             response = self._ollama_client.chat(payload)
-            scenario, signal = parse_compact_interpretation_response(response)
+
+            systems = self.business_vocabulary.systems(message)
+            resolved_entities = self.business_vocabulary.entities(message)
+            if len(systems) == 1:
+                resolved_entities = {
+                    "system": systems[0],
+                    **resolved_entities,
+                }
+
+            delta = parse_interpretation_response(
+                response,
+                resolved_entities=resolved_entities,
+            )
             ok = True
-            return scenario, signal
+            return delta
         except OllamaError as exc:
             raise WebDemoError(
                 "LOCAL_AI_INFERENCE_FAILED",
@@ -370,28 +409,326 @@ class DemoRuntime:
         except (TypeError, ValueError, KeyError) as exc:
             raise WebDemoError(
                 "LOCAL_AI_RESPONSE_INVALID",
-                "O modelo local retornou uma resposta fora do contrato compacto.",
+                "O modelo local retornou uma interpretação fora do contrato.",
             ) from exc
         finally:
-            duration_ms = max(0.0, (perf_counter() - started) * 1000)
+            duration_ms = max(
+                0.0,
+                (perf_counter() - started) * 1000,
+            )
             if not ok:
                 self._local_ai_failed_calls += 1
-            self._local_ai_calls.append({"duration_ms": duration_ms, "ok": ok})
+            self._local_ai_calls.append(
+                {
+                    "duration_ms": duration_ms,
+                    "ok": ok,
+                }
+            )
 
-    def _classify_local_ai(self, text: str):
-        scenario, signal = self._interpret_local_ai(text)
-        return compact_interpretation_to_classification(
-            text, scenario, signal, self.business_vocabulary
+    @staticmethod
+    def _apply_result_to_context(context, result):
+        from dataclasses import replace
+
+        handoff = result.get("support_handoff") or {}
+        technician = handoff.get("technician") or {}
+
+        context = apply_backend_updates(
+            context,
+            {
+                "request_id": result.get("request_id"),
+                "request_state": result.get("state"),
+                "policy": result.get("policy"),
+                "support_handoff_id": handoff.get("handoff_id"),
+                "support_handoff_system": handoff.get("system"),
+                "support_handoff_capability": handoff.get("capability"),
+                "support_technician_id": technician.get("technician_id"),
+            },
         )
 
-    def _support_signal_local_ai(self, identity_id: str, message: str):
+        if result.get("status") == "NEEDS_CLARIFICATION":
+            question = result.get("question")
+            if isinstance(question, str) and question.strip():
+                context = replace(
+                    context,
+                    dialogue=replace(
+                        context.dialogue,
+                        stage="DIAGNOSING",
+                        pending_information=(question.strip(),),
+                        last_question=question.strip(),
+                    ),
+                )
+
+        return context
+
+    def _generate_response(self, message, context, grounding):
+        if self._ollama_client is None:
+            raise WebDemoError(
+                "LOCAL_AI_UNAVAILABLE",
+                "Cliente LOCAL_AI não está disponível.",
+            )
+
+        def tracked_chat(payload):
+            started = perf_counter()
+            self._local_ai_total_calls += 1
+            ok = False
+            try:
+                response = self._ollama_client.chat(payload)
+                ok = True
+                return response
+            finally:
+                duration_ms = max(
+                    0.0,
+                    (perf_counter() - started) * 1000,
+                )
+                if not ok:
+                    self._local_ai_failed_calls += 1
+                self._local_ai_calls.append(
+                    {
+                        "duration_ms": duration_ms,
+                        "ok": ok,
+                    }
+                )
+
+        return generate_natural_response(
+            message,
+            context,
+            grounding,
+            tracked_chat,
+        )
+
+    def _resolve_local_ai_turn(
+        self,
+        identity_id,
+        requester,
+        message,
+        context,
+        delta,
+    ):
+        if delta.domain == "SOCIAL":
+            return {
+                "status": "SOCIAL",
+                "request_id": None,
+            }
+
+        if delta.domain == "OTHER":
+            return {
+                "status": "OUT_OF_SCOPE",
+                "request_id": None,
+                "support_handoff": None,
+                "understood_topic": delta.understood_topic,
+                "business_context": {
+                    "system": "",
+                    "product": "",
+                },
+            }
+
+        support_signal = _LOCAL_SUPPORT_SIGNALS.get(delta.semantic_signal)
+        active_system = context.dialogue.system.value or delta.entities.get("system", "")
+        explicit_systems = self.business_vocabulary.systems(message)
+        explicit_other_system = bool(
+            (active_system and active_system != "OFFICE 365")
+            or any(system != "OFFICE 365" for system in explicit_systems)
+        )
+        support_turn = self.support_state.handle(
+            identity_id,
+            message,
+            interpreted_signal=support_signal,
+            explicit_other_system=explicit_other_system,
+            allow_text_fallback=False,
+        )
+
+        if support_turn is not None and support_turn.status != "PASSWORD_EVIDENCE_COLLECTED":
+            if support_turn.status == "SUPPORT_RESOLVED":
+                self._record_support_resolution(identity_id, requester)
+
+            result = support_turn.as_result()
+            if support_turn.status == "SUPPORT_HANDOFF_PENDING":
+                handoff = self._materialize_support_handoff(
+                    identity_id,
+                    requester,
+                )
+                result["support_handoff"] = handoff.as_result()
+
+            result["business_context"] = {
+                "system": "OFFICE 365",
+                "product": context.dialogue.product.value,
+            }
+            return result
+
+        support = self.support_state.get(identity_id)
+        if support.stage == SupportStage.GUIDANCE_DELIVERED:
+            return {
+                "status": "NEEDS_CLARIFICATION",
+                "request_id": None,
+                "question": "O procedimento funcionou ou o problema continua?",
+                "business_context": {
+                    "system": "OFFICE 365",
+                    "product": context.dialogue.product.value,
+                },
+            }
+
+        classification = classification_from_context(
+            context,
+            delta,
+            self.business_vocabulary,
+        )
+
+        result = self._send_operational_message(
+            identity_id,
+            message,
+            requester,
+            classification=classification,
+        )
+
         if (
-            self.mode != "LOCAL_AI"
-            or self.support_state.get(identity_id).stage == SupportStage.IDLE
+            result.get("status") == "KNOWLEDGE_FOUND"
+            and result.get("knowledge_id") == "KB-SYN-M365-PASSWORD-001"
         ):
-            return None
-        _, signal = self._interpret_local_ai(message)
-        return _LOCAL_SUPPORT_SIGNALS.get(signal)
+            procedure = SupportProcedure(
+                knowledge_id=result["knowledge_id"],
+                answer=result["answer"],
+                url="https://mysignins.microsoft.com/security-info/password/change",
+            )
+            result["procedure_url"] = procedure.url
+            self.support_state.record_guidance(
+                identity_id,
+                procedure,
+            )
+
+        state = self._triage[identity_id][1]
+        if result.get("status") == "TRIAGE_ABSTAINED" and delta.domain == "IT_SUPPORT":
+            system = state.system or context.dialogue.system.value
+            intent = state.intent or delta.intent or "OUTRO"
+
+            if system == "OFFICE 365":
+                handoff = self._materialize_m365_knowledge_gap_handoff(
+                    identity_id,
+                    requester,
+                    message,
+                    intent=intent,
+                )
+            else:
+                handoff = self._materialize_general_handoff(
+                    identity_id,
+                    requester,
+                    message,
+                    system=system or "GENERAL_IT",
+                    intent=intent,
+                )
+
+            result = {
+                "status": "SUPPORT_HANDOFF_PENDING",
+                "request_id": None,
+                "support_handoff": handoff.as_result(),
+            }
+
+        result["business_context"] = {
+            "system": state.system,
+            "product": state.entities.get("product", ""),
+        }
+        return result
+
+    def _send_local_ai_message(
+        self,
+        identity_id: str,
+        message: str,
+        *,
+        telemetry: dict | None = None,
+    ) -> dict:
+        requester = self._requester(identity_id)
+
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("Mensagem vazia.")
+
+        context_before = self._context_for(
+            identity_id,
+            requester,
+        )
+
+        interpretation_started = perf_counter()
+        try:
+            delta = self._interpret_conversation(
+                context_before,
+                message,
+            )
+        finally:
+            if telemetry is not None:
+                telemetry["interpretation_ms"] = max(
+                    0.0,
+                    (perf_counter() - interpretation_started) * 1000,
+                )
+
+        context_after_delta = reduce_conversation_context(
+            context_before,
+            delta,
+            user_message=message,
+        )
+
+        self.knowledge_engine.last_search_ms = 0.0
+        backend_started = perf_counter()
+        try:
+            result = self._resolve_local_ai_turn(
+                identity_id,
+                requester,
+                message,
+                context_after_delta,
+                delta,
+            )
+        finally:
+            backend_total_ms = max(
+                0.0,
+                (perf_counter() - backend_started) * 1000,
+            )
+            retrieval_ms = max(
+                0.0,
+                float(getattr(self.knowledge_engine, "last_search_ms", 0.0)),
+            )
+            if telemetry is not None:
+                telemetry["retrieval_ms"] = retrieval_ms
+                telemetry["backend_ms"] = max(
+                    0.0,
+                    backend_total_ms - retrieval_ms,
+                )
+
+        context_after_backend = self._apply_result_to_context(
+            context_after_delta,
+            result,
+        )
+
+        grounding = ground_response(
+            result,
+            context_after_backend,
+            delta,
+        )
+
+        generation_started = perf_counter()
+        try:
+            assistant_message = self._generate_response(
+                message,
+                context_after_backend,
+                grounding,
+            )
+        finally:
+            if telemetry is not None:
+                telemetry["generation_ms"] = max(
+                    0.0,
+                    (perf_counter() - generation_started) * 1000,
+                )
+
+        context_final = append_turn(
+            context_after_backend,
+            "USER",
+            message.strip(),
+        )
+        context_final = append_turn(
+            context_final,
+            "ASSISTANT",
+            assistant_message,
+        )
+
+        self._conversation_contexts[identity_id] = context_final
+        result["assistant_message"] = assistant_message
+        return result
 
     def local_ai_metrics(self) -> dict:
         return {
@@ -464,6 +801,7 @@ class DemoRuntime:
         self._requester(identity_id)
         self._triage.pop(identity_id, None)
         self.conversations.pop(identity_id, None)
+        self._conversation_contexts.pop(identity_id, None)
         self.support_state.clear(identity_id)
         self._support_resolution_outcomes.pop(identity_id, None)
         self._support_handoff_ids.pop(identity_id, None)
@@ -478,15 +816,25 @@ class DemoRuntime:
 
         before_calls = self._local_ai_total_calls
         started = perf_counter()
+        turn = {
+            "interpretation_ms": 0.0,
+            "backend_ms": 0.0,
+            "retrieval_ms": 0.0,
+            "generation_ms": 0.0,
+        }
         try:
-            return self._send_message_impl(identity_id, message)
-        finally:
-            self._local_ai_turns.append(
-                {
-                    "call_count": self._local_ai_total_calls - before_calls,
-                    "duration_ms": max(0.0, (perf_counter() - started) * 1000),
-                }
+            return self._send_local_ai_message(
+                identity_id,
+                message,
+                telemetry=turn,
             )
+        finally:
+            turn["total_turn_ms"] = max(
+                0.0,
+                (perf_counter() - started) * 1000,
+            )
+            turn["qwen_call_count"] = self._local_ai_total_calls - before_calls
+            self._local_ai_turns.append(turn)
 
     def _send_message_impl(self, identity_id: str, message: str) -> dict:
         requester = self._requester(identity_id)
@@ -516,11 +864,9 @@ class DemoRuntime:
             return result
 
         systems = self.business_vocabulary.systems(message)
-        interpreted_signal = self._support_signal_local_ai(identity_id, message)
         support_turn = self.support_state.handle(
             identity_id,
             message,
-            interpreted_signal=interpreted_signal,
             explicit_other_system=bool(systems and "OFFICE 365" not in systems),
         )
         if support_turn is not None and support_turn.status != "PASSWORD_EVIDENCE_COLLECTED":
@@ -862,12 +1208,23 @@ class DemoRuntime:
         lines.append(f"Encaminhamento: {technician_name}")
         return "\n".join(lines)
 
-    def _send_operational_message(self, identity_id: str, message: str, requester) -> dict:
+    def _send_operational_message(
+        self,
+        identity_id: str,
+        message: str,
+        requester,
+        *,
+        classification=None,
+    ) -> dict:
         current = self._triage.get(identity_id)
         if current is None or current[1].status != "ACTIVE":
             current = self._new_triage(identity_id)
         engine, state = current
-        next_state, knowledge_result = engine.step(state, message)
+        next_state, knowledge_result = engine.step(
+            state,
+            message,
+            classification=classification,
+        )
         self._triage[identity_id] = (engine, next_state)
         self.conversations.setdefault(identity_id, []).append(
             {"role": "USER", "text": message.strip(), "status": knowledge_result["status"]}

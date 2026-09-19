@@ -2,12 +2,12 @@
 
 ## Pré-requisitos
 
-A demonstração da Fase 13 preserva o runtime homologado da Fase 12 e é local, sintética e reproduzível. Ela exige:
+A demonstração da Fase 15 usa o conversational core local, permanece sintética e reproduzível e exige:
 
 - Python 3.14.x;
 - ambiente do projeto instalado com `python -m pip install -e ".[dev]"`;
 - Node 24 para lint, testes e build do frontend;
-- checkout na branch `phase-13-requester-experience`;
+- checkout na branch `phase-15-conversational-core`;
 - porta TCP local disponível, por padrão `8000`.
 
 Não é necessário executar `npm install`. O frontend não possui dependências npm de runtime e não usa CDN. O roteiro conversacional usa `--mode LOCAL_AI`, com Ollama e `qwen3.5:4b`; o modo `DETERMINISTIC` mantém os smokes reproduzíveis.
@@ -19,8 +19,12 @@ Browser
   -> Jup Resolve frontend
   -> FastAPI local
   -> DemoRuntime
-  -> domínio homologado F1-F11
-  -> CDMAdapter
+  -> conversational core
+     -> ConversationInterpreter
+     -> backend authoritative services
+     -> ResponseGrounding
+     -> NaturalResponseGenerator
+  -> CDMAdapter, somente após autorização do backend
   -> fake CDM HTTP local
 ```
 
@@ -34,7 +38,7 @@ O frontend apresenta os estados recebidos da API. Ele não implementa Policy, Ro
 
 O backend FastAPI resolve a identidade somente por `X-Demo-Identity` usando a allowlist sintética. Mensagens de conversa não alteram a identidade da sessão.
 
-O browser nunca recebe token do CDM e nunca chama o fake CDM diretamente. O fake CDM é iniciado pelo backend em loopback com porta efêmera e existe apenas para provar a integração HTTP controlada da demonstração.
+O browser nunca chama Ollama nem CDM diretamente e nunca recebe token do CDM. Toda conversa passa por FastAPI, DemoRuntime e pelo conversational core antes dos serviços autoritativos. O fake CDM é iniciado pelo backend em loopback com porta efêmera e existe apenas para provar a integração HTTP controlada da demonstração.
 
 ## Build
 

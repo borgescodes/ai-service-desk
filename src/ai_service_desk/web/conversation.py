@@ -3,8 +3,6 @@ import re
 from collections.abc import Callable
 
 from ai_service_desk.engine.ollama import OllamaError
-from ai_service_desk.web.business_context import BusinessVocabulary
-from ai_service_desk.web.errors import WebDemoError
 
 _GREETING = re.compile(
     r"(?:bom dia|boa tarde|boa noite|oi|olá|ola)"
@@ -29,31 +27,19 @@ def is_outside_it_support_scope(message: str) -> bool:
     return any(pattern.search(normalized) is not None for pattern in _OUTSIDE_IT_SCOPE)
 
 
-def greeting_message(message: str, name: str, chat: Callable[[dict], dict] | None) -> str:
-    if chat is None:
-        normalized = " ".join(message.casefold().split())
-        if normalized.startswith("bom dia"):
-            return "Bom dia! Como posso ajudar?"
-        if normalized.startswith("boa tarde"):
-            return "Boa tarde! Como posso ajudar?"
-        if normalized.startswith("boa noite"):
-            return "Boa noite! Como posso ajudar?"
-        return "Oi! Como posso ajudar?"
-
-    choices = (
-        f"Olá, {name.split()[0]}! Me conta o que você precisa resolver ou acessar.",
-        f"Oi, {name.split()[0]}! Como posso ajudar?",
-    )
-    return _conversation_message(
-        message,
-        "Você é Jup. Escolha uma das saudações permitidas pelo formato JSON. "
-        f"O nome do solicitante, confirmado pelo backend, é {name}. "
-        "Use seu primeiro nome e convide-o a contar o que precisa. "
-        "Não afirme ter criado solicitações, aprovado ou executado ações.",
-        chat,
-        "SOCIAL_RESPONSE_UNAVAILABLE",
-        choices,
-    )
+def greeting_message(
+    message: str,
+    name: str,
+    chat: Callable[[dict], dict] | None,
+) -> str:
+    normalized = " ".join(message.casefold().split())
+    if normalized.startswith("bom dia"):
+        return "Bom dia! Como posso ajudar?"
+    if normalized.startswith("boa tarde"):
+        return "Boa tarde! Como posso ajudar?"
+    if normalized.startswith("boa noite"):
+        return "Boa noite! Como posso ajudar?"
+    return "Oi! Como posso ajudar?"
 
 
 def operational_message(result: dict, message: str, chat: Callable[[dict], dict] | None) -> str:
@@ -113,23 +99,7 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
 
     if result["status"] == "NEEDS_CLARIFICATION":
         question = result.get("question") or ""
-        systems = BusinessVocabulary().systems(message)
-        choices = ("Entendi seu relato.", "Entendi que você precisa de ajuda.")
-        if systems:
-            choices = (f"Entendi seu relato sobre {', '.join(systems)}.", *choices)
         acknowledgment = "Entendi."
-        if chat is not None:
-            acknowledgment = _conversation_message(
-                message,
-                "Você é Jup. Escolha um reconhecimento permitido pelo formato JSON. "
-                "Fale diretamente com a pessoa em segunda pessoa e apenas reconheça o que ela "
-                "relatou. Não faça perguntas. Não mencione instruções, limitações, regras ou "
-                "processos internos. Não use a expressão 'o usuário'. Não invente solução, "
-                "identidade, decisão, estado ou ação executada.",
-                chat,
-                "OPERATIONAL_RESPONSE_UNAVAILABLE",
-                choices,
-            )
         return f"{acknowledgment}\n\n{question}" if question else acknowledgment
 
     if result["status"] == "TRIAGE_ABSTAINED":
@@ -141,46 +111,186 @@ def operational_message(result: dict, message: str, chat: Callable[[dict], dict]
     return f"Nenhuma solicitação foi criada. Resultado do processo: {result['status']}."
 
 
-def _conversation_message(
-    message: str,
-    instruction: str,
-    chat: Callable[[dict], dict],
-    error_code: str,
-    choices: tuple[str, ...],
-) -> str:
+_REQUEST_ID = re.compile(r"\bREQ-\d{6}\b")
+_APPROVAL_CLAIM = re.compile(
+    r"\b(?:solicita[cç][aã]o|pedido|requisi[cç][aã]o|acesso|request|access request)\b"
+    r".{0,32}\b(?:aprovad[oa]|approved)\b"
+    r"|"
+    r"\b(?:aprovad[oa]|approved)\b"
+    r".{0,16}\b(?:solicita[cç][aã]o|pedido|requisi[cç][aã]o|acesso|request|access request)\b",
+    re.I,
+)
+_EXECUTION_CLAIM = re.compile(
+    r"\b(?:executad[oa]|completed|conclu[ií]d[oa])\b",
+    re.I,
+)
+_ACCESS_GRANTED_CLAIM = re.compile(
+    r"\b(?:acesso (?:foi )?liberad[oa]|já liberei|pode entrar)\b",
+    re.I,
+)
+
+
+_INTERNAL_ARCHITECTURE_CLAIM = re.compile(
+    r"\b(?:backend|grounding|handler|policy engine)\b",
+    re.I,
+)
+
+_INVENTED_CAPABILITY_CLAIM = re.compile(
+    r"\b(?:tenho|temos) acesso ao sistema\b"
+    r"|"
+    r"\bt.cnico\b.{0,48}\b(?:est.|ficou) pronto\b",
+    re.I,
+)
+
+
+def _has_invalid_operational_claim(text, grounding):
+    allowed = {value.casefold() for value in grounding.allowed_operational_values}
+
+    request_ids = _REQUEST_ID.findall(text)
+    if any(request_id.casefold() not in allowed for request_id in request_ids):
+        return True
+
+    if _APPROVAL_CLAIM.search(text) and "approved" not in allowed:
+        return True
+
+    if _EXECUTION_CLAIM.search(text) and not {
+        "executed",
+        "completed",
+    }.intersection(allowed):
+        return True
+
+    if _ACCESS_GRANTED_CLAIM.search(text) and not {
+        "access_granted",
+        "granted",
+    }.intersection(allowed):
+        return True
+
+    if _INTERNAL_ARCHITECTURE_CLAIM.search(text):
+        return True
+
+    if _INVENTED_CAPABILITY_CLAIM.search(text):
+        return True
+
+    return False
+
+
+def _generate_natural_response(message, context, grounding, chat):
+    protected = bool(grounding.protected_content)
+
+    if protected:
+        response_format = {
+            "type": "object",
+            "properties": {
+                "intro": {"type": "string"},
+                "outro": {"type": "string"},
+            },
+            "required": ["intro", "outro"],
+            "additionalProperties": False,
+        }
+    else:
+        response_format = {
+            "type": "object",
+            "properties": {
+                "assistant_message": {"type": "string"},
+            },
+            "required": ["assistant_message"],
+            "additionalProperties": False,
+        }
+
+    recent_turns = [
+        {
+            "role": turn.role,
+            "text": turn.text,
+        }
+        for turn in getattr(context, "recent_turns", ())
+    ]
+
+    instruction = (
+        "Voce e Jup, agente conversacional de suporte de TI. "
+        "Escreva de forma natural e contextual, sem usar respostas de catalogo. "
+        "Use somente os fatos operacionais confirmados fornecidos nesta instrucao. "
+        "Nunca preencha fatos operacionais ausentes usando conhecimento do modelo. "
+        "Nunca exponha componentes internos, mecanismos de decisao ou "
+        "detalhes de implementacao.\n\n"
+        f"Objetivo da resposta: {grounding.response_goal}\n"
+        f"Fatos confirmados: {list(grounding.facts)}\n"
+        f"Afirmacoes proibidas: {list(grounding.forbidden_claims)}\n"
+        f"Informacoes obrigatorias: {list(grounding.required_information)}\n"
+        f"Turnos recentes: {recent_turns}"
+    )
+
     payload = {
         "model": "qwen3.5:4b",
-        "stream": False,
         "think": False,
+        "stream": False,
+        "keep_alive": "30m",
         "messages": [
             {
                 "role": "system",
                 "content": instruction,
             },
-            {"role": "user", "content": message},
+            {
+                "role": "user",
+                "content": message,
+            },
         ],
-        "format": {
-            "type": "object",
-            "properties": {"assistant_message": {"type": "string", "enum": list(choices)}},
-            "required": ["assistant_message"],
-            "additionalProperties": False,
+        "format": response_format,
+        "options": {
+            "temperature": 0.4,
+            "num_ctx": 3072,
+            "num_predict": 256,
         },
-        "options": {"temperature": 0, "num_predict": 256},
     }
+
+    response = chat(payload)
+    if response.get("done_reason") == "length":
+        raise ValueError("Resposta conversacional truncada.")
+
+    data = json.loads(response["message"]["content"])
+    if not isinstance(data, dict):
+        raise ValueError("Resposta conversacional fora do contrato.")
+
+    if protected:
+        if set(data) != {"intro", "outro"}:
+            raise ValueError("Resposta protegida fora do contrato.")
+
+        intro = data["intro"]
+        outro = data["outro"]
+        if not isinstance(intro, str) or not isinstance(outro, str):
+            raise ValueError("Resposta protegida deve conter apenas texto.")
+
+        if _has_invalid_operational_claim(intro, grounding):
+            return grounding.fallback_message
+        if _has_invalid_operational_claim(outro, grounding):
+            return grounding.fallback_message
+
+        parts = [
+            intro.strip(),
+            *(item.content for item in grounding.protected_content),
+            outro.strip(),
+        ]
+        return "\n\n".join(part for part in parts if part)
+
+    if set(data) != {"assistant_message"}:
+        raise ValueError("Resposta conversacional fora do contrato.")
+
+    assistant_message = data["assistant_message"]
+    if not isinstance(assistant_message, str) or not assistant_message.strip():
+        raise ValueError("Resposta conversacional vazia.")
+
+    if _has_invalid_operational_claim(assistant_message, grounding):
+        return grounding.fallback_message
+
+    return assistant_message.strip()
+
+
+def generate_natural_response(message, context, grounding, chat):
     try:
-        response = chat(payload)
-        if response.get("done_reason") == "length":
-            raise ValueError("Resposta conversacional truncada.")
-        data = json.loads(response["message"]["content"])
-        if not isinstance(data, dict) or set(data) != {"assistant_message"}:
-            raise ValueError("Resposta fora do contrato de apresentação.")
-        text = data["assistant_message"]
-        if not isinstance(text, str) or not text.strip():
-            raise ValueError("Resposta conversacional vazia.")
-        if text not in choices:
-            raise ValueError("Reconhecimento não autorizado pelo contrato de apresentação.")
-        return text
-    except (OllamaError, ValueError, KeyError, TypeError, AttributeError) as exc:
-        raise WebDemoError(
-            error_code, "Não foi possível obter a resposta conversacional do Ollama."
-        ) from exc
+        return _generate_natural_response(
+            message,
+            context,
+            grounding,
+            chat,
+        )
+    except (OllamaError, ValueError, KeyError, TypeError, AttributeError):
+        return grounding.fallback_message

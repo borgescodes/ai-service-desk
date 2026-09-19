@@ -523,3 +523,34 @@ def test_two_sessions_do_not_share_state() -> None:
     assert state_a.pending_field == "system"
     assert state_b.session_id == "session-b"
     assert result_b["status"] == "KNOWLEDGE_FOUND"
+
+
+def test_step_can_use_precomputed_classification_without_second_classifier_call():
+    knowledge = FakeKnowledgeEngine({"PROBLEMA_ACESSO": ("CDM",)})
+    calls = []
+
+    def forbidden_classifier(text):
+        calls.append(text)
+        raise AssertionError("classifier must not be called")
+
+    engine = TriageEngine(
+        "session-precomputed",
+        knowledge,
+        forbidden_classifier,
+    )
+    state = engine.initial_state()
+    classification = TicketClassification(
+        "PROBLEMA_ACESSO",
+        "CDM",
+        {},
+        0.9,
+    )
+
+    next_state, _ = engine.step(
+        state,
+        "Preciso acessar o CDM",
+        classification=classification,
+    )
+
+    assert calls == []
+    assert next_state.system == "CDM"
