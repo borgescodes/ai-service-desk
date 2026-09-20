@@ -48,6 +48,7 @@ from ai_service_desk.integrations.cdm import CDMAdapter
 from ai_service_desk.integrations.cdm_fake_api import CDMFakeStore, build_cdm_server
 from ai_service_desk.web.business_context import BusinessVocabulary
 from ai_service_desk.web.conversation import (
+    general_handoff_options,
     generate_natural_response,
     greeting_message,
     is_outside_it_support_scope,
@@ -88,6 +89,7 @@ from ai_service_desk.web.demo_support import (
     SupportStage,
 )
 from ai_service_desk.web.errors import WebDemoError
+from ai_service_desk.web.general_triage import QUESTIONS, GeneralTriage, is_general_it_problem
 from ai_service_desk.web.presentation import present_confidence, present_prevention, present_request
 
 DEMO_MODES = frozenset({"DETERMINISTIC", "LOCAL_AI"})
@@ -281,6 +283,7 @@ class DemoRuntime:
         self._support_resolution_outcomes: dict[str, str] = {}
         self._support_handoff_ids: dict[str, str] = {}
         self._general_handoff_ids: dict[str, str] = {}
+        self._general_triage: dict[str, GeneralTriage] = {}
 
         cdm_technician = self.identity_provider.technician_identity("tecnico-cdm")
         m365_technician = self.identity_provider.technician_identity("tecnico-m365")
@@ -563,12 +566,15 @@ class DemoRuntime:
                 "request_id": None,
             }
 
+        if identity_id in self._general_triage:
+            return self._general_triage_turn(identity_id, requester, message)
+
         if delta.domain == "OTHER":
             return {
                 "status": "OUT_OF_SCOPE",
                 "request_id": None,
                 "support_handoff": None,
-                "understood_topic": delta.understood_topic,
+                "understood_topic": delta.understood_topic or message,
                 "business_context": {
                     "system": "",
                     "product": "",
@@ -649,25 +655,37 @@ class DemoRuntime:
             )
 
         state = self._triage[identity_id][1]
-        if result.get("status") == "TRIAGE_ABSTAINED" and delta.domain == "IT_SUPPORT":
+        if (
+            result.get("status") in {"TRIAGE_ABSTAINED", "NEEDS_CLARIFICATION"}
+            and delta.domain == "IT_SUPPORT"
+            and result.get("reason") not in {"MISSING_SYSTEM", "AMBIGUOUS_SYSTEM"}
+        ):
             system = state.system or context.dialogue.system.value
             intent = state.intent or delta.intent or "OUTRO"
 
-            if system == "OFFICE 365":
+            if system == "OFFICE 365" and result.get("status") == "TRIAGE_ABSTAINED":
                 handoff = self._materialize_m365_knowledge_gap_handoff(
                     identity_id,
                     requester,
                     message,
                     intent=intent,
                 )
-            else:
-                handoff = self._materialize_general_handoff(
+            elif system != "OFFICE 365" and (
+                system != "CDM" or result.get("status") == "TRIAGE_ABSTAINED"
+            ):
+                return self._general_triage_turn(
                     identity_id,
                     requester,
                     message,
                     system=system or "GENERAL_IT",
                     intent=intent,
                 )
+            else:
+                result["business_context"] = {
+                    "system": system,
+                    "product": state.entities.get("product", ""),
+                }
+                return result
 
             result = {
                 "status": "SUPPORT_HANDOFF_PENDING",
@@ -718,6 +736,7 @@ class DemoRuntime:
             delta,
             user_message=message,
         )
+        self._cancel_general_for_new_goal(identity_id, message, delta)
 
         if delta.semantic_signal == "REQUEST_STATUS_QUERY" or _is_request_status_query(message):
             result = self._request_status_result(identity_id)
@@ -798,6 +817,7 @@ class DemoRuntime:
         )
 
         self._conversation_contexts[identity_id] = context_final
+        self._record_general_response(identity_id, result, assistant_message)
         result["assistant_message"] = assistant_message
         return result
 
@@ -878,11 +898,14 @@ class DemoRuntime:
         self._support_resolution_outcomes.pop(identity_id, None)
         self._support_handoff_ids.pop(identity_id, None)
         self._general_handoff_ids.pop(identity_id, None)
+        self._general_triage.pop(identity_id, None)
         self._conversation_generations[identity_id] = (
             self._conversation_generations.get(identity_id, 0) + 1
         )
 
     def send_message(self, identity_id: str, message: str) -> dict:
+        if isinstance(message, str):
+            self._cancel_general_for_new_goal(identity_id, message)
         if isinstance(message, str) and message.strip() == "/solicitacoes":
             context = self._context_for(identity_id, self._requester(identity_id))
             result = self._request_status_result(identity_id)
@@ -895,6 +918,7 @@ class DemoRuntime:
         if self.mode != "LOCAL_AI":
             context = self._context_for(identity_id, self._requester(identity_id))
             result = self._send_message_impl(identity_id, message)
+            self._record_general_response(identity_id, result, result["assistant_message"])
             context = self._apply_result_to_context(context, result)
             context = append_turn(context, "USER", message)
             self._conversation_contexts[identity_id] = append_turn(
@@ -969,6 +993,10 @@ class DemoRuntime:
             return result
 
         systems = self.business_vocabulary.systems(message)
+        if identity_id in self._general_triage:
+            result = self._general_triage_turn(identity_id, requester, message)
+            result["assistant_message"] = result["general_triage"]["response_options"][0]
+            return result
         support_turn = self.support_state.handle(
             identity_id,
             message,
@@ -1022,23 +1050,90 @@ class DemoRuntime:
             }
         elif self._should_general_handoff(message, systems, result, state):
             system = systems[0] if len(systems) == 1 else "GENERAL_IT"
-            handoff = self._materialize_general_handoff(
+            result = self._general_triage_turn(
                 identity_id,
                 requester,
                 message,
                 system=system,
                 intent=state.intent or "OUTRO",
             )
-            result = {
-                "status": "SUPPORT_HANDOFF_PENDING",
-                "request_id": None,
-                "support_handoff": handoff.as_result(),
-            }
         result["business_context"] = {
             "system": state.system,
             "product": state.entities.get("product", ""),
         }
         result["assistant_message"] = operational_message(result, message, None)
+        return result
+
+    def _cancel_general_for_new_goal(self, identity_id, message, delta=None):
+        if identity_id not in self._general_triage:
+            return
+        systems = self.business_vocabulary.systems(message)
+        contextual_reply = bool(
+            re.match(
+                r"(?:principalmente|somente|apenas|so|no|na|quando|ao)\b", normalize_text(message)
+            )
+        )
+        switched = (
+            (bool(systems) and not contextual_reply)
+            or _is_request_status_query(message)
+            or message.strip() == "/solicitacoes"
+            or is_outside_it_support_scope(message)
+            or bool(
+                re.search(
+                    r"\b(?:deixa isso|outro assunto|outro problema|esquece isso)\b",
+                    normalize_text(message),
+                )
+            )
+            or (delta is not None and delta.relation == TurnRelation.TOPIC_SWITCH)
+            or (
+                delta is not None
+                and delta.domain == "OTHER"
+                and delta.relation == TurnRelation.NEW_GOAL
+            )
+        )
+        if switched:
+            self._general_triage.pop(identity_id, None)
+            self._general_handoff_ids.pop(identity_id, None)
+            self._triage.pop(identity_id, None)
+
+    def _record_general_response(self, identity_id, result, response):
+        current = self._general_triage.get(identity_id)
+        if current is not None and result.get("general_triage") and not current.handoff_id:
+            self._general_triage[identity_id] = current.with_response(response)
+
+    def _general_triage_turn(
+        self, identity_id, requester, message, *, system="GENERAL_IT", intent="OUTRO"
+    ):
+        current = self._general_triage.get(identity_id)
+        if current is None:
+            self._general_handoff_ids.pop(identity_id, None)
+            current = GeneralTriage(message.strip(), system, intent)
+        if current.handoff_id:
+            handoff = self.support_handoff_store.get(current.handoff_id)
+            dimension = None
+        else:
+            current, dimension = current.collect(
+                message.strip(),
+                sufficient_initial=bool(self.business_vocabulary.canonical(system)),
+            )
+            self._general_triage[identity_id] = current
+            if dimension is None:
+                handoff = self._materialize_general_handoff(
+                    identity_id, requester, message, system=current.system, intent=current.intent
+                )
+                current = replace(current, handoff_id=handoff.handoff_id)
+                self._general_triage[identity_id] = current
+        result = {"request_id": None, "business_context": {"system": current.system, "product": ""}}
+        if dimension is not None:
+            options = QUESTIONS[dimension]
+            result.update(status="NEEDS_CLARIFICATION", question=options[0])
+        else:
+            options = general_handoff_options(current.history)
+            result.update(status="SUPPORT_HANDOFF_PENDING", support_handoff=handoff.as_result())
+        result["general_triage"] = {
+            "questions_asked": len(current.questions),
+            "response_options": options,
+        }
         return result
 
     @staticmethod
@@ -1050,7 +1145,7 @@ class DemoRuntime:
         normalized = " ".join(message.casefold().split())
         if systems == ("UBS",) and _ACCESS_REQUEST.search(normalized):
             return True
-        if _GENERAL_IT_CLEAR.search(normalized):
+        if _GENERAL_IT_CLEAR.search(normalized) or is_general_it_problem(message):
             return True
         if (
             result.get("status") == "TRIAGE_ABSTAINED"
@@ -1220,20 +1315,27 @@ class DemoRuntime:
         if existing_id is not None:
             return self.support_handoff_store.get(existing_id)
 
-        technician = self.identity_provider.technician_identity("tecnico-geral")
+        technician = self.routing_registry.resolve("GENERAL_IT", "GENERAL_IT_SUPPORT")
         assessment = assess_support_context(requester.area, system, message)
         confidence = present_confidence(assessment)
-        conversation_history = tuple(
-            SupportHistoryEntry("USER", item["text"])
-            for item in self.conversations.get(identity_id, [])
-            if item.get("role") == "USER" and item.get("text")
+        triage = self._general_triage.get(identity_id)
+        conversation_history = (
+            triage.history
+            if triage is not None
+            else tuple(
+                SupportHistoryEntry(item.role, item.text)
+                for item in self._context_for(identity_id, requester).recent_turns
+            )
         )
         if not conversation_history or conversation_history[-1].text != message.strip():
             conversation_history += (SupportHistoryEntry("USER", message.strip()),)
         support = SupportConversation(
             stage=SupportStage.HANDOFF,
-            original_symptom=message.strip(),
-            evidence=(message.strip(),),
+            original_symptom=triage.original_symptom if triage else message.strip(),
+            evidence=tuple(item.text for item in conversation_history if item.role == "USER"),
+            questions_asked=tuple(
+                item.text for item in conversation_history if item.role == "ASSISTANT"
+            ),
             history=conversation_history,
         )
         public_system = system if system != "GENERAL_IT" else "TI geral"
@@ -1242,6 +1344,7 @@ class DemoRuntime:
                 f"Solicitante: {requester.name}",
                 f"E-mail: {requester.email}",
                 f"Área: {requester.area}",
+                f"Cargo: {requester.job_title}",
                 f"Sistema/contexto: {public_system}",
                 f"Intenção interpretada: {intent or 'OUTRO'}",
                 f"Sintoma/pedido informado: {message.strip()}",
@@ -1249,6 +1352,8 @@ class DemoRuntime:
                 f"Confiança de contexto: {confidence['label']}",
                 "Motivos: " + ", ".join(assessment.reason_codes),
                 f"Encaminhamento: {technician.name}",
+                "Conversa de triagem:",
+                *(f"{item.role}: {item.text}" for item in conversation_history),
             )
         )
         handoff_id = f"DEMO-GENERAL-HANDOFF-{len(self.support_handoff_store.snapshot()) + 1:03d}"

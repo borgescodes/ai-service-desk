@@ -3,6 +3,7 @@ import re
 from collections.abc import Callable
 
 from ai_service_desk.engine.ollama import OllamaError
+from ai_service_desk.engine.validation import normalize_text
 
 _GREETING = re.compile(
     r"(?:bom dia|boa tarde|boa noite|oi|olá|ola)"
@@ -12,9 +13,12 @@ _GREETING = re.compile(
 
 _OUTSIDE_IT_SCOPE = (
     re.compile(r"\b(?:quanto foi|quem ganhou|qual foi o placar)\b.*\b(?:jogo|partida)\b"),
-    re.compile(r"\b(?:receita|ingredientes? para (?:um |uma )?receita|como (?:fazer|cozinhar))\b"),
+    re.compile(
+        r"\b(?:receita|ingredientes? para (?:um |uma )?receita|"
+        r"como (?:fazer|faco|cozinhar) (?:um |uma )?(?:bolo|pao|torta|comida))\b"
+    ),
     re.compile(r"\bqual(?: e)? a capital (?:da|de|do)\b"),
-    re.compile(r"\b(?:escreve|escreva|cria|crie|faca)\b.*\b(?:poesia|poema)\b"),
+    re.compile(r"\b(?:escrever|escreve|escreva|cria|crie|faca)\b.*\b(?:poesia|poema)\b"),
 )
 
 
@@ -23,8 +27,30 @@ def is_social_greeting(message: str) -> bool:
 
 
 def is_outside_it_support_scope(message: str) -> bool:
-    normalized = " ".join(message.casefold().split())
+    normalized = normalize_text(message)
     return any(pattern.search(normalized) is not None for pattern in _OUTSIDE_IT_SCOPE)
+
+
+def scope_redirect_fallback(topic: str) -> str:
+    normalized = normalize_text(topic)
+    if re.search(r"\b(?:bolo|receita)\b", normalized):
+        return (
+            "Entendi que você procura uma receita de bolo. Aqui eu cuido de suporte "
+            "e serviços de TI; se precisar de ajuda nessa área, pode me contar."
+        )
+    if re.search(r"\b(?:poema|poesia)\b", normalized):
+        return (
+            "Você quer ajuda com um poema, mas meu foco aqui é suporte de TI. "
+            "Tem alguma necessidade de tecnologia em que eu possa ajudar?"
+        )
+    if re.search(r"\b(?:jogo|partida|futebol|placar)\b", normalized):
+        return (
+            "Sobre o jogo, não consigo ajudar por aqui. Cuido dos atendimentos "
+            "e solicitações de TI; se precisar, pode me contar."
+        )
+    return (
+        "Esse assunto fica fora do meu papel aqui. Posso ajudar com suporte e solicitações de TI."
+    )
 
 
 def greeting_message(
@@ -43,11 +69,10 @@ def greeting_message(
 
 
 def operational_message(result: dict, message: str, chat: Callable[[dict], dict] | None) -> str:
+    if result.get("general_triage"):
+        return result["general_triage"]["response_options"][0]
     if result["status"] == "OUT_OF_SCOPE":
-        return (
-            "Meu foco aqui é suporte de TI, como acesso a sistemas, Microsoft 365 "
-            "e solicitações no CDM. Para esse outro assunto, não vou responder por aqui."
-        )
+        return scope_redirect_fallback(message)
 
     if result["status"] == "KNOWLEDGE_FOUND":
         return f"Encontrei uma orientação aprovada para esse caso:\n\n{result['answer']}"
@@ -131,9 +156,45 @@ _ACCESS_GRANTED_CLAIM = re.compile(
 
 
 _INTERNAL_ARCHITECTURE_CLAIM = re.compile(
-    r"\b(?:backend|grounding|handler|policy engine)\b",
+    r"\b(?:backend|grounding|handler|policy(?: engine)?|capabilit(?:y|ies)|routing|"
+    r"confidence|knowledge_id|MODEL_INFERRED|USER_EXPLICIT|TRUSTED_SESSION|"
+    r"GENERAL_IT(?:_SUPPORT)?|TECH-[\w-]+|SUPPORT_HANDOFF_PENDING|"
+    r"NEEDS_CLARIFICATION|PENDING_APPROVAL|DENIED_POLICY|REQUIRE_APPROVAL|"
+    r"ConversationInterpreter|ResponseGrounding|SupportHandoff(?:Store)?|"
+    r"verifica[cç][aã]o operacional|escopo operacional)\b",
     re.I,
 )
+
+
+def _is_scope_redirect(text):
+    normalized = normalize_text(text)
+    if "escopo operacional" in normalized or re.search(
+        r"\d|\b(?:encaminh\w*|notific\w*|contat\w*|ligar|retorno|sla|prazo|"
+        r"mistur\w*|adicione|asse|preaque\w*|ingredientes|gols?|ganhou|venceu|"
+        r"reinici\w*|instal\w*|execut\w*|simul\w*|recebera|resolveremos)\b",
+        normalized,
+    ):
+        return False
+    sentences = [
+        normalize_text(part).strip() for part in re.split(r"[.!?\n]+", text) if part.strip()
+    ]
+    if not 1 <= len(sentences) <= 3 or len(text) > 500:
+        return False
+    role = re.compile(
+        r"\b(?:meu (?:papel|foco)|suporte (?:de |e servicos de |tecnico)|"
+        r"(?:assuntos|solicitacoes|necessidade|necessidades|questoes|servicos) de ti|"
+        r"(?:ajudar|ajudo|ajuda|cuidar)\b.*\b(?:ti|tecnologia)|"
+        r"(?:problema tecnico|duvida sobre tecnologia)\b.*\bajudar|"
+        r"(?:aqui|atuo|cuido)\b.*\bti)\b"
+    )
+    acknowledgment = re.compile(
+        r"^(?:entendi|vejo|percebi|voce (?:quer|gostaria|esta (?:buscando|procurando)))\b"
+    )
+    return any(role.search(part) for part in sentences) and all(
+        role.search(part) or (index == 0 and acknowledgment.search(part))
+        for index, part in enumerate(sentences)
+    )
+
 
 _INVENTED_CAPABILITY_CLAIM = re.compile(
     r"\b(?:tenho|temos) acesso ao sistema\b"
@@ -141,6 +202,32 @@ _INVENTED_CAPABILITY_CLAIM = re.compile(
     r"\bt.cnico\b.{0,48}\b(?:est.|ficou) pronto\b",
     re.I,
 )
+
+
+def general_handoff_options(history):
+    """Resumo extrativo: texto atribuído ao solicitante, nunca diagnóstico gerado."""
+    reports = [item.text for item in history if item.role == "USER"]
+    safe_reports = [
+        text
+        for text in reports
+        if len(text) <= 220
+        and not _INTERNAL_ARCHITECTURE_CLAIM.search(text)
+        and not re.search(
+            r"\b(?:reinici\w*|reinstal\w*|atualiz\w*|driver|usb|cache|comando|"
+            r"configur\w*|registro|reset\w*|trocar|instal\w*|suporte|tecnico|"
+            r"fazer|nao sei|nao tenho certeza|nao consigo dizer)\b",
+            normalize_text(text),
+        )
+    ]
+    summary = ""
+    if safe_reports:
+        summary = f"Você relatou “{safe_reports[0]}”. "
+        if len(safe_reports) > 1:
+            summary += f"Acrescentou: “{safe_reports[-1]}”. "
+    return (
+        summary + "Encaminhei esse contexto para o suporte de TI analisar.",
+        "Entendi. " + summary + "Encaminhei o que você relatou para o suporte de TI analisar.",
+    )
 
 
 def _has_invalid_operational_claim(text, grounding):
@@ -218,6 +305,11 @@ def _generate_natural_response(message, context, grounding, chat):
         f"Informacoes obrigatorias: {list(grounding.required_information)}\n"
         f"Turnos recentes: {recent_turns}"
     )
+    if grounding.response_options:
+        instruction += (
+            f"\nEscolha a formulação mais adequada ao turno entre: {grounding.response_options}. "
+            "Retorne a frase escolhida literalmente em assistant_message, sem acrescentar nada."
+        )
     if grounding.allowed_wrappers is not None:
         instruction += (
             f"\nintro e outro devem ser escolhidos somente entre: {grounding.allowed_wrappers}. "
@@ -289,6 +381,12 @@ def _generate_natural_response(message, context, grounding, chat):
         raise ValueError("Resposta conversacional vazia.")
 
     if _has_invalid_operational_claim(assistant_message, grounding):
+        return grounding.fallback_message
+
+    if grounding.response_options and assistant_message.strip() not in grounding.response_options:
+        return grounding.fallback_message
+
+    if grounding.disposition == "OUT_OF_SCOPE" and not _is_scope_redirect(assistant_message):
         return grounding.fallback_message
 
     return assistant_message.strip()

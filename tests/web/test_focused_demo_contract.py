@@ -294,7 +294,7 @@ def test_outside_scope_redirects_to_it_without_creating_request(runtime, message
     result = send(runtime, message)
     response = result["assistant_message"].casefold()
     assert "ti" in response
-    assert "acesso" in response or "sistema" in response
+    assert result["status"] == "OUT_OF_SCOPE"
     assert "paris" not in response
     assert not result.get("request_id")
     assert not result.get("support_handoff")

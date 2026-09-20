@@ -1,6 +1,8 @@
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
+from ai_service_desk.web.conversation import scope_redirect_fallback
+
 
 class ConversationDisposition(StrEnum):
     SOCIAL = "SOCIAL"
@@ -33,6 +35,7 @@ class ResponseGrounding:
     fallback_message: str
     allowed_operational_values: frozenset[str]
     allowed_wrappers: tuple[str, ...] | None = None
+    response_options: tuple[str, ...] = ()
 
 
 def _consolidated_facts(context) -> tuple[str, ...]:
@@ -47,6 +50,20 @@ def _consolidated_facts(context) -> tuple[str, ...]:
 
 def ground_response(result, context, delta) -> ResponseGrounding:
     grounding = _ground_response(result, context, delta)
+    if result.get("general_triage"):
+        options = tuple(result["general_triage"]["response_options"])
+        return replace(
+            grounding,
+            facts=(),
+            response_goal="Use somente a pergunta ou o encaminhamento confirmado, com o relato.",
+            fallback_message=options[0],
+            response_options=options,
+            forbidden_claims=(
+                *grounding.forbidden_claims,
+                "Não acrescente procedimentos, causas, diagnóstico, fatos técnicos ou perguntas.",
+                "Não prometa contato, notificação, prazo, resolução ou acompanhamento.",
+            ),
+        )
     article = result.get("article") or {}
     article_is_approved = article.get("provenance", {}).get("status") == "APPROVED"
     if result.get("system") != "CDM" and not article_is_approved:
@@ -350,16 +367,17 @@ def _ground_response(result, context, delta) -> ResponseGrounding:
                 "Reconheça naturalmente o assunto entendido, explique que ele está "
                 "fora do papel de suporte de TI do Jup e redirecione a conversa para "
                 "assuntos de TI. Não invente encaminhamento para técnico."
+                " Não responda o conteúdo solicitado: nenhuma receita, placar, poema ou conselho."
+                " Use no máximo duas frases curtas e acolhedoras: reconheça o tema e convide "
+                "a trazer uma necessidade de TI. Evite explicações formais sobre restrições, "
+                "infraestrutura, escopo operacional ou regras."
             ),
             verbosity="concise",
             facts=tuple(facts),
             protected_content=(),
             forbidden_claims=forbidden_claims,
             required_information=(),
-            fallback_message=(
-                "Esse assunto fica fora do meu papel aqui. "
-                "Posso ajudar com suporte e solicitações de TI."
-            ),
+            fallback_message=scope_redirect_fallback(topic),
             allowed_operational_values=allowed_values,
         )
 

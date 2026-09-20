@@ -88,6 +88,9 @@ def test_ubs_access_goes_to_general_technician_with_low_explainable_confidence(r
 def test_general_it_without_approved_knowledge_handoffs_instead_of_dying(runtime):
     result = runtime.send_message("pedro-miranda", "meu pc ta travando muito")
 
+    assert result["status"] == "NEEDS_CLARIFICATION"
+    result = runtime.send_message("pedro-miranda", "principalmente no Excel")
+
     assert result["status"] == "SUPPORT_HANDOFF_PENDING"
     assert result["support_handoff"]["technician"]["technician_id"] == "TECH-GENERAL"
     assert result["request_id"] is None
