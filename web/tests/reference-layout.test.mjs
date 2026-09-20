@@ -20,7 +20,7 @@ test('chat navigation keeps reset and request tracking in the contextual sidebar
   const global = html.split('</header>')[0];
   assert.doesNotMatch(global, /href="\/requests"/);
   assert.match(html, /data-action="new-chat"[^>]*>[^]*?Nova conversa/);
-  assert.match(html, /href="\/requests"[^>]*>[^]*?Acompanhar chamado/);
+  assert.match(html, /href="\/requests"[^>]*>[^]*?Minhas solicitações/);
   assert.doesNotMatch(html, /Artigos de ajuda/);
 });
 

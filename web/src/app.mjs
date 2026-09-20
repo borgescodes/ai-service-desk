@@ -152,7 +152,7 @@ function renderRoute() {
   }
 
   if (state.route === 'requests') {
-    return `${pageHeading('Acompanhar chamados', 'Acompanhe o andamento dos seus atendimentos.')}${renderRequestList(state.routeData.items ?? [], state.selectedRequestId)}`;
+    return `${pageHeading('Minhas solicitações', 'Veja o estado atual e o próximo passo de cada atendimento.')}${renderRequestList(state.routeData.items ?? [], state.selectedRequestId)}`;
   }
 
   if (state.route === 'approvals') {

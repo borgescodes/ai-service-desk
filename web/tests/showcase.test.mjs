@@ -105,7 +105,7 @@ test('FAQ accordion is independent, animated and catalog rows do not expose demo
 test('Jup contextual sidebar keeps only new conversation and request tracking', () => {
   const html = renderAppHeader({ activeRoute: 'jup', identity: { name: 'Pedro Miranda' } });
   assert.match(html, /Nova conversa/);
-  assert.match(html, /Acompanhar chamado/);
+  assert.match(html, /Minhas solicitações/);
   assert.doesNotMatch(html, /Artigos de ajuda/);
 });
 

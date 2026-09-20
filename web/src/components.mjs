@@ -17,7 +17,7 @@ export function renderAppHeader({ activeRoute, operational = false, operationPat
   const globalItems = operational ? [] : [['solutions', '/', 'Soluções'], ['jup', '/jup', 'Falar com o Jup']];
   const sidebarItems = operational
     ? [['approvals', operationPath, 'Solicitações recebidas']]
-    : [['requests', '/requests', 'Acompanhar chamado']];
+    : [['requests', '/requests', 'Minhas solicitações']];
   const initials = (identity.name || 'Jup').split(' ').slice(0, 2).map(word => word[0]).join('');
   const requester = identity.role === 'REQUESTER'
     ? identity

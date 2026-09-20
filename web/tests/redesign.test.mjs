@@ -34,7 +34,7 @@ test('header exposes backend persona choices and a real new-chat control', () =>
   assert.match(html, /Pedro Miranda/);
   assert.match(html, /data-persona="tecnico-cdm"/);
   assert.match(html, /data-action="new-chat"/);
-  assert.match(html, /Acompanhar chamado/);
+  assert.match(html, /Minhas solicitações/);
   assert.match(html, /id="demo-identity-form"/);
   assert.match(html, /Configurar usuário da demo/);
   assert.match(html, /pattern="\[\^@\]\+@juparana\[\.\]com\[\.\]br"/);
