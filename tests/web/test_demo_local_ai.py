@@ -304,7 +304,8 @@ def test_local_ai_turn_uses_interpreter_then_writer(monkeypatch):
         payloads = runtime._ollama_client.payloads
         assert len(payloads) == 2
         assert "r" in payloads[0]["format"]["properties"]
-        assert "assistant_message" in payloads[1]["format"]["properties"]
+        assert set(payloads[1]["format"]["properties"]) == {"intro", "outro"}
+        assert "aguarda aprovação" in result["assistant_message"]
         assert "enum" not in json.dumps(payloads[1]["format"])
     finally:
         runtime.close()
@@ -570,7 +571,8 @@ def test_local_ai_uses_interpreter_and_writer_for_operational_results(monkeypatc
         assert created["request_id"]
         assert len(gateway.payloads) == 2
         assert "r" in gateway.payloads[0]["format"]["properties"]
-        assert "assistant_message" in gateway.payloads[1]["format"]["properties"]
+        assert set(gateway.payloads[1]["format"]["properties"]) == {"intro", "outro"}
+        assert "aguarda aprovação" in created["assistant_message"]
         assert runtime.local_ai_metrics()["turns"][-1]["qwen_call_count"] == 2
 
         runtime.reset()

@@ -9,7 +9,7 @@ from ai_service_desk.engine.access_request import prepare_access_request
 from ai_service_desk.engine.approval import ApprovalService
 from ai_service_desk.engine.cdm_execution import CDMActionExecutor
 from ai_service_desk.engine.cdm_scope import LOCAL_CDM_SCOPE_CATALOG
-from ai_service_desk.engine.classification import classify_ticket
+from ai_service_desk.engine.classification import TicketClassification, classify_ticket
 from ai_service_desk.engine.confidence import assess_support_context
 from ai_service_desk.engine.execution import ExecutionEngine
 from ai_service_desk.engine.knowledge import build_knowledge_index
@@ -61,6 +61,7 @@ from ai_service_desk.web.conversation_interpreter import (
     parse_interpretation_response,
 )
 from ai_service_desk.web.conversation_state import (
+    TurnRelation,
     append_turn,
     apply_backend_updates,
     new_conversation_context,
@@ -459,6 +460,21 @@ class DemoRuntime:
             },
         )
 
+        context = replace(
+            context,
+            dialogue=replace(
+                context.dialogue, stage="IDLE", pending_information=(), last_question=""
+            ),
+        )
+        if result.get("offer_action") == "CDM_ACCESS_REQUEST":
+            context = replace(
+                context,
+                dialogue=replace(
+                    context.dialogue,
+                    stage="OFFERING_CDM_REQUEST",
+                    pending_information=(result["offer_purpose"],),
+                ),
+            )
         if result.get("status") == "NEEDS_CLARIFICATION":
             question = result.get("question")
             if isinstance(question, str) and question.strip():
@@ -650,6 +666,8 @@ class DemoRuntime:
             "system": state.system,
             "product": state.entities.get("product", ""),
         }
+        if state.system == "CDM":
+            result["system"] = "CDM"
         return result
 
     def _send_local_ai_message(
@@ -691,13 +709,17 @@ class DemoRuntime:
         self.knowledge_engine.last_search_ms = 0.0
         backend_started = perf_counter()
         try:
-            result = self._resolve_local_ai_turn(
-                identity_id,
-                requester,
-                message,
-                context_after_delta,
-                delta,
+            result = self._cdm_conversation_turn(
+                identity_id, requester, message, context_before, delta
             )
+            if result is None:
+                result = self._resolve_local_ai_turn(
+                    identity_id,
+                    requester,
+                    message,
+                    context_after_delta,
+                    delta,
+                )
         finally:
             backend_total_ms = max(
                 0.0,
@@ -837,7 +859,14 @@ class DemoRuntime:
 
     def send_message(self, identity_id: str, message: str) -> dict:
         if self.mode != "LOCAL_AI":
-            return self._send_message_impl(identity_id, message)
+            context = self._context_for(identity_id, self._requester(identity_id))
+            result = self._send_message_impl(identity_id, message)
+            context = self._apply_result_to_context(context, result)
+            context = append_turn(context, "USER", message)
+            self._conversation_contexts[identity_id] = append_turn(
+                context, "ASSISTANT", result["assistant_message"]
+            )
+            return result
 
         before_calls = self._local_ai_total_calls
         started = perf_counter()
@@ -865,6 +894,15 @@ class DemoRuntime:
         requester = self._requester(identity_id)
         if not isinstance(message, str) or not message.strip():
             raise ValueError("Mensagem vazia.")
+
+        cdm = self._cdm_conversation_turn(
+            identity_id, requester, message, self._context_for(identity_id, requester)
+        )
+        if cdm is not None:
+            cdm["assistant_message"] = ground_response(
+                cdm, self._context_for(identity_id, requester), None
+            ).fallback_message
+            return cdm
 
         pending = self._continue_cdm_scope(identity_id, message, requester)
         if pending is not None:
@@ -1238,6 +1276,55 @@ class DemoRuntime:
         lines.append(f"Encaminhamento: {technician_name}")
         return "\n".join(lines)
 
+    def _cdm_conversation_turn(self, identity_id, requester, message, context, delta=None):
+        normalized = normalize_text(message)
+        informational = (
+            "CDM" in self.business_vocabulary.systems(message)
+            and _ACCESS_REQUEST.search(normalized)
+            and (
+                bool(re.search(r"^(?:como|o que preciso para)\b|\bcomo funciona\b", normalized))
+                or (
+                    delta is not None
+                    and delta.intent == "ORIENTACAO"
+                    and delta.semantic_signal == "NONE"
+                )
+            )
+        )
+        acceptance = normalized in {
+            "pode solicitar",
+            "pode solicitar para mim",
+            "pode fazer pra mim",
+            "pode fazer para mim",
+            "sim solicita",
+            "quero sim",
+            "pode abrir",
+            "sim",
+        }
+        if delta is not None and delta.relation == TurnRelation.CONFIRMATION:
+            acceptance = acceptance or (
+                delta.semantic_signal == "ACCESS_REQUEST"
+                and delta.domain == "IT_SUPPORT"
+                and not set(self.business_vocabulary.systems(message)) - {"CDM"}
+            )
+        if not informational and not (
+            context.dialogue.stage == "OFFERING_CDM_REQUEST" and acceptance
+        ):
+            return None
+        purpose = message
+        if not informational:
+            purpose = context.dialogue.pending_information[0]
+            purpose = f"Quero acesso ao CDM. {purpose}\n{message}"
+        self._pending_cdm_scope.pop(identity_id, None)
+        return self._send_operational_message(
+            identity_id,
+            purpose,
+            requester,
+            classification=TicketClassification(
+                intent="PROBLEMA_ACESSO", system="CDM", entities={}, confidence=0.9
+            ),
+            informational=informational,
+        )
+
     def _send_operational_message(
         self,
         identity_id: str,
@@ -1245,6 +1332,7 @@ class DemoRuntime:
         requester,
         *,
         classification=None,
+        informational=False,
     ) -> dict:
         current = self._triage.get(identity_id)
         if current is None or current[1].status != "ACTIVE":
@@ -1261,6 +1349,14 @@ class DemoRuntime:
         )
 
         if knowledge_result["status"] != "KNOWLEDGE_FOUND":
+            if informational:
+                return {
+                    "status": "NEEDS_CLARIFICATION",
+                    "system": "CDM",
+                    "reason": knowledge_result.get("reason"),
+                    "question": "Não encontrei uma orientação aprovada para esse acesso.",
+                    "request_id": None,
+                }
             return {
                 "status": knowledge_result["status"],
                 "question": knowledge_result.get("question"),
@@ -1269,6 +1365,34 @@ class DemoRuntime:
             }
 
         knowledge = knowledge_result["knowledge"]
+        if informational:
+            if knowledge["knowledge_id"] != "KB-SYN-CDM-ACCESS-001":
+                return {
+                    "status": "NEEDS_CLARIFICATION",
+                    "system": "CDM",
+                    "question": "Não encontrei uma orientação aprovada para esse acesso.",
+                    "request_id": None,
+                }
+            try:
+                self.faq_catalog.detail(knowledge["knowledge_id"])
+                article = self.faq_catalog.detail("KB-SYN-FAQ-CDM-REQUEST-001")
+            except FaqNotFoundError:
+                return {
+                    "status": "NEEDS_CLARIFICATION",
+                    "system": "CDM",
+                    "question": "O artigo de acesso ao CDM não está disponível agora.",
+                    "request_id": None,
+                }
+            return {
+                "status": "KNOWLEDGE_FOUND",
+                "system": "CDM",
+                "request_id": None,
+                "knowledge_id": knowledge["knowledge_id"],
+                "answer": knowledge["answer"],
+                "article": {key: article[key] for key in ("knowledge_id", "title", "provenance")},
+                "offer_action": "CDM_ACCESS_REQUEST",
+                "offer_purpose": message,
+            }
         playbook_result = self.playbook_engine.resolve(knowledge)
         if playbook_result["status"] == "KNOWLEDGE_ONLY":
             if knowledge["knowledge_id"] != "KB-SYN-M365-PASSWORD-001":
@@ -1317,6 +1441,8 @@ class DemoRuntime:
             return {
                 "status": "NEEDS_CLARIFICATION",
                 "reason": preparation.reason_code,
+                "system": "CDM",
+                "question": "Qual tipo de acesso você precisa no CDM?",
                 "request_id": None,
             }
 
@@ -1331,13 +1457,15 @@ class DemoRuntime:
         mismatch = context.scope_mismatch if context else False
         labels = ", ".join(scope.label for scope in self.cdm_scope_catalog.scopes)
         question = (
-            f"Sua área é {requester.area}, mas o escopo solicitado no CDM é "
-            f"{self.cdm_scope_catalog.label(scope)}. Confirma esse escopo?"
+            f"Seu perfil está associado a {requester.area}, mas o acesso solicitado é para "
+            f"{self.cdm_scope_catalog.label(scope)}. É isso mesmo?"
             if mismatch
-            else f"Qual escopo do CDM você precisa: {labels}?"
+            else f"Seu perfil está associado a {requester.area}. "
+            f"Para o CDM, qual área você precisa acessar: {labels}?"
         )
         return {
             "status": "NEEDS_CLARIFICATION",
+            "system": "CDM",
             "reason": preparation.reason_code,
             "question": question,
             "request_id": None,
@@ -1357,10 +1485,21 @@ class DemoRuntime:
             self._pending_cdm_scope.pop(identity_id)
             return {
                 "status": "NEEDS_CLARIFICATION",
+                "system": "CDM",
                 "request_id": None,
                 "question": "Pedido cancelado. Como posso ajudar?",
             }
-        if normalized in {"sim", "confirmo", "pode solicitar", "sim confirmo"}:
+        confirmed_scope = re.fullmatch(r"sim e para (.+)", normalized)
+        confirms_pending_scope = (
+            confirmed_scope is not None
+            and preparation.context is not None
+            and self.cdm_scope_catalog.match_area(confirmed_scope[1])
+            == preparation.context.business_scope
+        )
+        if (
+            normalized in {"sim", "confirmo", "pode solicitar", "sim confirmo"}
+            or confirms_pending_scope
+        ):
             if preparation.context is None:
                 return self._scope_question(requester, preparation)
             self._pending_cdm_scope.pop(identity_id)
@@ -1394,6 +1533,7 @@ class DemoRuntime:
         }
         return {
             "status": "REQUEST_CREATED" if record.state == "PENDING_APPROVAL" else record.state,
+            "system": "CDM",
             "request_id": record.request_id,
             "state": record.state,
             "confidence": record.confidence.level,

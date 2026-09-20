@@ -218,6 +218,11 @@ def _generate_natural_response(message, context, grounding, chat):
         f"Informacoes obrigatorias: {list(grounding.required_information)}\n"
         f"Turnos recentes: {recent_turns}"
     )
+    if grounding.allowed_wrappers is not None:
+        instruction += (
+            f"\nintro e outro devem ser escolhidos somente entre: {grounding.allowed_wrappers}. "
+            "Prefira outro vazio. O conteúdo confirmado será inserido pelo sistema."
+        )
 
     payload = {
         "model": "qwen3.5:4b",
@@ -258,6 +263,11 @@ def _generate_natural_response(message, context, grounding, chat):
         outro = data["outro"]
         if not isinstance(intro, str) or not isinstance(outro, str):
             raise ValueError("Resposta protegida deve conter apenas texto.")
+
+        if grounding.allowed_wrappers is not None and any(
+            part.strip() not in grounding.allowed_wrappers for part in (intro, outro)
+        ):
+            return grounding.fallback_message
 
         if _has_invalid_operational_claim(intro, grounding):
             return grounding.fallback_message

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 
@@ -31,6 +31,7 @@ class ResponseGrounding:
     required_information: tuple[str, ...]
     fallback_message: str
     allowed_operational_values: frozenset[str]
+    allowed_wrappers: tuple[str, ...] | None = None
 
 
 def _consolidated_facts(context) -> tuple[str, ...]:
@@ -44,6 +45,39 @@ def _consolidated_facts(context) -> tuple[str, ...]:
 
 
 def ground_response(result, context, delta) -> ResponseGrounding:
+    grounding = _ground_response(result, context, delta)
+    if result.get("system") != "CDM":
+        return grounding
+    # The writer may connect confirmed content, never author operational facts.
+    content = grounding.protected_content or (
+        ProtectedContent("BACKEND_RESULT", grounding.fallback_message),
+    )
+    if result.get("offer_action") == "CDM_ACCESS_REQUEST":
+        content = (
+            *content,
+            ProtectedContent(
+                "ARTICLE_REFERENCE", f"Na Central de Suporte: {result['article']['title']}."
+            ),
+            ProtectedContent("ACTION_OFFER", "Se quiser, posso registrar a solicitação para você."),
+        )
+    return replace(
+        grounding,
+        protected_content=content,
+        fallback_message="\n\n".join(item.content for item in content),
+        response_goal=(
+            "Conecte brevemente o conteúdo confirmado usando somente as expressões permitidas. "
+            "Não repita nem complemente o conteúdo protegido."
+        ),
+        allowed_wrappers=("", "Entendi.", "Claro.", "Vamos lá."),
+        forbidden_claims=(
+            *grounding.forbidden_claims,
+            "Não acrescente notificações, acompanhamento, contato futuro, técnico ou SLA.",
+            "Não invente status, aprovação, criação, execução ou procedimentos.",
+        ),
+    )
+
+
+def _ground_response(result, context, delta) -> ResponseGrounding:
     status = result.get("status")
     facts = list(_consolidated_facts(context))
     protected_content = ()

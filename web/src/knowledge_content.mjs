@@ -7,7 +7,7 @@ export function renderMessageBody(text) {
     .map(p => `<p>${escapeHtml(p)}</p>`).join('');
 }
 
-export function renderApprovedKnowledgeBody({ text, procedureUrl = null, knowledgeId = null }) {
+export function renderApprovedKnowledgeBody({ text, procedureUrl = null, knowledgeId = null, article = null }) {
   const approvedUrl = procedureUrl === APPROVED_PROCEDURE_URL ? APPROVED_PROCEDURE_URL
     : knowledgeId === 'KB-SYN-FAQ-CDM-REQUEST-001' && procedureUrl === 'https://cdm.juparana.com.br/'
       ? 'https://cdm.juparana.com.br/' : null;
@@ -33,5 +33,8 @@ export function renderApprovedKnowledgeBody({ text, procedureUrl = null, knowled
     else { flushParagraph(); }
   }
   flushParagraph(); flushSteps();
+  if (article?.knowledge_id === 'KB-SYN-FAQ-CDM-REQUEST-001' && article.provenance?.status === 'APPROVED') {
+    output.push(`<p><a href="/solucoes/KB-SYN-FAQ-CDM-REQUEST-001" data-solution-link data-knowledge-id="KB-SYN-FAQ-CDM-REQUEST-001">${escapeHtml(article.title)}</a></p>`);
+  }
   return output.join('');
 }

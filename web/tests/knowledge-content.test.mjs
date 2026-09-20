@@ -4,6 +4,16 @@ import { renderApprovedKnowledgeBody } from '../src/knowledge_content.mjs';
 
 const SAFE_URL = 'https://mysignins.microsoft.com/security-info/password/change';
 
+test('CDM guidance links the approved Central article without linking arbitrary content', () => {
+  const article = { knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001', title: 'Como solicitar acesso ao CDM', provenance: { status: 'APPROVED' } };
+  const html = renderApprovedKnowledgeBody({ text: 'O acesso precisa de aprovação.', article });
+  assert.match(html, /href="\/solucoes\/KB-SYN-FAQ-CDM-REQUEST-001"/);
+  assert.match(html, /Como solicitar acesso ao CDM/);
+  for (const invalid of [{ ...article, provenance: { status: 'DRAFT' } }, { ...article, knowledge_id: 'https://evil.example' }]) {
+    assert.doesNotMatch(renderApprovedKnowledgeBody({ text: 'Orientação', article: invalid }), /<a /);
+  }
+});
+
 test('approved numbered procedure keeps semantic ordered list and exact safe anchor', () => {
   const html = renderApprovedKnowledgeBody({
     text: 'Procedimento\n\n1. Acesse a página.\n2. Confirme sua identidade.\n\nDepois, teste novamente.',
