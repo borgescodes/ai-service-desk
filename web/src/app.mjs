@@ -167,7 +167,10 @@ function renderRoute() {
 function render() {
   finishPresentation();
   const scroll = captureConversationScroll(app.querySelector('.conversation-thread'));
-  const focused = document.activeElement?.id === 'jup-message';
+  const activeElement = document.activeElement;
+  const focused = activeElement?.id === 'jup-message';
+  const selectionStart = focused ? activeElement.selectionStart : null;
+  const selectionEnd = focused ? activeElement.selectionEnd : null;
   app.innerHTML = `${renderAppHeader({
     activeRoute: state.route,
     identities: state.identities, identity: selectedIdentity() ?? {}, pending: state.pendingAction || false,
@@ -181,7 +184,18 @@ function render() {
   finishPresentation = presentChat(app, { welcome: welcomeEntry.update(hasWelcome), followConversation: scroll?.atEnd ?? true, reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false });
   renderedMessageCount = state.messages.length;
   restoreConversationScroll(app.querySelector('.conversation-thread'), app.querySelector('[data-action="scroll-bottom"]'), scroll, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
-  if (focused && !state.pendingAction) app.querySelector('#jup-message')?.focus?.({ preventScroll: true });
+  if (focused && !state.pendingAction) {
+    const composer = app.querySelector('#jup-message');
+    composer?.focus?.({ preventScroll: true });
+    if (
+      composer &&
+      Number.isInteger(selectionStart) &&
+      Number.isInteger(selectionEnd) &&
+      typeof composer.setSelectionRange === 'function'
+    ) {
+      composer.setSelectionRange(selectionStart, selectionEnd);
+    }
+  }
 }
 
 function friendlyError(error) {

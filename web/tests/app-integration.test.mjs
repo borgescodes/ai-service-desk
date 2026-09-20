@@ -21,12 +21,34 @@ async function boot(path, respond, identities = [
     addEventListener(name, handler) { if (name === 'click') events[`persona-${identityId}`] = handler; },
   }));
   const command = { addEventListener(name, handler) { events[`command-${name}`] = handler; }, focus() {} };
-  const field = { value: '', addEventListener(name, handler) { events[`field-${name}`] = handler; }, focus() {} };
+  const field = {
+    id: 'jup-message',
+    value: '',
+    selectionStart: 0,
+    selectionEnd: 0,
+    addEventListener(name, handler) { events[`field-${name}`] = handler; },
+    focus() { globalThis.document.activeElement = this; },
+    setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
+  };
   const form = { addEventListener(name, handler) { events[name] = handler; }, querySelector() { return field; } };
-  const root = { innerHTML: '', setAttribute() {}, querySelectorAll(selector) { return selector === '.queue-row[data-request-id]' ? [queueRow] : selector === '[data-persona]' ? personas : []; }, querySelector(selector) { return selector === '[data-action="approve"]' ? approve : selector === '[data-action="new-chat"]' ? newChat : selector === '#demo-identity-form' ? identityForm : selector === '#jup-form' ? form : selector === '#jup-message' ? field : selector === '[data-command="/solicitacoes"]' || selector === '[data-command-menu] [data-command]' ? command : null; } };
+  let rootHtml = '';
+  const root = {
+    get innerHTML() { return rootHtml; },
+    set innerHTML(value) {
+      rootHtml = value;
+      if (globalThis.document?.activeElement === field) {
+        globalThis.document.activeElement = null;
+        field.selectionStart = 0;
+        field.selectionEnd = 0;
+      }
+    },
+    setAttribute() {},
+    querySelectorAll(selector) { return selector === '.queue-row[data-request-id]' ? [queueRow] : selector === '[data-persona]' ? personas : []; },
+    querySelector(selector) { return selector === '[data-action="approve"]' ? approve : selector === '[data-action="new-chat"]' ? newChat : selector === '#demo-identity-form' ? identityForm : selector === '#jup-form' ? form : selector === '#jup-message' ? field : selector === '[data-command="/solicitacoes"]' || selector === '[data-command-menu] [data-command]' ? command : null; },
+  };
   const win = { location: new URL(`http://demo${path}`), addEventListener(name, fn) { events[name] = fn; } };
   win.history = { pushState(_a, _b, path) { win.location = new URL(path, win.location); } };
-  globalThis.document = { querySelector(selector) { return selector === '#app' ? root : null; } };
+  globalThis.document = { activeElement: null, querySelector(selector) { return selector === '#app' ? root : null; } };
   globalThis.window = win;
   globalThis.FormData = class { get(name) { return identityValues[name]; } };
   globalThis.fetch = async (url, options) => {
@@ -36,7 +58,7 @@ async function boot(path, respond, identities = [
     return new Response(JSON.stringify(payload), { status: 200 });
   };
   await import(`../src/app.mjs?test=${++serial}`); await tick();
-  return { root, field, async approve() { await events.approve(); await tick(); }, async selectApproval() { events.selectApproval(); await tick(); }, async reset() { await events.newChat?.(); await tick(); }, async configureIdentity() { events.configureIdentity?.({ preventDefault() {}, currentTarget: identityForm }); await tick(); }, async switchPersona() { await events['persona-tecnico-cdm']?.(); await tick(); }, async switchTo(identityId) { await events[`persona-${identityId}`]?.(); await tick(); }, async go(path) { win.location = new URL(`http://demo${path}`); events.popstate(); await tick(); }, async send(text) { field.value = text; events.submit({ preventDefault() {}, currentTarget: form }); await tick(); }, async type(text) { field.value = text; events['field-input']?.({ target: field }); await tick(); }, async selectCommand() { events['command-click']?.(); await tick(); }, async escapeCommand() { events['field-keydown']?.({ key: 'Escape', preventDefault() {}, currentTarget: field }); await tick(); } };
+  return { root, field, async approve() { await events.approve(); await tick(); }, async selectApproval() { events.selectApproval(); await tick(); }, async reset() { await events.newChat?.(); await tick(); }, async configureIdentity() { events.configureIdentity?.({ preventDefault() {}, currentTarget: identityForm }); await tick(); }, async switchPersona() { await events['persona-tecnico-cdm']?.(); await tick(); }, async switchTo(identityId) { await events[`persona-${identityId}`]?.(); await tick(); }, async go(path) { win.location = new URL(`http://demo${path}`); events.popstate(); await tick(); }, async send(text) { field.value = text; events.submit({ preventDefault() {}, currentTarget: form }); await tick(); }, async type(text) { field.value = text; events['field-input']?.({ target: field }); await tick(); }, async typeCharacter(character) { field.focus(); const start = field.selectionStart ?? field.value.length; const end = field.selectionEnd ?? start; field.value = field.value.slice(0, start) + character + field.value.slice(end); field.selectionStart = start + character.length; field.selectionEnd = field.selectionStart; events['field-input']?.({ target: field }); await tick(); }, async selectCommand() { events['command-click']?.(); await tick(); }, async escapeCommand() { events['field-keydown']?.({ key: 'Escape', preventDefault() {}, currentTarget: field }); await tick(); } };
 }
 
 test('late FAQ response cannot replace an article after navigation', async () => {
@@ -150,6 +172,19 @@ test('requester chat survives requests, article, and request CTA navigation', as
   assert.match(ui.root.innerHTML, /Veja suas solicitações/);
   await ui.go('/solucoes/KB-1'); await ui.go('/jup');
   assert.match(ui.root.innerHTML, /Veja suas solicitações/);
+});
+
+test('composer preserves caret position while typing across rerenders', async () => {
+  const ui = await boot('/jup', () => []);
+
+  await ui.typeCharacter('a');
+  await ui.typeCharacter('b');
+  await ui.typeCharacter('c');
+
+  assert.equal(ui.field.value, 'abc');
+  assert.equal(ui.field.selectionStart, 3);
+  assert.equal(ui.field.selectionEnd, 3);
+  assert.match(ui.root.innerHTML, />abc<\/textarea>/);
 });
 
 test('slash command is selectable by keyboard-ready menu control and sends the deterministic message', async () => {
