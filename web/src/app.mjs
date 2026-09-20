@@ -46,6 +46,7 @@ let state = {
   faqCategory: '',
   lastBackendStatus: null,
   messageError: null,
+  processingActivity: null,
   identityConfigError: null,
   messages: [],
   understood: null,
@@ -53,6 +54,61 @@ let state = {
   selectedRequestId: null,
   selectedOpportunityId: null,
 };
+
+function processingContextFromMessages(messages) {
+  for (const item of [...messages].reverse()) {
+    if (item.role !== 'USER') continue;
+
+    const text = String(item.text || '');
+    const isCdm = /\bcdm\b/i.test(text);
+    const isMicrosoft365 = /\b(?:m365|365|office|outlook|teams|sharepoint)\b/i.test(text);
+
+    if (isCdm && isMicrosoft365) return null;
+    if (isCdm) return 'CDM';
+    if (isMicrosoft365) return 'MICROSOFT_365';
+  }
+
+  return null;
+}
+
+function processingFeedbackSteps(messages) {
+  const context = processingContextFromMessages(messages);
+
+  const contextualStep = context === 'CDM'
+    ? 'Verificando informações de acesso ao CDM'
+    : context === 'MICROSOFT_365'
+      ? 'Verificando orientações sobre Microsoft 365'
+      : 'Organizando as informações do atendimento';
+
+  return [
+    'Entendendo sua solicitação',
+    'Consultando as informações necessárias',
+    contextualStep,
+    'Preparando sua resposta',
+  ];
+}
+
+function scheduleProcessingFeedback(steps, revision) {
+  // Presentation feedback only. This is not a trace of backend execution.
+  const update = (activity) => {
+    if (
+      revision !== identityRevision ||
+      state.pendingAction !== 'message' ||
+      state.route !== 'jup'
+    ) return;
+
+    state.processingActivity = activity;
+    render();
+  };
+
+  const timers = [
+    setTimeout(() => update(steps[1]), 4000),
+    setTimeout(() => update(steps[2]), 9000),
+    setTimeout(() => update(steps[3]), 14000),
+  ];
+
+  return () => timers.forEach(timer => clearTimeout(timer));
+}
 
 function selectedIdentity() {
   return state.identities.find((item) => item.identity_id === state.identityId) ?? null;
@@ -91,6 +147,7 @@ function renderRoute() {
       messages: state.messages,
       understood: state.understood,
       loading: state.pendingAction === 'message',
+      processingActivity: state.processingActivity,
     });
   }
 
@@ -261,16 +318,19 @@ async function submitMessage(form, messageOverride = null) {
 
   const revision = identityRevision;
   const identityId = state.identityId;
-  const presentationReady = new Promise(resolve => setTimeout(resolve, 2400));
-  state.messages = [...state.messages, { role: 'USER', text: message, sentAt: new Date().toISOString() }];
+  const nextMessages = [...state.messages, { role: 'USER', text: message, sentAt: new Date().toISOString() }];
+  const feedback = processingFeedbackSteps(nextMessages);
+  state.messages = nextMessages;
   state.composerDraft = '';
   state.commandMenuOpen = false;
   state.lastBackendStatus = null;
   state.messageError = null;
   state.composerFocused = false;
   state.pendingAction = 'message';
+  state.processingActivity = feedback[0];
   state.transientError = null;
   render();
+  const stopProcessingFeedback = scheduleProcessingFeedback(feedback, revision);
 
   try {
     const result = await apiRequest('/api/jup/messages', {
@@ -292,7 +352,6 @@ async function submitMessage(form, messageOverride = null) {
     } else {
       state.understood = null;
     }
-    await presentationReady;
     if (revision !== identityRevision) return;
     await dismissThinking(app, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
     if (revision !== identityRevision) return;
@@ -315,7 +374,9 @@ async function submitMessage(form, messageOverride = null) {
     if (revision !== identityRevision) return;
     state.messageError = friendlyError(error).message;
   } finally {
+    stopProcessingFeedback();
     if (revision === identityRevision) {
+      state.processingActivity = null;
       state.pendingAction = null;
       render();
       if (state.route === 'jup') {

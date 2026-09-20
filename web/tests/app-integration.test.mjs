@@ -201,17 +201,88 @@ test('demo identity form creates and activates a trusted requester', async () =>
   assert.equal(reset[1].headers['X-Demo-Identity'], 'demo-requester-1');
 });
 
-test('fast successful replies wait for bounded presentation time', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+test('fast successful replies do not wait for artificial presentation time', async () => {
   const ui = await boot('/jup', () => ({ status: 'SOCIAL', assistant_message: 'Olá, Pedro!' }));
   await ui.send('Olá');
-  assert.match(ui.root.innerHTML, /Pensando/);
-  assert.doesNotMatch(ui.root.innerHTML, /Olá, Pedro!/);
-  t.mock.timers.tick(2500); await tick();
+  await tick();
+
   assert.match(ui.root.innerHTML, /Olá, Pedro!/);
   assert.doesNotMatch(ui.root.innerHTML, /conversation-message--thinking/);
 });
 
+test('slow CDM reply progresses through user-oriented processing feedback', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  let finish;
+  const ui = await boot('/jup', url => url === '/api/jup/messages'
+    ? new Promise(resolve => { finish = resolve; })
+    : []);
+
+  await ui.send('Preciso de acesso ao CDM');
+
+  assert.match(ui.root.innerHTML, /Entendendo sua solicitação/);
+  assert.doesNotMatch(ui.root.innerHTML, /backend|policy|routing|confidence/i);
+
+  t.mock.timers.tick(4000);
+  await tick();
+
+  assert.match(ui.root.innerHTML, /Consultando as informações necessárias/);
+
+  t.mock.timers.tick(5000);
+  await tick();
+
+  assert.match(ui.root.innerHTML, /Verificando informações de acesso ao CDM/);
+
+  t.mock.timers.tick(5000);
+  await tick();
+
+  assert.match(ui.root.innerHTML, /Preparando sua resposta/);
+
+  finish({ status: 'SOCIAL', assistant_message: 'Resposta pronta.' });
+  await tick();
+  await tick();
+
+  assert.match(ui.root.innerHTML, /Resposta pronta\./);
+  assert.doesNotMatch(ui.root.innerHTML, /conversation-message--thinking/);
+});
+
+test('slow follow-up reuses recent Microsoft 365 context for processing feedback', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  let finish;
+  let messageCalls = 0;
+
+  const ui = await boot('/jup', url => {
+    if (url !== '/api/jup/messages') return [];
+
+    messageCalls += 1;
+
+    if (messageCalls === 1) {
+      return { status: 'NEEDS_CLARIFICATION', assistant_message: 'Qual erro aparece?' };
+    }
+
+    return new Promise(resolve => { finish = resolve; });
+  });
+
+  await ui.send('Office não abre');
+  await tick();
+
+  await ui.send('senha');
+
+  assert.match(ui.root.innerHTML, /Entendendo sua solicitação/);
+
+  t.mock.timers.tick(9000);
+  await tick();
+
+  assert.match(ui.root.innerHTML, /Verificando orientações sobre Microsoft 365/);
+
+  finish({ status: 'SOCIAL', assistant_message: 'Resposta pronta.' });
+  await tick();
+  await tick();
+
+  assert.match(ui.root.innerHTML, /Resposta pronta\./);
+  assert.doesNotMatch(ui.root.innerHTML, /conversation-message--thinking/);
+});
 test('late operational detail cannot leak into another persona', async () => {
   let finish;
   const ui = await boot('/demo/operacao/cdm', url => url === '/api/operations/approvals/R-1'

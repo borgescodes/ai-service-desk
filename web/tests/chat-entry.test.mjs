@@ -16,20 +16,20 @@ test('first submission animates the welcome out before the first incoming messag
   const html = renderJupWorkspace({ messages: [{ role: 'USER', text: 'acesso CDM' }], loading: true, animateFrom: 0 });
   assert.match(html, /chat-welcome--leaving/);
   assert.match(html, /aria-hidden="true"[^>]*>[^]*?Como posso ajudar/);
-  assert.match(html, /Buscando contexto CDM/);
+  assert.match(html, /Entendendo sua solicitação/);
 });
 
-test('ongoing chat does not restore welcome and short replies retain known context', () => {
+test('ongoing chat does not restore welcome while processing starts with user-oriented feedback', () => {
   const html = renderJupWorkspace({ identity: { name: 'Ana da Silva' }, messages: [{ role: 'USER', text: 'Office não abre' }, { role: 'JUP', text: 'Qual erro?' }, { role: 'USER', text: 'senha' }], loading: true });
   assert.doesNotMatch(html, /chat-welcome/);
   assert.doesNotMatch(html, /Olá, <strong>Ana<\/strong>/);
-  assert.match(html, /Buscando contexto 365/);
+  assert.match(html, /Entendendo sua solicitação/);
 });
 
-test('processing uses a neutral label for unknown or ambiguous systems', () => {
+test('processing starts with a neutral user-oriented label', () => {
   for (const text of ['preciso de ajuda', 'CDM e Microsoft 365']) {
     const html = renderJupWorkspace({ messages: [{ role: 'USER', text }], loading: true });
-    assert.match(html, /processing-activity">Buscando contexto<\/p>/);
+    assert.match(html, /processing-activity">Entendendo sua solicitação<\/p>/);
   }
 });
 

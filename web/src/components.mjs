@@ -86,21 +86,7 @@ function renderChatWelcome(leaving, draft = '', identity = {}) {
   </div>`;
 }
 
-function processingActivity(messages) {
-  // Presentation context only: no claim about backend retrieval stages.
-  for (const message of [...messages].reverse()) {
-    if (message.role !== 'USER') continue;
-    const text = message.text || '';
-    const cdm = /\bcdm\b/i.test(text);
-    const office = /\b(?:m365|365|office|outlook|teams|sharepoint)\b/i.test(text);
-    if (cdm && office) return 'Buscando contexto';
-    if (cdm) return 'Buscando contexto CDM';
-    if (office) return 'Buscando contexto 365';
-  }
-  return 'Buscando contexto';
-}
-
-export function renderJupWorkspace({ identity = {}, messages = [], understood = null, loading = false, sourceContext = null, visualState = null, messageError = null, draft = '', commandMenuOpen = true, animateFrom = messages.length } = {}) {
+export function renderJupWorkspace({ identity = {}, messages = [], understood = null, loading = false, processingActivity = null, sourceContext = null, visualState = null, messageError = null, draft = '', commandMenuOpen = true, animateFrom = messages.length } = {}) {
   const entering = loading && messages.length === 1 && animateFrom === 0;
   const welcome = (!messages.length && !loading) || entering;
   const initials = (identity.name || '').split(' ').slice(0, 2).map(word => word[0] || '').join('');
@@ -116,7 +102,7 @@ export function renderJupWorkspace({ identity = {}, messages = [], understood = 
 
         <div class="conversation-stage"><div class="jup-conversation"><div class="conversation-thread${entering ? ' conversation-thread--entering' : ''}" role="log" aria-label="Conversa com Jup" aria-live="polite" tabindex="0">${welcome ? renderChatWelcome(entering, draft, identity) : ''}${conversation}
           ${understood && lastAssistant < 0 ? renderMessage({ role: 'JUP', text: '', context: understood }) : ''}
-          ${loading ? renderMessage({ role: 'JUP', thinking: true, activity: processingActivity(messages) }, { fresh: true }) : ''}
+          ${loading ? renderMessage({ role: 'JUP', thinking: true, activity: processingActivity || 'Entendendo sua solicitação' }, { fresh: true }) : ''}
           ${messageError ? renderMessage({ role: 'JUP', text: messageError, failed: true }, { fresh: true }) : ''}
           <div class="conversation-end" aria-hidden="true"></div></div>
           <button class="scroll-bottom" type="button" data-action="scroll-bottom" hidden aria-label="Voltar à última mensagem">Última mensagem ↓</button>

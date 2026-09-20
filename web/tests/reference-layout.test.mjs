@@ -50,5 +50,5 @@ test('chat preserves right support rail without a permanent hero or changing pen
   assert.match(html, /href="\/solucoes\/KB-SYN-FAQ-CDM-REQUEST-001"/);
   assert.match(html, /data-state="thinking"/);
   assert.match(html, /<textarea[^>]*disabled/);
-  assert.match(html, /Buscando contexto/);
+  assert.match(html, /Entendendo sua solicitação/);
 });

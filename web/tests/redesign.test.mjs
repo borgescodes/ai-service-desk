@@ -57,7 +57,7 @@ test('messages show presentation time and honest processing status', () => {
   const html = renderJupWorkspace({ messages: [{ role: 'USER', text: 'Oi', sentAt: '2026-09-14T13:42:00Z' }], loading: true });
   assert.match(html, /<time datetime="2026-09-14T13:42:00Z"/);
   assert.match(html, /Pensando/);
-  assert.match(html, /Buscando contexto/);
+  assert.match(html, /Entendendo sua solicitação/);
   assert.doesNotMatch(html, /Verificando política|Conferindo responsável/);
 });
 
