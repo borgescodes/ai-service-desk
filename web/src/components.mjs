@@ -67,6 +67,7 @@ function renderMessage(message, { fresh = false, visualState = null, initials = 
     <div class="message-content"><div class="message-author"><strong>${role}</strong>${message.sentAt ? `<time datetime="${escapeHtml(message.sentAt)}">${escapeHtml(new Date(message.sentAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}</time>` : ''}</div>
     <div class="message-bubble"${fresh && message.role === 'JUP' && !message.thinking && !message.failed ? ' data-reveal-response' : ''}>${message.thinking ? `<div class="processing" role="status" aria-label="Jup está pensando"><strong>Pensando<span class="thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></strong><p class="processing-activity">${escapeHtml(message.activity || 'Buscando contexto')}</p></div>` : message.failed ? `<p class="message-error" role="alert">${escapeHtml(message.text)}</p>` : message.role === 'JUP' ? renderApprovedKnowledgeBody({ text: message.text, procedureUrl: message.procedure_url, knowledgeId: message.knowledge_id, article: message.article }) : renderMessageBody(message.text)}
     ${message.role === 'JUP' ? renderSupportHandoff(message.support_handoff) : ''}
+    ${message.role === 'JUP' && message.requestCta === 'REQUESTS' ? '<a class="button button--secondary message-request-cta" href="/requests" data-route="requests">Ver minhas solicitações</a>' : ''}
     ${context ? `<div class="request-context">${context}</div>` : ''}</div></div>
     ${message.role === 'USER' && initials ? `<span class="message-user-avatar" aria-hidden="true">${escapeHtml(initials)}</span>` : ''}
   </article>`;
@@ -99,7 +100,7 @@ function processingActivity(messages) {
   return 'Buscando contexto';
 }
 
-export function renderJupWorkspace({ identity = {}, messages = [], understood = null, loading = false, sourceContext = null, visualState = null, messageError = null, draft = '', animateFrom = messages.length } = {}) {
+export function renderJupWorkspace({ identity = {}, messages = [], understood = null, loading = false, sourceContext = null, visualState = null, messageError = null, draft = '', commandMenuOpen = true, animateFrom = messages.length } = {}) {
   const entering = loading && messages.length === 1 && animateFrom === 0;
   const welcome = (!messages.length && !loading) || entering;
   const initials = (identity.name || '').split(' ').slice(0, 2).map(word => word[0] || '').join('');
@@ -120,6 +121,7 @@ export function renderJupWorkspace({ identity = {}, messages = [], understood = 
           <div class="conversation-end" aria-hidden="true"></div></div>
           <button class="scroll-bottom" type="button" data-action="scroll-bottom" hidden aria-label="Voltar à última mensagem">Última mensagem ↓</button>
           <form id="jup-form" class="composer" aria-label="Enviar mensagem ao Jup" aria-busy="${loading}">
+            ${commandMenuOpen && /^\/\S*$/.test(draft) ? '<div class="composer-command-menu" data-command-menu role="listbox" aria-label="Comandos"><button type="button" data-command="/solicitacoes" role="option" aria-label="/solicitacoes. Ver minhas solicitações e seus status"><strong>/solicitacoes</strong><span>Ver minhas solicitações e seus status</span></button></div>' : ''}
             <div class="composer-input-row"><span class="composer-leading-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17.5V7.8A2.8 2.8 0 0 1 6.8 5h10.4A2.8 2.8 0 0 1 20 7.8v6.4a2.8 2.8 0 0 1-2.8 2.8H9l-5 3v-2.5Z"/><path d="M8 9.5h8M8 13h5"/></svg></span><label class="sr-only" for="jup-message">Mensagem</label><textarea id="jup-message" name="message" rows="1" maxlength="3000" aria-describedby="composer-hint" placeholder="Digite sua mensagem aqui..."${loading ? ' disabled' : ''}>${escapeHtml(draft)}</textarea></div>
             <div class="composer-actions"><span id="composer-hint" class="composer-hint">Enter para enviar · Shift+Enter para nova linha</span><button class="button button--primary composer-send" type="submit" aria-label="Enviar mensagem"${loading ? ' disabled' : ''}><span class="sr-only">${loading ? 'Aguarde...' : 'Enviar'}</span>${navIcon('send')}</button></div>
           </form>

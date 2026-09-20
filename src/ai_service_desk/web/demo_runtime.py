@@ -107,6 +107,15 @@ _ACCESS_REQUEST = re.compile(
     r"\b(?:acesso|acessar|entrar|permissao|permissoes|libera|liberar|perfil)\b",
     re.IGNORECASE,
 )
+_REQUEST_STATUS_QUERY = re.compile(
+    r"(?:\bcomo\s+est[ãa]o?\s+(?:as\s+)?minhas?\s+solicita(?:ç|c)[õo]es\b|"
+    r"\btenho\s+alguma\s+solicita(?:ç|c)[ãa]o\s+pendente\b|"
+    r"\btenho\s+algum\s+pedido\s+pendente\b|"
+    r"\bquais?\s+(?:pedidos?|solicita(?:ç|c)[õo]es)\s+eu\s+tenho\b|"
+    r"\bcomo\s+est[áa]\s+meu\s+pedido\b|"
+    r"\bo\s+que\s+aconteceu\s+com\s+minha\s+solicita(?:ç|c)[ãa]o\b)",
+    re.IGNORECASE,
+)
 _LOCAL_SUPPORT_SIGNALS = {
     "LOGIN_PROBLEM": LinguisticSignal.M365_LOGIN_PROBLEM,
     "PASSWORD_EVIDENCE": LinguisticSignal.PASSWORD_EVIDENCE,
@@ -118,6 +127,10 @@ _LOCAL_SUPPORT_SIGNALS = {
 def _canonicalize_access_request_language(text: str) -> str:
     canonical = _ADMIN_ROLE_ALIAS.sub("admin", text)
     return _ENTER_ACCESS_ALIAS.sub("acessar", canonical)
+
+
+def _is_request_status_query(message: str) -> bool:
+    return bool(_REQUEST_STATUS_QUERY.search(" ".join(message.split())))
 
 
 class DemoRuntime:
@@ -706,6 +719,18 @@ class DemoRuntime:
             user_message=message,
         )
 
+        if delta.semantic_signal == "REQUEST_STATUS_QUERY" or _is_request_status_query(message):
+            result = self._request_status_result(identity_id)
+            context_after_backend = self._apply_result_to_context(context_after_delta, result)
+            grounding = ground_response(result, context_after_backend, delta)
+            assistant_message = grounding.fallback_message
+            context_final = append_turn(context_after_backend, "USER", message.strip())
+            self._conversation_contexts[identity_id] = append_turn(
+                context_final, "ASSISTANT", assistant_message
+            )
+            result["assistant_message"] = assistant_message
+            return result
+
         self.knowledge_engine.last_search_ms = 0.0
         backend_started = perf_counter()
         try:
@@ -858,6 +883,15 @@ class DemoRuntime:
         )
 
     def send_message(self, identity_id: str, message: str) -> dict:
+        if isinstance(message, str) and message.strip() == "/solicitacoes":
+            context = self._context_for(identity_id, self._requester(identity_id))
+            result = self._request_status_result(identity_id)
+            context = self._apply_result_to_context(context, result)
+            context = append_turn(context, "USER", message)
+            self._conversation_contexts[identity_id] = append_turn(
+                context, "ASSISTANT", result["assistant_message"]
+            )
+            return result
         if self.mode != "LOCAL_AI":
             context = self._context_for(identity_id, self._requester(identity_id))
             result = self._send_message_impl(identity_id, message)
@@ -894,6 +928,9 @@ class DemoRuntime:
         requester = self._requester(identity_id)
         if not isinstance(message, str) or not message.strip():
             raise ValueError("Mensagem vazia.")
+
+        if _is_request_status_query(message):
+            return self._request_status_result(identity_id)
 
         cdm = self._cdm_conversation_turn(
             identity_id, requester, message, self._context_for(identity_id, requester)
@@ -1565,6 +1602,33 @@ class DemoRuntime:
             assignment = self.routing_store.get_optional(request_id)
             items.append(self._present(record, assignment=assignment))
         return items
+
+    def _request_status_result(self, identity_id: str) -> dict:
+        items = self.list_requests(identity_id)
+        summary_items = [
+            {
+                "request_id": item["request_id"],
+                "system": item["system"],
+                "state_label": item["state_label"],
+            }
+            for item in items
+        ]
+        count = len(summary_items)
+        if not count:
+            message = "Você ainda não tem solicitações para acompanhar."
+        else:
+            noun = "solicitação" if count == 1 else "solicitações"
+            message = f"Você tem {count} {noun} para acompanhar.\n\n" + "\n".join(
+                f"{item['system']} · {item['state_label']} ({item['request_id']})"
+                for item in summary_items
+            )
+        return {
+            "status": "REQUESTS_LISTED",
+            "request_id": None,
+            "request_summary": {"count": count, "items": summary_items},
+            "presentation": {"cta": "REQUESTS" if count else None},
+            "assistant_message": message,
+        }
 
     def get_request(self, identity_id: str, request_id: str) -> dict:
         requester = self._requester(identity_id)

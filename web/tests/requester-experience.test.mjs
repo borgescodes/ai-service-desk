@@ -68,3 +68,20 @@ test('handoff keeps its technical summary behind a native disclosure', () => {
   assert.doesNotMatch(html, /<details[^>]*open/);
   assert.match(html, /Detalhe aprovado para continuidade/);
 });
+
+test('request-status response renders an explicit route CTA without inspecting its text', () => {
+  const html = renderJupWorkspace({
+    messages: [{ role: 'JUP', text: 'Você tem 1 solicitação em andamento.', requestCta: 'REQUESTS' }],
+  });
+  assert.match(html, /href="\/requests"[^>]*data-route/);
+  assert.match(html, />Ver minhas solicitações</);
+});
+
+test('composer renders a compact slash menu only for command search', () => {
+  const menu = renderJupWorkspace({ draft: '/', messages: [] });
+  const plain = renderJupWorkspace({ draft: 'olá', messages: [] });
+  assert.match(menu, /data-command-menu/);
+  assert.match(menu, /\/solicitacoes/);
+  assert.match(menu, /Ver minhas solicitações e seus status/);
+  assert.doesNotMatch(plain, /data-command-menu/);
+});

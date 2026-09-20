@@ -223,6 +223,24 @@ def test_backend_statuses_map_to_authoritative_dispositions():
             },
             ConversationDisposition.ACKNOWLEDGE_RESOLUTION,
         ),
+        (
+            {
+                "status": "REQUESTS_LISTED",
+                "request_id": None,
+                "assistant_message": "Você tem 1 solicitação para acompanhar.",
+                "request_summary": {
+                    "count": 1,
+                    "items": [
+                        {
+                            "request_id": "REQ-123456",
+                            "system": "CDM",
+                            "state_label": "Aguardando aprovação",
+                        }
+                    ],
+                },
+            },
+            ConversationDisposition.REQUEST_STATUS,
+        ),
     )
 
     for result, expected in cases:

@@ -166,7 +166,7 @@ img { max-width: 100%; }
 .thinking-dots span:nth-child(2) { animation-delay: .15s; }
 .thinking-dots span:nth-child(3) { animation-delay: .3s; }
 @keyframes thinking-dot { 50% { opacity: .25; } }
-.composer { flex: none; display: flex; align-items: center; gap: 12px; margin: 0 12px 12px; border: 1px solid var(--color-border); border-radius: 14px; background: white; padding: 8px; }
+.composer { position: relative; flex: none; display: flex; align-items: center; gap: 12px; margin: 0 12px 12px; border: 1px solid var(--color-border); border-radius: 14px; background: white; padding: 8px; }
 .composer:focus-within { border-color: var(--color-primary); outline: 3px solid var(--color-primary-soft); }
 .composer-input-row { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
 .composer-leading-icon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; background: var(--color-accent-soft); border-radius: 10px; color: var(--color-primary-800); }
@@ -176,6 +176,11 @@ img { max-width: 100%; }
 .composer-hint { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .composer-send { padding: 10px; min-width: 40px; height: 40px; }
 .composer-send .nav-icon { width: 24px; height: 24px; color: var(--color-accent); }
+.composer-command-menu { position: absolute; left: 8px; bottom: calc(100% + 8px); z-index: 2; min-width: 280px; padding: 4px; border: 1px solid var(--color-border); border-radius: 10px; background: white; box-shadow: 0 8px 20px rgb(31 53 35 / 16%); }
+.composer-command-menu button { display: grid; width: 100%; gap: 2px; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--color-ink); text-align: left; cursor: pointer; }
+.composer-command-menu button:hover, .composer-command-menu button:focus-visible { background: var(--color-primary-soft); outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.composer-command-menu button span { color: var(--color-muted); font-size: 13px; }
+.message-request-cta { margin-top: 10px; }
 .chat-support-rail { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
 .related-articles, .support-assistance { background: white; border: 1px solid var(--color-border); border-radius: 16px; padding: 15px; }
 .related-articles header { display: flex; align-items: center; gap: 9px; padding-bottom: 12px; }

@@ -42,6 +42,7 @@ let state = {
   route: resolveRoute(window.location.pathname),
   composerFocused: false,
   composerDraft: '',
+  commandMenuOpen: false,
   faqCategory: '',
   lastBackendStatus: null,
   messageError: null,
@@ -85,6 +86,7 @@ function renderRoute() {
       messageError: state.messageError,
       visualState: state.composerFocused && !state.pendingAction ? 'listening' : null,
       draft: state.composerDraft,
+      commandMenuOpen: state.commandMenuOpen,
       animateFrom: renderedMessageCount,
       messages: state.messages,
       understood: state.understood,
@@ -252,9 +254,9 @@ function settleSuccessAvatar(message) {
   }, 1200);
 }
 
-async function submitMessage(form) {
-  const field = form.querySelector('#jup-message');
-  const message = field?.value?.trim();
+async function submitMessage(form, messageOverride = null) {
+  const field = form?.querySelector?.('#jup-message');
+  const message = (messageOverride ?? field?.value)?.trim();
   if (!message || state.pendingAction) return;
 
   const revision = identityRevision;
@@ -262,6 +264,7 @@ async function submitMessage(form) {
   const presentationReady = new Promise(resolve => setTimeout(resolve, 2400));
   state.messages = [...state.messages, { role: 'USER', text: message, sentAt: new Date().toISOString() }];
   state.composerDraft = '';
+  state.commandMenuOpen = false;
   state.lastBackendStatus = null;
   state.messageError = null;
   state.composerFocused = false;
@@ -305,6 +308,7 @@ async function submitMessage(form) {
         text: result.assistant_message,
         procedure_url: result.procedure_url,
         support_handoff: result.support_handoff,
+        requestCta: result.presentation?.cta === 'REQUESTS' ? 'REQUESTS' : null,
       },
     ];
   } catch (error) {
@@ -517,7 +521,11 @@ function bindInteractions() {
     state.faqSearchQuery = event.target.value;
     faqSearch.input(state.faqSearchQuery, state.faqCategory);
   });
-  app.querySelector('#jup-message')?.addEventListener('input', event => { state.composerDraft = event.target.value; });
+  app.querySelector('#jup-message')?.addEventListener('input', event => {
+    state.composerDraft = event.target.value;
+    state.commandMenuOpen = /^\/\S*$/.test(state.composerDraft);
+    render();
+  });
 
   app.querySelector('#jup-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -535,10 +543,30 @@ function bindInteractions() {
     });
   }
   app.querySelector('#jup-message')?.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown' && app.querySelector('[data-command-menu] [data-command]')) {
+      event.preventDefault();
+      app.querySelector('[data-command-menu] [data-command]')?.focus();
+      return;
+    }
+    if (event.key === 'Escape' && state.commandMenuOpen) {
+      state.commandMenuOpen = false;
+      render();
+      return;
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
     }
+  });
+  app.querySelector('[data-command="/solicitacoes"]')?.addEventListener('click', () =>
+    void submitMessage(null, '/solicitacoes'),
+  );
+  app.querySelector('[data-command="/solicitacoes"]')?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    state.commandMenuOpen = false;
+    render();
+    app.querySelector('#jup-message')?.focus({ preventScroll: true });
   });
 
   app.querySelectorAll('[data-request-select]').forEach(button => {

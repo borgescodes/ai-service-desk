@@ -108,6 +108,31 @@ def test_real_text_cannot_promote_identity_or_approval(runtime):
     assert record.creation_policy.decision in {"REQUIRE_APPROVAL", "DENY"}
 
 
+def test_real_request_status_queries_use_authoritative_records(runtime):
+    created = runtime.send_message(
+        "pedro-miranda",
+        "Preciso de acesso ao CDM para solicitar materiais para uma revenda.",
+    )
+    request_id = created["request_id"]
+
+    listed = runtime.send_message("pedro-miranda", "Como estão minhas solicitações?")
+    pending = runtime.send_message("pedro-miranda", "Tenho algum pedido pendente?")
+
+    for result in (listed, pending):
+        assert result["status"] == "REQUESTS_LISTED"
+        assert result["request_summary"] == {
+            "count": 1,
+            "items": [
+                {
+                    "request_id": request_id,
+                    "system": "CDM",
+                    "state_label": "Aguardando aprovação",
+                }
+            ],
+        }
+        assert "PENDING_APPROVAL" not in result["assistant_message"]
+
+
 def test_real_product_correction_teams_to_outlook(runtime):
     runtime.send_message("pedro-miranda", "O Teams não entra")
     runtime.send_message("pedro-miranda", "não, falei errado, é Outlook")

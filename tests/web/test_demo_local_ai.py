@@ -57,7 +57,23 @@ class ConversationalGateway(LocalAIGatewayBase):
         text = payload["messages"][-1]["content"].casefold()
 
         if "relation" in properties or "r" in properties:
-            if "cdm" in text:
+            if any(
+                term in text
+                for term in ("minhas solicitações", "meu pedido", "solicitação pendente")
+            ):
+                data = {
+                    "relation": "NEW_GOAL",
+                    "domain": "IT_SUPPORT",
+                    "goal": "CHECK_REQUEST_STATUS",
+                    "intent": "OUTRO",
+                    "entities": {"system": "CDM" if "cdm" in text else "", "product": ""},
+                    "facts_added": [],
+                    "facts_corrected": [],
+                    "answered_pending_question": False,
+                    "semantic_signal": "REQUEST_STATUS_QUERY",
+                    "understood_topic": "minhas solicitações",
+                }
+            elif "cdm" in text:
                 data = {
                     "relation": "NEW_GOAL",
                     "domain": "IT_SUPPORT",
@@ -307,6 +323,33 @@ def test_local_ai_turn_uses_interpreter_then_writer(monkeypatch):
         assert set(payloads[1]["format"]["properties"]) == {"intro", "outro"}
         assert "aguarda aprovação" in result["assistant_message"]
         assert "enum" not in json.dumps(payloads[1]["format"])
+    finally:
+        runtime.close()
+
+
+def test_local_ai_request_status_query_uses_authoritative_summary(monkeypatch):
+    runtime = _runtime(monkeypatch, ConversationalGateway)
+    try:
+        result = runtime.send_message("pedro-miranda", "Como estão minhas solicitações?")
+
+        assert result["status"] == "REQUESTS_LISTED"
+        assert result["request_summary"] == {"count": 0, "items": []}
+        assert len(runtime._ollama_client.payloads) == 1
+        assert (
+            "REQUEST_STATUS_QUERY" in runtime._ollama_client.payloads[0]["messages"][0]["content"]
+        )
+    finally:
+        runtime.close()
+
+
+def test_local_ai_slash_command_skips_qwen_interpretation(monkeypatch):
+    runtime = _runtime(monkeypatch, ConversationalGateway)
+    try:
+        result = runtime.send_message("pedro-miranda", "/solicitacoes")
+
+        assert result["status"] == "REQUESTS_LISTED"
+        assert runtime._ollama_client.payloads == []
+        assert runtime.local_ai_metrics()["total_calls"] == 0
     finally:
         runtime.close()
 

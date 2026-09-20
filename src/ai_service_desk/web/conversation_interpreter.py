@@ -24,6 +24,7 @@ SEMANTIC_SIGNALS = (
     "PASSWORD_EVIDENCE",
     "PROCEDURE_SUCCEEDED",
     "PROCEDURE_FAILED",
+    "REQUEST_STATUS_QUERY",
     "NONE",
 )
 
@@ -317,7 +318,9 @@ def build_interpretation_payload(context, user_message, vocabulary):
         "acesso ao CDM usa ACCESS_REQUEST. "
         "14) Instalar aplicativo ou programa e INSTALACAO_SOFTWARE. Para 'instalar o Teams', "
         "use domain IT_SUPPORT, intent INSTALACAO_SOFTWARE e semantic_signal NONE. "
-        "15) Nunca use UNKNOWN quando a mensagem claramente cabe em SOCIAL, OTHER ou IT_SUPPORT."
+        "15) REQUEST_STATUS_QUERY: perguntas sobre solicitacoes, pedidos ou "
+        "pendencias usam IT_SUPPORT/OUTRO e esse signal; preserve CDM apenas se explicito. "
+        "Nao invente request_id, status, aprovacao, responsavel, execucao ou quantidade."
     )
 
     system_prompt = (

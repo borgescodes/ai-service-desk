@@ -12,9 +12,10 @@ async function boot(path, respond) {
   const queueRow = { dataset: { requestId: 'R-1' }, addEventListener(name, handler) { events.selectApproval = handler; } };
   const approve = { addEventListener(name, handler) { events.approve = handler; } };
   const persona = { dataset: { persona: 'tecnico-cdm' }, addEventListener(name, handler) { events.persona = handler; } };
-  const field = { value: '', addEventListener() {} };
+  const command = { addEventListener(name, handler) { events[`command-${name}`] = handler; }, focus() {} };
+  const field = { value: '', addEventListener(name, handler) { events[`field-${name}`] = handler; }, focus() {} };
   const form = { addEventListener(name, handler) { events[name] = handler; }, querySelector() { return field; } };
-  const root = { innerHTML: '', setAttribute() {}, querySelectorAll(selector) { return selector === '.queue-row[data-request-id]' ? [queueRow] : selector === '[data-persona]' ? [persona] : []; }, querySelector(selector) { return selector === '[data-action="approve"]' ? approve : selector === '[data-action="new-chat"]' ? newChat : selector === '#demo-identity-form' ? identityForm : selector === '#jup-form' ? form : selector === '#jup-message' ? field : null; } };
+  const root = { innerHTML: '', setAttribute() {}, querySelectorAll(selector) { return selector === '.queue-row[data-request-id]' ? [queueRow] : selector === '[data-persona]' ? [persona] : []; }, querySelector(selector) { return selector === '[data-action="approve"]' ? approve : selector === '[data-action="new-chat"]' ? newChat : selector === '#demo-identity-form' ? identityForm : selector === '#jup-form' ? form : selector === '#jup-message' ? field : selector === '[data-command="/solicitacoes"]' || selector === '[data-command-menu] [data-command]' ? command : null; } };
   const win = { location: new URL(`http://demo${path}`), addEventListener(name, fn) { events[name] = fn; } };
   win.history = { pushState(_a, _b, path) { win.location = new URL(path, win.location); } };
   globalThis.document = { querySelector(selector) { return selector === '#app' ? root : null; } };
@@ -32,7 +33,7 @@ async function boot(path, respond) {
     return new Response(JSON.stringify(payload), { status: 200 });
   };
   await import(`../src/app.mjs?test=${++serial}`); await tick();
-  return { root, field, async approve() { await events.approve(); await tick(); }, async selectApproval() { events.selectApproval(); await tick(); }, async reset() { await events.newChat?.(); await tick(); }, async configureIdentity() { events.configureIdentity?.({ preventDefault() {}, currentTarget: identityForm }); await tick(); }, async switchPersona() { await events.persona?.(); await tick(); }, async go(path) { win.location = new URL(`http://demo${path}`); events.popstate(); await tick(); }, async send(text) { field.value = text; events.submit({ preventDefault() {}, currentTarget: form }); await tick(); } };
+  return { root, field, async approve() { await events.approve(); await tick(); }, async selectApproval() { events.selectApproval(); await tick(); }, async reset() { await events.newChat?.(); await tick(); }, async configureIdentity() { events.configureIdentity?.({ preventDefault() {}, currentTarget: identityForm }); await tick(); }, async switchPersona() { await events.persona?.(); await tick(); }, async go(path) { win.location = new URL(`http://demo${path}`); events.popstate(); await tick(); }, async send(text) { field.value = text; events.submit({ preventDefault() {}, currentTarget: form }); await tick(); }, async type(text) { field.value = text; events['field-input']?.({ target: field }); await tick(); }, async selectCommand() { events['command-click']?.(); await tick(); }, async escapeCommand() { events['field-keydown']?.({ key: 'Escape', preventDefault() {}, currentTarget: field }); await tick(); } };
 }
 
 test('late FAQ response cannot replace an article after navigation', async () => {
@@ -86,6 +87,28 @@ test('persona control loads the assigned technician queue with backend identity'
   const queue = calls.find(([url]) => url === '/api/operations/approvals');
   assert.ok(queue);
   assert.equal(queue[1].headers['X-Demo-Identity'], 'tecnico-cdm');
+});
+
+test('slash command is selectable by keyboard-ready menu control and sends the deterministic message', async () => {
+  const calls = [];
+  const ui = await boot('/jup', (url, options) => {
+    calls.push([url, options]);
+    return { status: 'REQUESTS_LISTED', assistant_message: 'Você ainda não tem solicitações para acompanhar.', presentation: { cta: null } };
+  });
+  await ui.type('/');
+  assert.match(ui.root.innerHTML, /data-command-menu/);
+  await ui.selectCommand();
+  const request = calls.find(([url]) => url === '/api/jup/messages');
+  assert.equal(JSON.parse(request[1].body).message, '/solicitacoes');
+  assert.match(ui.root.innerHTML, /\/solicitacoes/);
+});
+
+test('Escape closes slash command menu without clearing the composer field', async () => {
+  const ui = await boot('/jup', () => []);
+  await ui.type('/');
+  await ui.escapeCommand();
+  assert.equal(ui.field.value, '/');
+  assert.doesNotMatch(ui.root.innerHTML, /data-command-menu/);
 });
 
 test('demo identity form creates and activates a trusted requester', async () => {

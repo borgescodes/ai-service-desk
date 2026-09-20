@@ -11,6 +11,7 @@ class ConversationDisposition(StrEnum):
     WAIT_FOR_APPROVAL = "WAIT_FOR_APPROVAL"
     HANDOFF = "HANDOFF"
     ACKNOWLEDGE_RESOLUTION = "ACKNOWLEDGE_RESOLUTION"
+    REQUEST_STATUS = "REQUEST_STATUS"
     OUT_OF_SCOPE = "OUT_OF_SCOPE"
 
 
@@ -102,6 +103,39 @@ def _ground_response(result, context, delta) -> ResponseGrounding:
         "Nao afirme execucao sem confirmacao operacional.",
         "Nao afirme que acesso foi liberado sem confirmacao operacional.",
     )
+
+    if status == "REQUESTS_LISTED":
+        summary = result.get("request_summary") or {}
+        items = summary.get("items") if isinstance(summary, dict) else None
+        if not isinstance(items, list):
+            raise ValueError("REQUESTS_LISTED requer resumo autoritativo.")
+        facts.extend(
+            f"solicitação confirmada: {item.get('request_id')} · {item.get('system')} · "
+            f"{item.get('state_label')}"
+            for item in items
+            if isinstance(item, dict)
+        )
+        fallback = result.get("assistant_message")
+        if not isinstance(fallback, str) or not fallback.strip():
+            raise ValueError("REQUESTS_LISTED requer mensagem factual.")
+        return ResponseGrounding(
+            disposition=ConversationDisposition.REQUEST_STATUS,
+            response_goal="Apresente somente o resumo autoritativo já fornecido.",
+            verbosity="concise",
+            facts=tuple(facts),
+            protected_content=(ProtectedContent("REQUEST_SUMMARY", fallback.strip()),),
+            forbidden_claims=forbidden_claims,
+            required_information=(),
+            fallback_message=fallback.strip(),
+            allowed_operational_values=frozenset(
+                str(value)
+                for item in items
+                if isinstance(item, dict)
+                for value in (item.get("request_id"), item.get("system"), item.get("state_label"))
+                if value is not None and str(value).strip()
+            ),
+            allowed_wrappers=("",),
+        )
 
     if status == "SOCIAL":
         return ResponseGrounding(
