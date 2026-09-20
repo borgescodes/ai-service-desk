@@ -1,6 +1,7 @@
 import { escapeHtml } from './render.mjs';
 
 export const APPROVED_PROCEDURE_URL = 'https://mysignins.microsoft.com/security-info/password/change';
+const CENTRAL_ARTICLE_IDS = new Set(['KB-SYN-FAQ-CDM-REQUEST-001', 'KB-SYN-M365-PASSWORD-001']);
 
 export function renderMessageBody(text) {
   return String(text ?? '').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean)
@@ -33,8 +34,8 @@ export function renderApprovedKnowledgeBody({ text, procedureUrl = null, knowled
     else { flushParagraph(); }
   }
   flushParagraph(); flushSteps();
-  if (article?.knowledge_id === 'KB-SYN-FAQ-CDM-REQUEST-001' && article.provenance?.status === 'APPROVED') {
-    output.push(`<p><a href="/solucoes/KB-SYN-FAQ-CDM-REQUEST-001" data-solution-link data-knowledge-id="KB-SYN-FAQ-CDM-REQUEST-001">${escapeHtml(article.title)}</a></p>`);
+  if (CENTRAL_ARTICLE_IDS.has(article?.knowledge_id) && article.provenance?.status === 'APPROVED') {
+    output.push(`<p><a href="/solucoes/${article.knowledge_id}" data-solution-link data-knowledge-id="${article.knowledge_id}">${escapeHtml(article.title)}</a></p>`);
   }
   return output.join('');
 }

@@ -371,6 +371,46 @@ def test_approved_m365_knowledge_renders_official_procedure_url():
     assert "backend" not in grounding.response_goal.casefold()
 
 
+def test_m365_article_reference_is_protected_and_rejects_invented_follow_up():
+    answer = "PASSO OFICIAL"
+    grounding = ground_response(
+        {
+            "status": "KNOWLEDGE_FOUND",
+            "request_id": None,
+            "answer": answer,
+            "knowledge_id": "KB-SYN-M365-PASSWORD-001",
+            "procedure_url": "https://mysignins.microsoft.com/security-info/password/change",
+            "article": {
+                "knowledge_id": "KB-SYN-M365-PASSWORD-001",
+                "title": "Redefinir sua senha do Microsoft 365",
+                "provenance": {"status": "APPROVED"},
+            },
+        },
+        base_context(),
+        delta_for(),
+    )
+
+    def chat(payload):
+        return {
+            "message": {
+                "content": json.dumps(
+                    {
+                        "intro": "O técnico foi notificado.",
+                        "outro": "Você receberá um retorno.",
+                    }
+                )
+            },
+            "done_reason": "stop",
+        }
+
+    rendered = generate_natural_response("Minha senha está errada", base_context(), grounding, chat)
+
+    assert rendered == grounding.fallback_message
+    assert "Redefinir sua senha do Microsoft 365" in rendered
+    assert "notificado" not in rendered.casefold()
+    assert "receberá" not in rendered.casefold()
+
+
 def test_writer_rejects_invented_handoff_capabilities():
     grounding = ground_response(
         {

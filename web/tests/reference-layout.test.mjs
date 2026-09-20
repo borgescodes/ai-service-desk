@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { renderAppHeader, renderJupWorkspace } from '../src/components.mjs';
 import { renderSolutionsHome, renderSolutionsResults } from '../src/solutions.mjs';
 
-const groups = [{ key: 'acessos-rotinas', items: [{ knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001', title: 'Como solicitar acesso ao CDM' }] }];
+const groups = [
+  { key: 'acessos-rotinas', items: [{ knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001', title: 'Como solicitar acesso ao CDM' }] },
+  { key: 'impressao-office-aplicativos', items: [{ knowledge_id: 'KB-SYN-M365-PASSWORD-001', title: 'Redefinir sua senha do Microsoft 365' }] },
+];
 
 test('FAQ has two global destinations and no sidebar or global request link', () => {
   const html = renderAppHeader({ activeRoute: 'solutions' });
@@ -21,14 +24,15 @@ test('chat navigation keeps reset and request tracking in the contextual sidebar
   assert.doesNotMatch(html, /Artigos de ajuda/);
 });
 
-test('FAQ restores visual categories while only the backend CDM article is linked', () => {
+test('FAQ restores visual categories while the two approved articles are linked', () => {
   const html = renderSolutionsHome({ groups });
   assert.equal((html.match(/class="faq-category"/g) ?? []).length, 4);
   assert.match(html, /data-category="rede-internet"/);
-  assert.match(html, /17 artigos/);
+  assert.match(html, /18 artigos/);
   assert.match(html, /Sistema não abre ou fecha sozinho/);
   assert.match(html, /aria-disabled="true"/);
-  assert.equal((html.match(/data-solution-link/g) ?? []).length, 1);
+  assert.match(html, /href="\/solucoes\/KB-SYN-M365-PASSWORD-001"/);
+  assert.equal((html.match(/data-solution-link/g) ?? []).length, 2);
   assert.match(html, /Ainda não encontrou a resposta/);
 });
 

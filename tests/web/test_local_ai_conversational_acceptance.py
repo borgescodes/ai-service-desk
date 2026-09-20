@@ -34,6 +34,11 @@ def test_real_m365_multi_turn_failure_handoff(runtime):
     )
     assert guidance["status"] == "KNOWLEDGE_FOUND"
     assert guidance["assistant_message"].count(guidance["answer"]) == 1
+    assert guidance["article"]["knowledge_id"] == "KB-SYN-M365-PASSWORD-001"
+    assert guidance["article"]["provenance"]["status"] == "APPROVED"
+    assert (
+        guidance["procedure_url"] == "https://mysignins.microsoft.com/security-info/password/change"
+    )
 
     failed = runtime.send_message(
         "pedro-miranda",
@@ -129,10 +134,10 @@ def test_real_ubs_is_low_confidence_general_handoff(runtime):
 
 
 def test_real_m365_success_resolves_without_handoff(runtime):
-    runtime.send_message(
-        "pedro-miranda",
-        "Esqueci minha senha do Microsoft 365",
-    )
+    first = runtime.send_message("pedro-miranda", "Meu office não entra.")
+    assert first["status"] == "NEEDS_CLARIFICATION"
+    guidance = runtime.send_message("pedro-miranda", "diz que minha senha ta errada")
+    assert guidance["status"] == "KNOWLEDGE_FOUND"
 
     result = runtime.send_message(
         "pedro-miranda",

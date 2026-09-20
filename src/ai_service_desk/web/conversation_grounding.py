@@ -46,18 +46,22 @@ def _consolidated_facts(context) -> tuple[str, ...]:
 
 def ground_response(result, context, delta) -> ResponseGrounding:
     grounding = _ground_response(result, context, delta)
-    if result.get("system") != "CDM":
+    article = result.get("article") or {}
+    article_is_approved = article.get("provenance", {}).get("status") == "APPROVED"
+    if result.get("system") != "CDM" and not article_is_approved:
         return grounding
     # The writer may connect confirmed content, never author operational facts.
     content = grounding.protected_content or (
         ProtectedContent("BACKEND_RESULT", grounding.fallback_message),
     )
+    if article_is_approved:
+        content = (
+            *content,
+            ProtectedContent("ARTICLE_REFERENCE", f"Na Central de Suporte: {article['title']}."),
+        )
     if result.get("offer_action") == "CDM_ACCESS_REQUEST":
         content = (
             *content,
-            ProtectedContent(
-                "ARTICLE_REFERENCE", f"Na Central de Suporte: {result['article']['title']}."
-            ),
             ProtectedContent("ACTION_OFFER", "Se quiser, posso registrar a solicitação para você."),
         )
     return replace(

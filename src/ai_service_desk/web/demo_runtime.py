@@ -1395,6 +1395,12 @@ class DemoRuntime:
             }
         playbook_result = self.playbook_engine.resolve(knowledge)
         if playbook_result["status"] == "KNOWLEDGE_ONLY":
+            article = None
+            if knowledge["knowledge_id"] == "KB-SYN-M365-PASSWORD-001":
+                try:
+                    article = self.faq_catalog.detail(knowledge["knowledge_id"])
+                except FaqNotFoundError:
+                    article = None
             if knowledge["knowledge_id"] != "KB-SYN-M365-PASSWORD-001":
                 interaction_id = f"DEMO-KNOWLEDGE-{len(self.outcome_store.snapshot()) + 1:03d}"
                 self.outcome_store.ingest(
@@ -1405,12 +1411,17 @@ class DemoRuntime:
                         area=requester.area,
                     )
                 )
-            return {
+            result = {
                 "status": "KNOWLEDGE_FOUND",
                 "knowledge_id": knowledge["knowledge_id"],
                 "answer": knowledge["answer"],
                 "request_id": None,
             }
+            if article is not None:
+                result["article"] = {
+                    key: article[key] for key in ("knowledge_id", "title", "provenance")
+                }
+            return result
 
         if playbook_result["status"] != "PLAYBOOK_FOUND":
             return {

@@ -4,11 +4,11 @@ import { renderApprovedKnowledgeBody } from '../src/knowledge_content.mjs';
 
 const SAFE_URL = 'https://mysignins.microsoft.com/security-info/password/change';
 
-test('CDM guidance links the approved Central article without linking arbitrary content', () => {
-  const article = { knowledge_id: 'KB-SYN-FAQ-CDM-REQUEST-001', title: 'Como solicitar acesso ao CDM', provenance: { status: 'APPROVED' } };
-  const html = renderApprovedKnowledgeBody({ text: 'O acesso precisa de aprovação.', article });
-  assert.match(html, /href="\/solucoes\/KB-SYN-FAQ-CDM-REQUEST-001"/);
-  assert.match(html, /Como solicitar acesso ao CDM/);
+test('approved Central articles link from guidance without linking arbitrary content', () => {
+  const article = { knowledge_id: 'KB-SYN-M365-PASSWORD-001', title: 'Redefinir sua senha do Microsoft 365', provenance: { status: 'APPROVED' } };
+  const html = renderApprovedKnowledgeBody({ text: 'Orientação aprovada.', article });
+  assert.match(html, /href="\/solucoes\/KB-SYN-M365-PASSWORD-001"/);
+  assert.match(html, /Redefinir sua senha do Microsoft 365/);
   for (const invalid of [{ ...article, provenance: { status: 'DRAFT' } }, { ...article, knowledge_id: 'https://evil.example' }]) {
     assert.doesNotMatch(renderApprovedKnowledgeBody({ text: 'Orientação', article: invalid }), /<a /);
   }

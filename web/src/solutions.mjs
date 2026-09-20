@@ -1,5 +1,5 @@
 import { navIcon } from './icons.mjs';
-import { renderApprovedKnowledgeBody } from './knowledge_content.mjs';
+import { APPROVED_PROCEDURE_URL, renderApprovedKnowledgeBody } from './knowledge_content.mjs';
 import { renderJupVisual } from './jup_visual.mjs';
 import { escapeHtml } from './render.mjs';
 
@@ -50,7 +50,10 @@ export function createFaqSearch({ request, update }) {
   };
 }
 
-const CDM_FAQ_ID = 'KB-SYN-FAQ-CDM-REQUEST-001';
+const FUNCTIONAL_ARTICLES = Object.freeze({
+  'KB-SYN-FAQ-CDM-REQUEST-001': { category: 'acessos-rotinas', symbol: 'cdm-simbol.svg', intro: 'Siga as orientações abaixo para solicitar seu acesso.', officialLabel: 'Abrir o CDM ↗' },
+  'KB-SYN-M365-PASSWORD-001': { category: 'impressao-office-aplicativos', icon: 'key-round', intro: 'Siga as orientações aprovadas para redefinir sua senha.', officialLabel: 'Abrir página oficial da Microsoft ↗' },
+});
 
 const VISUAL_EXAMPLES = Object.freeze([
   ['acessos-rotinas', 'Acessos e rotinas', 'key-round', ['Como solicitar acesso ao CDM', 'Como entrar no CDM depois da aprovação', 'Como acompanhar uma solicitação feita pelo Jup', 'Como pedir acesso a um sistema corporativo']],
@@ -63,11 +66,13 @@ function arrowIcon() {
   return `<span class="solution-arrow" aria-hidden="true">${navIcon('arrow-right')}</span>`;
 }
 
-function visualArticle(title, availableCdm) {
-  if (title === 'Como solicitar acesso ao CDM' && availableCdm) {
-    return `<a class="faq-item faq-item--available" href="/solucoes/${CDM_FAQ_ID}" data-solution-link data-knowledge-id="${CDM_FAQ_ID}"><span class="faq-item-icon"><img src="/assets/brand/cdm-simbol.svg" alt="" width="24" height="24"></span><strong>${escapeHtml(title)}</strong>${arrowIcon()}</a>`;
+function visualArticle(article) {
+  const metadata = article.knowledge_id && FUNCTIONAL_ARTICLES[article.knowledge_id];
+  if (metadata) {
+    const icon = metadata.symbol ? `<img src="/assets/brand/${metadata.symbol}" alt="" width="24" height="24">` : navIcon(metadata.icon);
+    return `<a class="faq-item faq-item--available" href="/solucoes/${article.knowledge_id}" data-solution-link data-knowledge-id="${article.knowledge_id}"><span class="faq-item-icon">${icon}</span><strong>${escapeHtml(article.title)}</strong>${arrowIcon()}</a>`;
   }
-  return `<div class="faq-item faq-item--catalog" role="link" aria-disabled="true"><span class="faq-item-icon">${navIcon('book-open-text')}</span><span>${escapeHtml(title)}</span>${arrowIcon()}</div>`;
+  return `<div class="faq-item faq-item--catalog" role="link" aria-disabled="true"><span class="faq-item-icon">${navIcon('book-open-text')}</span><span>${escapeHtml(article.title)}</span>${arrowIcon()}</div>`;
 }
 
 function renderFaqHelpStrip() {
@@ -87,16 +92,20 @@ export function renderSolutionsResults({ groups = [], searchQuery = '', category
   }
   const query = searchQuery.trim();
   const normalize = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
-  const availableCdm = (query ? searchResults ?? [] : groups.flatMap(group => group.items ?? [])).some(item => item.knowledge_id === CDM_FAQ_ID);
+  const available = query ? searchResults ?? [] : groups.flatMap(group => group.items ?? []);
   const categories = VISUAL_EXAMPLES.filter(([key]) => !category || category === key)
-    .map(([key, label, icon, titles]) => [key, label, icon, titles.filter(title => !query || normalize(title).includes(normalize(query)))])
-    .filter(([, , , titles]) => titles.length);
-  const count = categories.reduce((sum, [, , , titles]) => sum + titles.length, 0);
+    .map(([key, label, icon, titles]) => {
+      const functional = available.filter(article => FUNCTIONAL_ARTICLES[article.knowledge_id]?.category === key);
+      const functionalTitles = new Set(functional.filter(article => article.title).map(article => normalize(article.title)));
+      const catalog = titles.map(title => ({ title })).filter(article => !functionalTitles.has(normalize(article.title)) && (!query || normalize(article.title).includes(normalize(query))));
+      return [key, label, icon, [...functional, ...catalog]];
+    }).filter(([, , , articles]) => articles.length);
+  const count = categories.reduce((sum, [, , , articles]) => sum + articles.length, 0);
   if (!count) {
     return renderFaqDirectory(`<div class="faq-empty"><h2>Nenhuma solução encontrada.</h2><p>Tente outras palavras ou conte sua dúvida ao Jup.</p><a class="button button--primary" href="${draftPath(searchQuery)}" data-route="jup">${navIcon('message-circle')}Falar com o Jup</a></div>`);
   }
-  const countLabel = `${query && availableCdm ? '1 solução encontrada · ' : ''}${count} ${count === 1 ? 'artigo' : 'artigos'}`;
-  const details = categories.map(([key, label, icon, titles], index) => `<details class="faq-category"${index === 0 ? ' open' : ''}><summary><strong>${label}</strong><small>${titles.length} artigos</small>${navIcon('chevron-down')}</summary><div class="faq-category-panel"><div class="faq-category-items">${titles.map(title => visualArticle(title, availableCdm)).join('')}</div></div></details>`).join('');
+  const countLabel = `${query && available.length ? `${available.length} ${available.length === 1 ? 'solução encontrada' : 'soluções encontradas'} · ` : ''}${count} ${count === 1 ? 'artigo' : 'artigos'}`;
+  const details = categories.map(([key, label, icon, articles], index) => `<details class="faq-category"${index === 0 ? ' open' : ''}><summary><strong>${label}</strong><small>${articles.length} artigos</small>${navIcon('chevron-down')}</summary><div class="faq-category-panel"><div class="faq-category-items">${articles.map(visualArticle).join('')}</div></div></details>`).join('');
   return renderFaqDirectory(details, countLabel);
 }
 
@@ -111,10 +120,12 @@ export function renderSolutionsHome(options = {}) {
 }
 
 export function renderSolutionDetail(detail) {
-  const officialUrl = detail.knowledge_id === CDM_FAQ_ID && detail.procedure_url === 'https://cdm.juparana.com.br/' ? detail.procedure_url : null;
+  const metadata = FUNCTIONAL_ARTICLES[detail.knowledge_id];
+  const officialUrl = detail.procedure_url === APPROVED_PROCEDURE_URL || (detail.knowledge_id === 'KB-SYN-FAQ-CDM-REQUEST-001' && detail.procedure_url === 'https://cdm.juparana.com.br/') ? detail.procedure_url : null;
+  const icon = metadata?.symbol ? `<img class="article-symbol" src="/assets/brand/${metadata.symbol}" width="64" height="64" alt="${escapeHtml(detail.system || '')}">` : `<span class="article-symbol">${navIcon(metadata?.icon || 'book-open-text')}</span>`;
   return `<article class="solution-detail">
-    <nav class="breadcrumb" aria-label="Localização"><a href="/" data-route="solutions">Central de Suporte</a><span aria-hidden="true">/</span><span>Acessos e rotinas</span><span aria-hidden="true">/</span><span>CDM</span></nav>
-    <header class="solution-article-header"><img class="article-symbol" src="/assets/brand/cdm-simbol.svg" width="64" height="64" alt="CDM"><p class="solution-category">Acessos e rotinas · ${escapeHtml(detail.system || 'CDM')}</p><h1>${escapeHtml(detail.title)}</h1><p>Siga as orientações abaixo para solicitar seu acesso.</p>${officialUrl ? `<a class="button button--primary" href="${officialUrl}" target="_blank" rel="noopener noreferrer">Abrir o CDM ↗</a>` : ''}</header>
+    <nav class="breadcrumb" aria-label="Localização"><a href="/" data-route="solutions">Central de Suporte</a><span aria-hidden="true">/</span><span>${escapeHtml(detail.category || '')}</span><span aria-hidden="true">/</span><span>${escapeHtml(detail.system || '')}</span></nav>
+    <header class="solution-article-header">${icon}<p class="solution-category">${escapeHtml(detail.category || '')} · ${escapeHtml(detail.system || '')}</p><h1>${escapeHtml(detail.title)}</h1><p>${metadata?.intro || 'Siga as orientações abaixo.'}</p>${officialUrl ? `<a class="button button--primary" href="${officialUrl}" target="_blank" rel="noopener noreferrer">${metadata?.officialLabel || 'Abrir referência oficial ↗'}</a>` : ''}</header>
     <div class="knowledge-body">${renderApprovedKnowledgeBody({ text: detail.answer, procedureUrl: detail.procedure_url, knowledgeId: detail.knowledge_id })}</div>
     <aside class="security-note"><strong>Cuide da sua segurança</strong><p>Não compartilhe senhas ou códigos de verificação. Use sempre o endereço oficial do sistema.</p></aside>
     <footer class="solution-outcome"><div><h2>Ainda precisa de ajuda?</h2><p>Continue o atendimento com o Jup.</p></div><a class="button button--primary" href="/jup?from=${encodeURIComponent(detail.knowledge_id)}" data-route="jup">Falar com o Jup →</a></footer>
