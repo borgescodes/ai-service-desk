@@ -2,6 +2,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
+from ai_service_desk.engine.cdm_scope import LOCAL_CDM_SCOPE_CATALOG, CDMScopeCatalog
 from ai_service_desk.engine.classification import ALLOWED_INTENTS
 from ai_service_desk.engine.playbook import CAPABILITY_RE
 from ai_service_desk.engine.triage import TriageState
@@ -9,7 +10,7 @@ from ai_service_desk.engine.validation import normalize_text
 
 RequestedRole = Literal["SOLICITANTE", "APROVADOR", "ADMIN", "SUPERADMIN", "UNKNOWN"]
 ConcreteRequestedRole = Literal["SOLICITANTE", "APROVADOR", "ADMIN", "SUPERADMIN"]
-PreparationStatus = Literal["READY", "NEEDS_CLARIFICATION"]
+PreparationStatus = Literal["READY", "NEEDS_CLARIFICATION", "NEEDS_CONFIRMATION"]
 
 CDM_SYSTEM = "CDM"
 CDM_ACCESS_INTENT = "PROBLEMA_ACESSO"
@@ -97,6 +98,10 @@ class AccessRequestContext:
     playbook_version: int
     step_id: str
     capability: str
+    business_scope: str | None = None
+    scope_source: str | None = None
+    scope_mismatch: bool = False
+    scope_confirmed: bool = False
 
 
 @dataclass(frozen=True)
@@ -135,6 +140,18 @@ def validate_access_request_context(context: AccessRequestContext) -> None:
         raise AccessRequestValidationError("intent fora do contrato existente.")
     if not isinstance(context.requested_role, str) or context.requested_role not in CONCRETE_ROLES:
         raise AccessRequestValidationError("requested_role fora do contrato concreto.")
+    if type(context.scope_mismatch) is not bool or type(context.scope_confirmed) is not bool:
+        raise AccessRequestValidationError("Indicadores de escopo devem ser bool.")
+    if context.business_scope is not None:
+        scope = _required_text(context.business_scope, "business_scope", 120)
+        if not scope.isascii() or not scope.replace("_", "").isalnum() or scope != scope.lower():
+            raise AccessRequestValidationError("business_scope deve ser chave canônica.")
+        if context.scope_source not in {"TRUSTED_SESSION", "USER_EXPLICIT"}:
+            raise AccessRequestValidationError("Escopo exige origem determinística.")
+        if context.scope_mismatch and context.scope_source != "USER_EXPLICIT":
+            raise AccessRequestValidationError("Divergência exige intenção explícita.")
+    elif context.scope_source is not None or context.scope_mismatch or context.scope_confirmed:
+        raise AccessRequestValidationError("Metadados de escopo sem escopo.")
     _required_text(context.purpose, "purpose", 3000)
     _required_text(context.knowledge_id, "knowledge_id", 120)
     _required_text(context.playbook_id, "playbook_id", 120)
@@ -221,6 +238,9 @@ def prepare_access_request(
     requester: SessionIdentity,
     triage: TriageState,
     descriptor: Mapping[str, object],
+    *,
+    scope_catalog: CDMScopeCatalog = LOCAL_CDM_SCOPE_CATALOG,
+    scope_answer: str | None = None,
 ) -> AccessRequestPreparation:
     validate_session_identity(requester)
     if not isinstance(triage, TriageState):
@@ -250,8 +270,21 @@ def prepare_access_request(
             context=None,
         )
 
+    explicit, requested_scope = scope_catalog.requested_scope(purpose)
+    if scope_answer is not None:
+        explicit, requested_scope = True, scope_catalog.match_area(scope_answer)
+    area_scope = scope_catalog.match_area(requester.area)
+    business_scope = requested_scope if explicit else area_scope
+    if business_scope is None:
+        return AccessRequestPreparation(
+            "NEEDS_CLARIFICATION", requested_role, "CDM_SCOPE_REQUIRED", None
+        )
+    mismatch = explicit and business_scope != area_scope
     context = AccessRequestContext(
         requester=requester,
+        business_scope=business_scope,
+        scope_source="USER_EXPLICIT" if explicit else "TRUSTED_SESSION",
+        scope_mismatch=mismatch,
         system=triage.system,
         intent=triage.intent,
         requested_role=requested_role,
@@ -264,8 +297,8 @@ def prepare_access_request(
     )
     validate_access_request_context(context)
     return AccessRequestPreparation(
-        status="READY",
+        status="NEEDS_CONFIRMATION" if mismatch else "READY",
         requested_role=requested_role,
-        reason_code=reason_code,
+        reason_code="CDM_SCOPE_CONFIRMATION_REQUIRED" if mismatch else reason_code,
         context=context,
     )

@@ -57,3 +57,17 @@ test('technician detail explains trusted requester, request, confidence and back
   assert.match(html, /Aprovação humana/i);
   assert.doesNotMatch(html, /87%|95%/);
 });
+
+test('technician sees trusted job title and explicit scope mismatch', () => {
+  const item = pendingRequest();
+  item.requester.job_title = 'Analista';
+  item.business_scope = 'ubs';
+  item.scope_mismatch = true;
+  item.scope_confirmed = true;
+  const html = renderTrackingDetail(item, { operational: true });
+  assert.match(html, /Analista/);
+  assert.match(html, /Escopo CDM/);
+  assert.match(html, /ubs/);
+  assert.match(html, /Divergência/);
+  assert.match(html, /Confirmada pelo solicitante/);
+});

@@ -27,6 +27,7 @@ from ai_service_desk.engine.technician_authorization import (
     TechnicianRegistryEntry,
 )
 from tests.engine.phase8_helpers import FixedClock, make_context
+from tests.engine.phase16_authorized_blobs import PHASE16_AUTHORIZED_EXTENSIONS
 
 ROOT = Path(__file__).resolve().parents[2]
 PROTECTED_BLOBS = (
@@ -102,11 +103,12 @@ def test_phase10_protected_git_blob_is_exact(path, expected_sha):
         ),
     }
     command = ["git", "rev-parse", f"HEAD:{path}"]
+    authorized_extensions.update(PHASE16_AUTHORIZED_EXTENSIONS)
     if path in authorized_extensions:
         historical, authorized = authorized_extensions[path]
         assert expected_sha == historical
         expected_sha = authorized
-    if path == "src/ai_service_desk/integrations/cdm_fake_api.py":
+    if path in PHASE16_AUTHORIZED_EXTENSIONS:
         command = ["git", "hash-object", path]
     completed = subprocess.run(
         command,

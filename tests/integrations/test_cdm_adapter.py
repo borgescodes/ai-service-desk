@@ -168,3 +168,30 @@ def test_post_sends_bearer_and_calls_once():
     assert len(session.calls) == 1
     _, _, kwargs = session.calls[0]
     assert kwargs["headers"] == {"Authorization": f"Bearer {TOKEN}"}
+
+
+def test_scoped_access_round_trip_and_idempotency(live_server):
+    _, base = live_server
+    adapter = CDMAdapter(base, TOKEN)
+    adapter.create_access(
+        "REQ-000001", "user", "user@example.invalid", "SOLICITANTE", business_scopes=("ubs",)
+    )
+    assert adapter.get_access("user@example.invalid").business_scopes == ("ubs",)
+    with pytest.raises(CDMIdempotencyConflictError):
+        adapter.create_access(
+            "REQ-000001",
+            "user",
+            "user@example.invalid",
+            "SOLICITANTE",
+            business_scopes=("revenda",),
+        )
+
+
+@pytest.mark.parametrize("scopes", [("financeiro",), ("ubs", "ubs"), (123,)])
+def test_fake_adapter_rejects_invalid_scopes(live_server, scopes):
+    _, base = live_server
+    adapter = CDMAdapter(base, TOKEN)
+    with pytest.raises(CDMRequestValidationError):
+        adapter.create_access(
+            "REQ-000001", "user", "user@example.invalid", "SOLICITANTE", business_scopes=scopes
+        )

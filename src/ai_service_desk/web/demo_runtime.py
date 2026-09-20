@@ -8,6 +8,7 @@ from time import perf_counter
 from ai_service_desk.engine.access_request import prepare_access_request
 from ai_service_desk.engine.approval import ApprovalService
 from ai_service_desk.engine.cdm_execution import CDMActionExecutor
+from ai_service_desk.engine.cdm_scope import LOCAL_CDM_SCOPE_CATALOG
 from ai_service_desk.engine.classification import classify_ticket
 from ai_service_desk.engine.confidence import assess_support_context
 from ai_service_desk.engine.execution import ExecutionEngine
@@ -42,6 +43,7 @@ from ai_service_desk.engine.technician_authorization import (
     TechnicianRegistryEntry,
 )
 from ai_service_desk.engine.triage import TriageEngine
+from ai_service_desk.engine.validation import normalize_text
 from ai_service_desk.integrations.cdm import CDMAdapter
 from ai_service_desk.integrations.cdm_fake_api import CDMFakeStore, build_cdm_server
 from ai_service_desk.web.business_context import BusinessVocabulary
@@ -123,6 +125,7 @@ class DemoRuntime:
         *,
         mode: str = DEFAULT_DEMO_MODE,
         fail_cdm_request_ids: set[str] | frozenset[str] | None = None,
+        scope_catalog=LOCAL_CDM_SCOPE_CATALOG,
     ) -> None:
         if mode not in DEMO_MODES:
             raise ValueError(f"Modo de demo invalido: {mode!r}.")
@@ -147,6 +150,7 @@ class DemoRuntime:
             finally:
                 self._local_ai_startup_ms = max(0.0, (perf_counter() - startup_started) * 1000)
             self._ollama_client = client
+        self.cdm_scope_catalog = scope_catalog
         self.mode = mode
         self.identity_provider = DemoIdentityProvider()
         self._fail_cdm_request_ids = frozenset(fail_cdm_request_ids or ())
@@ -165,8 +169,11 @@ class DemoRuntime:
         *,
         mode: str = DEFAULT_DEMO_MODE,
         fail_cdm_request_ids: set[str] | frozenset[str] | None = None,
+        scope_catalog=LOCAL_CDM_SCOPE_CATALOG,
     ) -> DemoRuntime:
-        return cls(mode=mode, fail_cdm_request_ids=fail_cdm_request_ids)
+        return cls(
+            mode=mode, fail_cdm_request_ids=fail_cdm_request_ids, scope_catalog=scope_catalog
+        )
 
     def _close_knowledge_resources(self) -> None:
         triage = getattr(self, "_triage", None)
@@ -233,7 +240,7 @@ class DemoRuntime:
         else:
             self.demo_embedder = DemoEmbedder()
             retrieval_client = DemoClassifierClient()
-        self.business_vocabulary = BusinessVocabulary()
+        self.business_vocabulary = BusinessVocabulary(self.cdm_scope_catalog)
         self.demo_classifier_client = DemoClassifierClient()
         build_knowledge_index(knowledge_source, knowledge_index, self.demo_embedder, batch_size=2)
         build_playbook_catalog(playbook_source, knowledge_index, playbook_catalog)
@@ -252,6 +259,7 @@ class DemoRuntime:
         self._conversation_contexts = {}
         self._conversation_generations: dict[str, int] = {}
         self._triage: dict[str, tuple[TriageEngine, object]] = {}
+        self._pending_cdm_scope = {}
         self.created_request_ids: list[str] = []
         self.request_metadata: dict[str, dict] = {}
         self.support_state = DemoSupportState()
@@ -309,7 +317,7 @@ class DemoRuntime:
         for outcome in demo_outcomes():
             self.outcome_store.ingest(outcome)
 
-        self.fake_cdm_store = CDMFakeStore()
+        self.fake_cdm_store = CDMFakeStore(self.cdm_scope_catalog)
         self.fake_cdm_server = build_cdm_server(
             "127.0.0.1",
             0,
@@ -324,6 +332,7 @@ class DemoRuntime:
             f"http://{host}:{port}",
             "phase12-demo-service-token",
             timeout_seconds=2,
+            scope_catalog=self.cdm_scope_catalog,
         )
         self.execution_engine = ExecutionEngine(
             self.request_repository,
@@ -439,6 +448,10 @@ class DemoRuntime:
                 "request_id": result.get("request_id"),
                 "request_state": result.get("state"),
                 "policy": result.get("policy"),
+                "business_scope": result.get("business_scope"),
+                "scope_mismatch": result.get("scope_mismatch"),
+                "scope_confirmed": result.get("scope_confirmed"),
+                "requested_role": result.get("requested_role"),
                 "support_handoff_id": handoff.get("handoff_id"),
                 "support_handoff_system": handoff.get("system"),
                 "support_handoff_capability": handoff.get("capability"),
@@ -453,7 +466,13 @@ class DemoRuntime:
                     context,
                     dialogue=replace(
                         context.dialogue,
-                        stage="DIAGNOSING",
+                        stage=(
+                            "CONFIRMING_CDM_SCOPE"
+                            if result.get("reason") == "CDM_SCOPE_CONFIRMATION_REQUIRED"
+                            else "SELECTING_CDM_SCOPE"
+                            if result.get("reason") == "CDM_SCOPE_REQUIRED"
+                            else "DIAGNOSING"
+                        ),
                         pending_information=(question.strip(),),
                         last_question=question.strip(),
                     ),
@@ -505,6 +524,10 @@ class DemoRuntime:
         context,
         delta,
     ):
+        pending = self._continue_cdm_scope(identity_id, message, requester)
+        if pending is not None:
+            return pending
+
         if delta.domain == "SOCIAL":
             return {
                 "status": "SOCIAL",
@@ -800,6 +823,7 @@ class DemoRuntime:
 
     def reset_conversation(self, identity_id: str) -> None:
         self._requester(identity_id)
+        self._pending_cdm_scope.pop(identity_id, None)
         self._triage.pop(identity_id, None)
         self.conversations.pop(identity_id, None)
         self._conversation_contexts.pop(identity_id, None)
@@ -841,6 +865,11 @@ class DemoRuntime:
         requester = self._requester(identity_id)
         if not isinstance(message, str) or not message.strip():
             raise ValueError("Mensagem vazia.")
+
+        pending = self._continue_cdm_scope(identity_id, message, requester)
+        if pending is not None:
+            pending["assistant_message"] = operational_message(pending, message, None)
+            return pending
 
         if is_social_greeting(message):
             chat = (
@@ -1278,8 +1307,13 @@ class DemoRuntime:
         canonical_problem = _canonicalize_access_request_language(next_state.problem_text)
         if canonical_problem != next_state.problem_text:
             preparation_state = replace(next_state, problem_text=canonical_problem)
-        preparation = prepare_access_request(requester, preparation_state, descriptor)
-        if preparation.status != "READY" or preparation.context is None:
+        preparation = prepare_access_request(
+            requester, preparation_state, descriptor, scope_catalog=self.cdm_scope_catalog
+        )
+        if preparation.status != "READY":
+            if preparation.reason_code.startswith("CDM_SCOPE_"):
+                self._pending_cdm_scope[identity_id] = (preparation_state, descriptor, preparation)
+                return self._scope_question(requester, preparation)
             return {
                 "status": "NEEDS_CLARIFICATION",
                 "reason": preparation.reason_code,
@@ -1289,6 +1323,69 @@ class DemoRuntime:
         request_context = preparation.context
         if canonical_problem != next_state.problem_text:
             request_context = replace(request_context, purpose=next_state.problem_text)
+        return self._materialize_cdm_request(request_context, next_state)
+
+    def _scope_question(self, requester, preparation):
+        context = preparation.context
+        scope = context.business_scope if context else None
+        mismatch = context.scope_mismatch if context else False
+        labels = ", ".join(scope.label for scope in self.cdm_scope_catalog.scopes)
+        question = (
+            f"Sua área é {requester.area}, mas o escopo solicitado no CDM é "
+            f"{self.cdm_scope_catalog.label(scope)}. Confirma esse escopo?"
+            if mismatch
+            else f"Qual escopo do CDM você precisa: {labels}?"
+        )
+        return {
+            "status": "NEEDS_CLARIFICATION",
+            "reason": preparation.reason_code,
+            "question": question,
+            "request_id": None,
+            "trusted_area": requester.area,
+            "business_scope": scope,
+            "scope_mismatch": mismatch,
+            "requested_role": preparation.requested_role,
+        }
+
+    def _continue_cdm_scope(self, identity_id, message, requester):
+        pending = self._pending_cdm_scope.get(identity_id)
+        if pending is None:
+            return None
+        state, descriptor, preparation = pending
+        normalized = normalize_text(message)
+        if normalized in {"nao", "cancelar", "cancele"}:
+            self._pending_cdm_scope.pop(identity_id)
+            return {
+                "status": "NEEDS_CLARIFICATION",
+                "request_id": None,
+                "question": "Pedido cancelado. Como posso ajudar?",
+            }
+        if normalized in {"sim", "confirmo", "pode solicitar", "sim confirmo"}:
+            if preparation.context is None:
+                return self._scope_question(requester, preparation)
+            self._pending_cdm_scope.pop(identity_id)
+            return self._materialize_cdm_request(
+                replace(preparation.context, scope_confirmed=True), state
+            )
+        answer = re.sub(r"^(?:para|no escopo|na area) (?:a |o |uma |um )?", "", normalized)
+        scope = self.cdm_scope_catalog.match_area(answer)
+        if scope is None:
+            self._pending_cdm_scope.pop(identity_id)
+            return None
+        preparation = prepare_access_request(
+            requester,
+            state,
+            descriptor,
+            scope_catalog=self.cdm_scope_catalog,
+            scope_answer=scope,
+        )
+        if preparation.status == "READY":
+            self._pending_cdm_scope.pop(identity_id)
+            return self._materialize_cdm_request(preparation.context, state)
+        self._pending_cdm_scope[identity_id] = (state, descriptor, preparation)
+        return self._scope_question(requester, preparation)
+
+    def _materialize_cdm_request(self, request_context, next_state):
         record = self.routed_requests.create_request(request_context)
         self.created_request_ids.append(record.request_id)
         self.request_metadata[record.request_id] = {
@@ -1301,6 +1398,10 @@ class DemoRuntime:
             "state": record.state,
             "confidence": record.confidence.level,
             "policy": record.creation_policy.decision,
+            "business_scope": record.context.business_scope,
+            "scope_mismatch": record.context.scope_mismatch,
+            "scope_confirmed": record.context.scope_confirmed,
+            "requested_role": record.context.requested_role,
         }
 
     def list_requests(self, identity_id: str) -> list[dict]:

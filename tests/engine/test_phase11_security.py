@@ -18,6 +18,7 @@ from ai_service_desk.engine.learning_prevention import (
 from ai_service_desk.engine.routing import RoutingAssignment
 from ai_service_desk.engine.technician_authorization import TechnicianIdentity
 from tests.engine.phase8_helpers import make_record
+from tests.engine.phase16_authorized_blobs import PHASE16_AUTHORIZED_EXTENSIONS
 
 ROOT = Path(__file__).resolve().parents[2]
 LEARNING_MODULE = ROOT / "src" / "ai_service_desk" / "engine" / "learning_prevention.py"
@@ -148,13 +149,14 @@ def test_previous_phase_protected_blobs_are_exact(path: str, expected_sha: str) 
             "6ab28ad86d7d40e4873e9a76b6c3cd9f3b4c843b",
         ),
     }
+    authorized_extensions.update(PHASE16_AUTHORIZED_EXTENSIONS)
     if path in authorized_extensions:
         historical, authorized = authorized_extensions[path]
         assert expected_sha == historical
         expected_sha = authorized
     actual = subprocess.run(
         ["git", "hash-object", path]
-        if path == "src/ai_service_desk/integrations/cdm_fake_api.py"
+        if path in PHASE16_AUTHORIZED_EXTENSIONS
         else ["git", "rev-parse", f"HEAD:{path}"],
         cwd=ROOT,
         check=True,

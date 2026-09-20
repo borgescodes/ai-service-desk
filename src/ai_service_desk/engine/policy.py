@@ -132,6 +132,13 @@ class PolicyEngine:
 
     def evaluate(self, context: AccessRequestContext) -> PolicyDecision:
         validate_access_request_context(context)
+        if context.scope_mismatch and not context.scope_confirmed:
+            return PolicyDecision(
+                "DENY",
+                "CDM_SCOPE_CONFIRMATION",
+                "CDM_SCOPE_CONFIRMATION_REQUIRED",
+                "Divergência de escopo exige confirmação da intenção antes da solicitação.",
+            )
         rule = self._rules.get((context.system, context.capability, context.requested_role))
         if rule is None:
             return PolicyDecision(

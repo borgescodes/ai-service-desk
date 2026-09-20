@@ -23,6 +23,9 @@ def make_request(**context_changes):
         intent="PROBLEMA_ACESSO",
         capability="CDM_ACCESS_REQUEST",
         requested_role="SOLICITANTE",
+        business_scope=None,
+        scope_mismatch=False,
+        scope_confirmed=False,
     )
     for key, value in context_changes.items():
         setattr(context, key, value)
@@ -51,7 +54,7 @@ class AdapterSpy:
             raise self.error
         return self.lookup
 
-    def create_access(self, request_id, username, email, role):
+    def create_access(self, request_id, username, email, role, *, business_scopes=()):
         self.post_calls += 1
         if self.error is not None:
             raise self.error
@@ -138,3 +141,21 @@ def test_known_adapter_error_returns_failure(error, code):
 def test_unexpected_runtime_error_propagates():
     with pytest.raises(RuntimeError):
         CDMActionExecutor(AdapterSpy(error=RuntimeError("boom"))).execute(make_request())
+
+
+def test_scoped_request_does_not_accept_existing_access_in_another_scope():
+    adapter = AdapterSpy(
+        lookup=AccessLookup(
+            True, "user@example.invalid", "SOLICITANTE", "ACTIVE", "100001", ("revenda",)
+        )
+    )
+    result = CDMActionExecutor(adapter).execute(make_request(business_scope="ubs"))
+    assert result.success is False
+    assert result.result_code == "CDM_EXISTING_ACCESS_CONFLICT"
+
+
+def test_scoped_create_race_does_not_claim_success_without_matching_access():
+    adapter = AdapterSpy(creation=AccessCreationResult("ALREADY_EXISTS", "100001", "ACTIVE"))
+    result = CDMActionExecutor(adapter).execute(make_request(business_scope="ubs"))
+    assert result.success is False
+    assert result.result_code == "CDM_EXISTING_ACCESS_CONFLICT"

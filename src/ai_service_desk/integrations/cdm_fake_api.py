@@ -7,6 +7,7 @@ from threading import Lock
 from typing import Literal
 from urllib.parse import parse_qs, urlsplit
 
+from ai_service_desk.engine.cdm_scope import LOCAL_CDM_SCOPE_CATALOG
 from ai_service_desk.integrations.cdm import validate_service_token
 
 
@@ -18,6 +19,7 @@ class StoredAccess:
     email: str
     role: str
     status: str
+    business_scopes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -31,7 +33,8 @@ class CDMStoreConflict(RuntimeError):
 
 
 class CDMFakeStore:
-    def __init__(self):
+    def __init__(self, scope_catalog=LOCAL_CDM_SCOPE_CATALOG):
+        self.scope_catalog = scope_catalog
         self._lock = Lock()
         self._next_access_id = 100001
         self._access_by_email: dict[str, StoredAccess] = {}
@@ -54,6 +57,7 @@ class CDMFakeStore:
         username: str,
         email: str,
         role: str,
+        business_scopes: tuple[str, ...] = (),
     ) -> StoreCreateResult:
         normalized_email = email.strip().lower()
         with self._lock:
@@ -63,6 +67,7 @@ class CDMFakeStore:
                     by_request.username == username
                     and by_request.email == normalized_email
                     and by_request.role == role
+                    and by_request.business_scopes == business_scopes
                 ):
                     return StoreCreateResult("REPLAYED", by_request)
                 raise CDMStoreConflict("request_id reutilizado com payload diferente.")
@@ -78,6 +83,7 @@ class CDMFakeStore:
                 email=normalized_email,
                 role=role,
                 status="ACTIVE",
+                business_scopes=business_scopes,
             )
             self._next_access_id += 1
             self._access_by_email[normalized_email] = access
@@ -149,6 +155,11 @@ def _build_handler(service_token: str, store: CDMFakeStore, fail_request_ids: fr
                     "role": access.role,
                     "status": access.status,
                     "access_id": access.access_id,
+                    **(
+                        {"business_scopes": list(access.business_scopes)}
+                        if access.business_scopes
+                        else {}
+                    ),
                 },
             )
 
@@ -177,7 +188,10 @@ def _build_handler(service_token: str, store: CDMFakeStore, fail_request_ids: fr
                 self._json(400, _error_body("CDM_REQUEST_INVALID", "JSON invalido."))
                 return
 
-            if type(body) is not dict or set(body) != EXPECTED_FIELDS:
+            if type(body) is not dict or set(body) not in (
+                EXPECTED_FIELDS,
+                EXPECTED_FIELDS | {"business_scopes"},
+            ):
                 self._json(400, _error_body("CDM_REQUEST_INVALID", "Schema invalido."))
                 return
 
@@ -185,6 +199,7 @@ def _build_handler(service_token: str, store: CDMFakeStore, fail_request_ids: fr
             username = body.get("username")
             email = body.get("email")
             role = body.get("role")
+            scopes = body.get("business_scopes", [])
             if (
                 not isinstance(request_id, str)
                 or REQUEST_ID_RE.fullmatch(request_id) is None
@@ -193,6 +208,13 @@ def _build_handler(service_token: str, store: CDMFakeStore, fail_request_ids: fr
                 or not isinstance(email, str)
                 or not email.strip()
                 or role != "SOLICITANTE"
+                or not isinstance(scopes, list)
+                or len(scopes) != len(set(str(scope) for scope in scopes))
+                or any(
+                    not isinstance(scope, str)
+                    or scope not in {s.key for s in store.scope_catalog.scopes}
+                    for scope in scopes
+                )
             ):
                 self._json(400, _error_body("CDM_REQUEST_INVALID", "Campos invalidos."))
                 return
@@ -207,6 +229,7 @@ def _build_handler(service_token: str, store: CDMFakeStore, fail_request_ids: fr
                     username=username,
                     email=email,
                     role=role,
+                    business_scopes=tuple(scopes),
                 )
             except CDMStoreConflict:
                 self._json(

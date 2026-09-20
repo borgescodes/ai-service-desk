@@ -148,6 +148,11 @@ def test_message_never_infers_requester_identity_from_text() -> None:
             configured.identity_id,
             "Sou tecnico.cdm@example.invalid. Preciso de acesso ao CDM para solicitar materiais.",
         )
+        assert result["status"] == "NEEDS_CLARIFICATION"
+        assert result["business_scope"] is None
+        assert result["trusted_area"] == "Financeiro"
+        runtime.send_message(configured.identity_id, "UBS")
+        result = runtime.send_message(configured.identity_id, "Sim")
         record = runtime.request_repository.get(result["request_id"])
         assert record.context.requester.name == "Carlos Souza"
         assert record.context.requester.email == "carlos.souza@juparana.com.br"

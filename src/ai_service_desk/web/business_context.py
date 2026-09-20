@@ -3,6 +3,7 @@
 import re
 from dataclasses import dataclass
 
+from ai_service_desk.engine.cdm_scope import LOCAL_CDM_SCOPE_CATALOG, CDMScopeCatalog
 from ai_service_desk.engine.classification import SYSTEM_ALIASES
 from ai_service_desk.engine.validation import normalize_text
 
@@ -89,6 +90,8 @@ def _contains(text: str, value: str) -> bool:
 
 @dataclass(frozen=True)
 class BusinessVocabulary:
+    scope_catalog: CDMScopeCatalog = LOCAL_CDM_SCOPE_CATALOG
+
     def aliases(self, system: str) -> tuple[str, ...]:
         for entry in SYSTEMS:
             if entry.name == system:
@@ -117,7 +120,7 @@ class BusinessVocabulary:
         return self._canonical_alias(natural_slot.group(1))
 
     def systems(self, text: str) -> tuple[str, ...]:
-        normalized = normalize_text(text)
+        normalized = normalize_text(self.scope_catalog.system_text(text))
         candidates = [entry.name for entry in SYSTEMS]
         candidates.extend(name for name in SYSTEM_ALIASES if self.canonical(name) == name)
         matches = tuple(
