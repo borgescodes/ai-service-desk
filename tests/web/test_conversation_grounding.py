@@ -389,7 +389,7 @@ def test_approved_m365_knowledge_renders_official_procedure_url():
     assert "backend" not in grounding.response_goal.casefold()
 
 
-def test_m365_article_reference_is_protected_and_rejects_invented_follow_up():
+def test_m365_article_metadata_is_left_to_presentation_and_rejects_invented_follow_up():
     answer = "PASSO OFICIAL"
     grounding = ground_response(
         {
@@ -424,9 +424,35 @@ def test_m365_article_reference_is_protected_and_rejects_invented_follow_up():
     rendered = generate_natural_response("Minha senha está errada", base_context(), grounding, chat)
 
     assert rendered == grounding.fallback_message
-    assert "Redefinir sua senha do Microsoft 365" in rendered
+    assert "Redefinir sua senha do Microsoft 365" not in rendered
+    assert grounding.allowed_wrappers == ("",)
     assert "notificado" not in rendered.casefold()
     assert "receberá" not in rendered.casefold()
+
+
+def test_cdm_offer_uses_direct_user_facing_action_without_duplicate_article_copy():
+    grounding = ground_response(
+        {
+            "status": "KNOWLEDGE_FOUND",
+            "system": "CDM",
+            "request_id": None,
+            "answer": "O acesso de solicitante ao CDM precisa de aprovação humana antes da liberação.",
+            "knowledge_id": "KB-SYN-CDM-ACCESS-001",
+            "article": {
+                "knowledge_id": "KB-SYN-FAQ-CDM-REQUEST-001",
+                "title": "Como solicitar acesso ao CDM",
+                "provenance": {"status": "APPROVED"},
+            },
+            "offer_action": "CDM_ACCESS_REQUEST",
+        },
+        base_context(),
+        delta_for(),
+    )
+
+    assert "Você pode solicitar por aqui" in grounding.fallback_message
+    assert "governança do CDM" in grounding.fallback_message
+    assert "Na Central de Suporte" not in grounding.fallback_message
+    assert grounding.allowed_wrappers == ("",)
 
 
 def test_writer_rejects_invented_handoff_capabilities():

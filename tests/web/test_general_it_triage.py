@@ -85,6 +85,19 @@ def test_topic_switch_cancels_triage_and_processes_cdm(runtime):
     assert "pedro-miranda" not in runtime._general_triage
 
 
+def test_explicit_correction_after_general_handoff_starts_cdm_instead_of_repeating_handoff(runtime):
+    send(runtime, "meu note ta lento")
+    handoff = send(runtime, "pc todo")
+    assert handoff["status"] == "SUPPORT_HANDOFF_PENDING"
+
+    result = send(runtime, "na verdade eu preciso de acesso ao cdm")
+
+    assert result["state"] == "PENDING_APPROVAL"
+    assert result["system"] == "CDM"
+    assert "general_triage" not in result
+    assert "pedro-miranda" not in runtime._general_triage
+
+
 def test_application_answer_is_context_not_a_specialized_topic_switch(runtime):
     first = send(runtime, "meu notebook está muito lento")
     result = send(runtime, "principalmente no Teams")

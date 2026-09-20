@@ -1073,8 +1073,15 @@ class DemoRuntime:
                 r"(?:principalmente|somente|apenas|so|no|na|quando|ao)\b", normalize_text(message)
             )
         )
+        explicit_switch = bool(
+            re.search(
+                r"\b(?:na verdade|pensando bem|mudei de ideia|agora eu preciso|agora preciso)\b",
+                normalize_text(message),
+            )
+        )
         switched = (
-            (bool(systems) and not contextual_reply)
+            explicit_switch
+            or (bool(systems) and not contextual_reply)
             or _is_request_status_query(message)
             or message.strip() == "/solicitacoes"
             or is_outside_it_support_scope(message)
@@ -1664,6 +1671,7 @@ class DemoRuntime:
         if scope is None:
             self._pending_cdm_scope.pop(identity_id)
             return None
+        previous_reason = preparation.reason_code
         preparation = prepare_access_request(
             requester,
             state,
@@ -1674,6 +1682,15 @@ class DemoRuntime:
         if preparation.status == "READY":
             self._pending_cdm_scope.pop(identity_id)
             return self._materialize_cdm_request(preparation.context, state)
+        if (
+            previous_reason == "CDM_SCOPE_REQUIRED"
+            and preparation.context is not None
+            and preparation.reason_code == "CDM_SCOPE_CONFIRMATION_REQUIRED"
+        ):
+            self._pending_cdm_scope.pop(identity_id)
+            return self._materialize_cdm_request(
+                replace(preparation.context, scope_confirmed=True), state
+            )
         self._pending_cdm_scope[identity_id] = (state, descriptor, preparation)
         return self._scope_question(requester, preparation)
 

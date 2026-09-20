@@ -72,15 +72,13 @@ def ground_response(result, context, delta) -> ResponseGrounding:
     content = grounding.protected_content or (
         ProtectedContent("BACKEND_RESULT", grounding.fallback_message),
     )
-    if article_is_approved:
-        content = (
-            *content,
-            ProtectedContent("ARTICLE_REFERENCE", f"Na Central de Suporte: {article['title']}."),
-        )
     if result.get("offer_action") == "CDM_ACCESS_REQUEST":
         content = (
             *content,
-            ProtectedContent("ACTION_OFFER", "Se quiser, posso registrar a solicitação para você."),
+            ProtectedContent(
+                "ACTION_OFFER",
+                "Você pode solicitar por aqui: eu registro a solicitação para análise da governança do CDM.",
+            ),
         )
     return replace(
         grounding,
@@ -90,7 +88,7 @@ def ground_response(result, context, delta) -> ResponseGrounding:
             "Conecte brevemente o conteúdo confirmado usando somente as expressões permitidas. "
             "Não repita nem complemente o conteúdo protegido."
         ),
-        allowed_wrappers=("", "Entendi.", "Claro.", "Vamos lá."),
+        allowed_wrappers=("",),
         forbidden_claims=(
             *grounding.forbidden_claims,
             "Não acrescente notificações, acompanhamento, contato futuro, técnico ou SLA.",

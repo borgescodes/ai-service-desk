@@ -57,15 +57,24 @@ function renderSupportHandoff(handoff) {
   </section>`;
 }
 
+function renderRequestSummary(summary) {
+  const items = Array.isArray(summary?.items) ? summary.items : [];
+  if (!items.length) return '';
+  return `<div class="tracking-queue request-summary-list" aria-label="Resumo das solicitações">${items.map(item => `<div class="tracking-row request-summary-row"><span class="tracking-row-top"><span class="tracking-system">${escapeHtml(item.system || 'Solicitação')}</span><small>${escapeHtml(item.request_id || '')}</small></span><span class="status-badge">${escapeHtml(item.state_label || '')}</span></div>`).join('')}</div>`;
+}
+
 function renderMessage(message, { fresh = false, visualState = null, initials = '' } = {}) {
   const role = message.role === 'USER' ? 'Você' : 'Jup';
   const klass = message.role === 'USER' ? 'conversation-message--user' : 'conversation-message--jup';
   const emote = message.thinking ? 'thinking' : visualState ?? message.visual_state ?? visualStateFromUi({ backendStatus: message.status, failed: message.failed });
   const context = message.context ? [message.context.system, message.context.next_step].filter(Boolean).map(escapeHtml).join(' · ') : '';
+  const requestSummary = message.role === 'JUP' ? renderRequestSummary(message.request_summary) : '';
+  const assistantText = requestSummary ? String(message.text ?? '').split(/\n\s*\n/, 1)[0] : message.text;
   return `<article class="conversation-message ${klass}${message.thinking ? ' conversation-message--thinking' : ''}${fresh ? ' is-new' : ''}">
     ${message.role === 'JUP' ? renderJupVisual({ state: emote, compact: true }) : ''}
     <div class="message-content"><div class="message-author"><strong>${role}</strong>${message.sentAt ? `<time datetime="${escapeHtml(message.sentAt)}">${escapeHtml(new Date(message.sentAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}</time>` : ''}</div>
-    <div class="message-bubble"${fresh && message.role === 'JUP' && !message.thinking && !message.failed ? ' data-reveal-response' : ''}>${message.thinking ? `<div class="processing" role="status" aria-label="Jup está pensando"><strong>Pensando<span class="thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></strong><p class="processing-activity">${escapeHtml(message.activity || 'Buscando contexto')}</p></div>` : message.failed ? `<p class="message-error" role="alert">${escapeHtml(message.text)}</p>` : message.role === 'JUP' ? renderApprovedKnowledgeBody({ text: message.text, procedureUrl: message.procedure_url, knowledgeId: message.knowledge_id, article: message.article }) : renderMessageBody(message.text)}
+    <div class="message-bubble"${fresh && message.role === 'JUP' && !message.thinking && !message.failed ? ' data-reveal-response' : ''}>${message.thinking ? `<div class="processing" role="status" aria-label="Jup está pensando"><strong>Pensando<span class="thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></strong><p class="processing-activity">${escapeHtml(message.activity || 'Buscando contexto')}</p></div>` : message.failed ? `<p class="message-error" role="alert">${escapeHtml(message.text)}</p>` : message.role === 'JUP' ? renderApprovedKnowledgeBody({ text: assistantText, procedureUrl: message.procedure_url, knowledgeId: message.knowledge_id, article: message.article }) : renderMessageBody(message.text)}
+    ${requestSummary}
     ${message.role === 'JUP' ? renderSupportHandoff(message.support_handoff) : ''}
     ${message.role === 'JUP' && message.requestCta === 'REQUESTS' ? '<a class="button button--secondary message-request-cta" href="/requests" data-route="requests">Ver minhas solicitações</a>' : ''}
     ${context ? `<div class="request-context">${context}</div>` : ''}</div></div>

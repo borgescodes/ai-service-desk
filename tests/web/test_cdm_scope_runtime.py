@@ -43,6 +43,20 @@ def test_unknown_area_requires_scope_without_materializing(runtime):
     assert runtime.fake_cdm_store.access_count == 0
 
 
+def test_unknown_area_scope_selection_is_explicit_enough_to_avoid_duplicate_confirmation(runtime):
+    identity = requester(runtime, "Financeiro")
+    first = runtime.send_message(identity, "Quero acesso ao CDM")
+    assert first["reason"] == "CDM_SCOPE_REQUIRED"
+
+    selected = runtime.send_message(identity, "revenda")
+
+    assert selected["status"] == "REQUEST_CREATED"
+    detail = runtime.get_operational_request("tecnico-cdm", selected["request_id"])
+    assert detail["business_scope"] == "revenda"
+    assert detail["scope_mismatch"] is True
+    assert detail["scope_confirmed"] is True
+
+
 def test_mismatch_requires_confirmation_and_remains_visible_after_execution(runtime):
     identity = requester(runtime, "Revenda")
     result = runtime.send_message(identity, "Quero acesso ao CDM para UBS")

@@ -381,6 +381,7 @@ async function submitMessage(form, messageOverride = null) {
         text: result.assistant_message,
         procedure_url: result.procedure_url,
         support_handoff: result.support_handoff,
+        request_summary: result.request_summary,
         requestCta: result.presentation?.cta === 'REQUESTS' ? 'REQUESTS' : null,
       },
     ];
@@ -556,6 +557,15 @@ async function configureDemoIdentity(form) {
   }
 }
 
+function syncComposerPresentation() {
+  const welcome = app.querySelector('.chat-welcome:not(.chat-welcome--leaving)');
+  if (!welcome) return;
+  const listening = Boolean(state.composerDraft.trim());
+  welcome.setAttribute('data-listening', String(listening));
+  welcome.querySelector('[data-welcome-state="idle"]')?.setAttribute('aria-hidden', String(listening));
+  welcome.querySelector('[data-welcome-state="listening"]')?.setAttribute('aria-hidden', String(!listening));
+}
+
 function bindInteractions() {
   bindRouteLinks(app);
   app.querySelector('[data-action="new-chat"]')?.addEventListener('click', newChat);
@@ -594,9 +604,14 @@ function bindInteractions() {
     faqSearch.input(state.faqSearchQuery, state.faqCategory);
   });
   app.querySelector('#jup-message')?.addEventListener('input', event => {
+    const commandMenuWasOpen = state.commandMenuOpen;
     state.composerDraft = event.target.value;
     state.commandMenuOpen = /^\/\S*$/.test(state.composerDraft);
-    render();
+    if (commandMenuWasOpen !== state.commandMenuOpen) {
+      render();
+      return;
+    }
+    syncComposerPresentation();
   });
 
   app.querySelector('#jup-form')?.addEventListener('submit', (event) => {

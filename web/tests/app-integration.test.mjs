@@ -32,9 +32,11 @@ async function boot(path, respond, identities = [
   };
   const form = { addEventListener(name, handler) { events[name] = handler; }, querySelector() { return field; } };
   let rootHtml = '';
+  let rootWriteCount = 0;
   const root = {
     get innerHTML() { return rootHtml; },
     set innerHTML(value) {
+      rootWriteCount += 1;
       rootHtml = value;
       if (globalThis.document?.activeElement === field) {
         globalThis.document.activeElement = null;
@@ -58,7 +60,7 @@ async function boot(path, respond, identities = [
     return new Response(JSON.stringify(payload), { status: 200 });
   };
   await import(`../src/app.mjs?test=${++serial}`); await tick();
-  return { root, field, async approve() { await events.approve(); await tick(); }, async selectApproval() { events.selectApproval(); await tick(); }, async reset() { await events.newChat?.(); await tick(); }, async configureIdentity() { events.configureIdentity?.({ preventDefault() {}, currentTarget: identityForm }); await tick(); }, async switchPersona() { await events['persona-tecnico-cdm']?.(); await tick(); }, async switchTo(identityId) { await events[`persona-${identityId}`]?.(); await tick(); }, async go(path) { win.location = new URL(`http://demo${path}`); events.popstate(); await tick(); }, async send(text) { field.value = text; events.submit({ preventDefault() {}, currentTarget: form }); await tick(); }, async type(text) { field.value = text; events['field-input']?.({ target: field }); await tick(); }, async typeCharacter(character) { field.focus(); const start = field.selectionStart ?? field.value.length; const end = field.selectionEnd ?? start; field.value = field.value.slice(0, start) + character + field.value.slice(end); field.selectionStart = start + character.length; field.selectionEnd = field.selectionStart; events['field-input']?.({ target: field }); await tick(); }, async selectCommand() { events['command-click']?.(); await tick(); }, async escapeCommand() { events['field-keydown']?.({ key: 'Escape', preventDefault() {}, currentTarget: field }); await tick(); } };
+  return { root, field, renderCount() { return rootWriteCount; }, async approve() { await events.approve(); await tick(); }, async selectApproval() { events.selectApproval(); await tick(); }, async reset() { await events.newChat?.(); await tick(); }, async configureIdentity() { events.configureIdentity?.({ preventDefault() {}, currentTarget: identityForm }); await tick(); }, async switchPersona() { await events['persona-tecnico-cdm']?.(); await tick(); }, async switchTo(identityId) { await events[`persona-${identityId}`]?.(); await tick(); }, async go(path) { win.location = new URL(`http://demo${path}`); events.popstate(); await tick(); }, async send(text) { field.value = text; events.submit({ preventDefault() {}, currentTarget: form }); await tick(); }, async type(text) { field.value = text; events['field-input']?.({ target: field }); await tick(); }, async typeCharacter(character) { field.focus(); const start = field.selectionStart ?? field.value.length; const end = field.selectionEnd ?? start; field.value = field.value.slice(0, start) + character + field.value.slice(end); field.selectionStart = start + character.length; field.selectionEnd = field.selectionStart; events['field-input']?.({ target: field }); await tick(); }, async selectCommand() { events['command-click']?.(); await tick(); }, async escapeCommand() { events['field-keydown']?.({ key: 'Escape', preventDefault() {}, currentTarget: field }); await tick(); } };
 }
 
 test('late FAQ response cannot replace an article after navigation', async () => {
@@ -174,8 +176,9 @@ test('requester chat survives requests, article, and request CTA navigation', as
   assert.match(ui.root.innerHTML, /Veja suas solicitações/);
 });
 
-test('composer preserves caret position while typing across rerenders', async () => {
+test('normal composer typing does not rerender the full chat or move the caret', async () => {
   const ui = await boot('/jup', () => []);
+  const before = ui.renderCount();
 
   await ui.typeCharacter('a');
   await ui.typeCharacter('b');
@@ -184,7 +187,29 @@ test('composer preserves caret position while typing across rerenders', async ()
   assert.equal(ui.field.value, 'abc');
   assert.equal(ui.field.selectionStart, 3);
   assert.equal(ui.field.selectionEnd, 3);
-  assert.match(ui.root.innerHTML, />abc<\/textarea>/);
+  assert.equal(ui.renderCount(), before);
+});
+
+test('request status message renders authoritative items as a scannable list', async () => {
+  const ui = await boot('/jup', url => url === '/api/jup/messages' ? {
+    status: 'REQUESTS_LISTED',
+    assistant_message: 'Você tem 2 solicitações para acompanhar.\n\nCDM · Aguardando aprovação (REQ-000001)\nMICROSOFT_365 · Encaminhada para suporte (REQ-000002)',
+    request_summary: {
+      count: 2,
+      items: [
+        { request_id: 'REQ-000001', system: 'CDM', state_label: 'Aguardando aprovação' },
+        { request_id: 'REQ-000002', system: 'MICROSOFT_365', state_label: 'Encaminhada para suporte' },
+      ],
+    },
+    presentation: { cta: 'REQUESTS' },
+  } : []);
+
+  await ui.send('Como estão minhas solicitações?');
+
+  assert.match(ui.root.innerHTML, /request-summary-list/);
+  assert.match(ui.root.innerHTML, /REQ-000001/);
+  assert.match(ui.root.innerHTML, /REQ-000002/);
+  assert.doesNotMatch(ui.root.innerHTML, /CDM · Aguardando aprovação \(REQ-000001\)/);
 });
 
 test('slash command is selectable by keyboard-ready menu control and sends the deterministic message', async () => {
