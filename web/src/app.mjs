@@ -13,7 +13,7 @@ import {
 } from './components.mjs';
 import { escapeHtml, renderErrorState, renderUnauthorizedState } from './render.mjs';
 import { demoIdentityForPath, resolveRoute, routeParams } from './router.mjs';
-import { createInitialState, selectIdentity, resetConversation, personaPath } from './state.mjs';
+import { activateIdentity, clearRequesterChatState, createInitialState, resetConversation, personaPath } from './state.mjs';
 
 const app = document.querySelector('#app');
 let identityRevision = 0;
@@ -167,9 +167,9 @@ function syncRouteIdentity() {
   }
   if (state.identityId !== desiredIdentityId) {
     identityRevision += 1;
-    Object.assign(state, selectIdentity(state, desiredIdentityId), {
-      messages: [], understood: null, lastBackendStatus: null, composerFocused: false, composerDraft: '', messageError: null,
-    });
+    Object.assign(state, activateIdentity(state, state.identities.find(item => item.identity_id === desiredIdentityId)));
+    renderedMessageCount = 0;
+    welcomeEntry.reset();
   }
 }
 
@@ -446,7 +446,7 @@ async function newChat() {
     await apiRequest('/api/jup/conversation/reset', { method: 'POST', identityId: state.identityId });
     if (revision !== identityRevision) return;
     identityRevision += 1;
-    state = resetConversation(state);
+    state = clearRequesterChatState(resetConversation(state), state.identityId);
     renderedMessageCount = 0;
     welcomeEntry.reset();
     await navigate('/jup');
@@ -469,10 +469,7 @@ async function configureDemoIdentity(form) {
   try {
     const configured = await apiRequest('/api/session/identities', { method: 'POST', body });
     identityRevision += 1;
-    state = resetConversation(selectIdentity({
-      ...state,
-      identities: [...state.identities, configured],
-    }, configured.identity_id));
+    state = activateIdentity({ ...state, identities: [...state.identities, configured] }, configured);
     state.identityConfigError = null;
     renderedMessageCount = 0;
     welcomeEntry.reset();
@@ -497,9 +494,9 @@ function bindInteractions() {
       const identity = state.identities.find(item => item.identity_id === button.dataset.persona);
       const path = personaPath(identity);
       if (!path) return;
-      if (identity?.role === 'REQUESTER' && identity.identity_id !== state.identityId) {
+      if (identity.identity_id !== state.identityId) {
         identityRevision += 1;
-        state = resetConversation(selectIdentity(state, identity.identity_id));
+        state = activateIdentity(state, identity);
         renderedMessageCount = 0;
         welcomeEntry.reset();
       }

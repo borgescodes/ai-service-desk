@@ -4,18 +4,26 @@ import assert from 'node:assert/strict';
 // Minimal browser boundary: run the real app and API client; control only DOM storage and transport.
 const tick = () => new Promise(resolve => setImmediate(resolve));
 let serial = 0;
-async function boot(path, respond) {
+async function boot(path, respond, identities = [
+  { identity_id: 'pedro-miranda', name: 'Fulano de Tal', email: 'fulano.tal@juparana.com.br', job_title: 'Colaborador', area: 'Revenda - Matriz', role: 'REQUESTER' },
+  { identity_id: 'tecnico-cdm', name: 'Técnico CDM', role: 'TECHNICIAN' },
+  { identity_id: 'tecnico-m365', name: 'Técnico Microsoft 365', role: 'TECHNICIAN' },
+  { identity_id: 'tecnico-geral', name: 'Técnico Geral', role: 'TECHNICIAN' },
+]) {
   const events = {};
   const identityValues = { name: 'Ana da Silva', email: 'ana.silva@juparana.com.br', job_title: 'Analista UBS', area: 'UBS' };
   const identityForm = { addEventListener(name, handler) { events.configureIdentity = handler; } };
   const newChat = { addEventListener(name, handler) { events.newChat = handler; } };
   const queueRow = { dataset: { requestId: 'R-1' }, addEventListener(name, handler) { events.selectApproval = handler; } };
   const approve = { addEventListener(name, handler) { events.approve = handler; } };
-  const persona = { dataset: { persona: 'tecnico-cdm' }, addEventListener(name, handler) { events.persona = handler; } };
+  const personas = identities.map(({ identity_id: identityId }) => ({
+    dataset: { persona: identityId },
+    addEventListener(name, handler) { if (name === 'click') events[`persona-${identityId}`] = handler; },
+  }));
   const command = { addEventListener(name, handler) { events[`command-${name}`] = handler; }, focus() {} };
   const field = { value: '', addEventListener(name, handler) { events[`field-${name}`] = handler; }, focus() {} };
   const form = { addEventListener(name, handler) { events[name] = handler; }, querySelector() { return field; } };
-  const root = { innerHTML: '', setAttribute() {}, querySelectorAll(selector) { return selector === '.queue-row[data-request-id]' ? [queueRow] : selector === '[data-persona]' ? [persona] : []; }, querySelector(selector) { return selector === '[data-action="approve"]' ? approve : selector === '[data-action="new-chat"]' ? newChat : selector === '#demo-identity-form' ? identityForm : selector === '#jup-form' ? form : selector === '#jup-message' ? field : selector === '[data-command="/solicitacoes"]' || selector === '[data-command-menu] [data-command]' ? command : null; } };
+  const root = { innerHTML: '', setAttribute() {}, querySelectorAll(selector) { return selector === '.queue-row[data-request-id]' ? [queueRow] : selector === '[data-persona]' ? personas : []; }, querySelector(selector) { return selector === '[data-action="approve"]' ? approve : selector === '[data-action="new-chat"]' ? newChat : selector === '#demo-identity-form' ? identityForm : selector === '#jup-form' ? form : selector === '#jup-message' ? field : selector === '[data-command="/solicitacoes"]' || selector === '[data-command-menu] [data-command]' ? command : null; } };
   const win = { location: new URL(`http://demo${path}`), addEventListener(name, fn) { events[name] = fn; } };
   win.history = { pushState(_a, _b, path) { win.location = new URL(path, win.location); } };
   globalThis.document = { querySelector(selector) { return selector === '#app' ? root : null; } };
@@ -23,17 +31,12 @@ async function boot(path, respond) {
   globalThis.FormData = class { get(name) { return identityValues[name]; } };
   globalThis.fetch = async (url, options) => {
     const payload = url === '/api/session/identities' && (!options || options.method === 'GET')
-      ? [
-          { identity_id: 'pedro-miranda', name: 'Fulano de Tal', email: 'fulano.tal@juparana.com.br', job_title: 'Colaborador', area: 'Revenda - Matriz', role: 'REQUESTER' },
-          { identity_id: 'tecnico-cdm', name: 'Técnico CDM', role: 'TECHNICIAN' },
-          { identity_id: 'tecnico-m365', name: 'Técnico Microsoft 365', role: 'TECHNICIAN' },
-          { identity_id: 'tecnico-geral', name: 'Técnico Geral', role: 'TECHNICIAN' },
-        ]
+      ? identities
       : await respond(url, options);
     return new Response(JSON.stringify(payload), { status: 200 });
   };
   await import(`../src/app.mjs?test=${++serial}`); await tick();
-  return { root, field, async approve() { await events.approve(); await tick(); }, async selectApproval() { events.selectApproval(); await tick(); }, async reset() { await events.newChat?.(); await tick(); }, async configureIdentity() { events.configureIdentity?.({ preventDefault() {}, currentTarget: identityForm }); await tick(); }, async switchPersona() { await events.persona?.(); await tick(); }, async go(path) { win.location = new URL(`http://demo${path}`); events.popstate(); await tick(); }, async send(text) { field.value = text; events.submit({ preventDefault() {}, currentTarget: form }); await tick(); }, async type(text) { field.value = text; events['field-input']?.({ target: field }); await tick(); }, async selectCommand() { events['command-click']?.(); await tick(); }, async escapeCommand() { events['field-keydown']?.({ key: 'Escape', preventDefault() {}, currentTarget: field }); await tick(); } };
+  return { root, field, async approve() { await events.approve(); await tick(); }, async selectApproval() { events.selectApproval(); await tick(); }, async reset() { await events.newChat?.(); await tick(); }, async configureIdentity() { events.configureIdentity?.({ preventDefault() {}, currentTarget: identityForm }); await tick(); }, async switchPersona() { await events['persona-tecnico-cdm']?.(); await tick(); }, async switchTo(identityId) { await events[`persona-${identityId}`]?.(); await tick(); }, async go(path) { win.location = new URL(`http://demo${path}`); events.popstate(); await tick(); }, async send(text) { field.value = text; events.submit({ preventDefault() {}, currentTarget: form }); await tick(); }, async type(text) { field.value = text; events['field-input']?.({ target: field }); await tick(); }, async selectCommand() { events['command-click']?.(); await tick(); }, async escapeCommand() { events['field-keydown']?.({ key: 'Escape', preventDefault() {}, currentTarget: field }); await tick(); } };
 }
 
 test('late FAQ response cannot replace an article after navigation', async () => {
@@ -87,6 +90,66 @@ test('persona control loads the assigned technician queue with backend identity'
   const queue = calls.find(([url]) => url === '/api/operations/approvals');
   assert.ok(queue);
   assert.equal(queue[1].headers['X-Demo-Identity'], 'tecnico-cdm');
+});
+
+test('requester chat and understood context survive technician navigation', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const ui = await boot('/jup', url => {
+    if (url === '/api/jup/messages') return { status: 'PENDING_APPROVAL', assistant_message: 'Seu pedido foi encaminhado.', request_id: 'R-1' };
+    if (url === '/api/requests/R-1') return { system: 'CDM', requested_role: 'SOLICITANTE', purpose: 'Materiais', confidence: 0.9, policy: { decision: 'PENDING_APPROVAL' }, state_label: 'Aguardando aprovação' };
+    return [];
+  });
+  await ui.send('Preciso de acesso ao CDM');
+  t.mock.timers.tick(2500); await tick();
+  await ui.switchPersona();
+  assert.doesNotMatch(ui.root.innerHTML, /Preciso de acesso ao CDM/);
+  await ui.switchTo('pedro-miranda');
+  assert.match(ui.root.innerHTML, /Preciso de acesso ao CDM/);
+  assert.match(ui.root.innerHTML, /Seu pedido foi encaminhado/);
+  assert.match(ui.root.innerHTML, /Aguardando aprovação/);
+});
+
+test('requester histories remain isolated and reset only the active requester', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const identities = [
+    { identity_id: 'pedro-miranda', name: 'Ana', role: 'REQUESTER' },
+    { identity_id: 'carlos', name: 'Carlos', role: 'REQUESTER' },
+    { identity_id: 'tecnico-cdm', name: 'Técnico CDM', role: 'TECHNICIAN' },
+  ];
+  const calls = [];
+  const ui = await boot('/jup', (url, options) => {
+    calls.push([url, options]);
+    if (url === '/api/jup/messages') return { status: 'SOCIAL', assistant_message: `Resposta para ${options.headers['X-Demo-Identity']}` };
+    return [];
+  }, identities);
+  await ui.send('Mensagem da Ana'); t.mock.timers.tick(2500); await tick();
+  await ui.switchTo('carlos');
+  assert.doesNotMatch(ui.root.innerHTML, /Mensagem da Ana/);
+  await ui.send('Mensagem do Carlos'); t.mock.timers.tick(2500); await tick();
+  await ui.switchTo('pedro-miranda');
+  assert.match(ui.root.innerHTML, /Mensagem da Ana/);
+  assert.doesNotMatch(ui.root.innerHTML, /Mensagem do Carlos/);
+  await ui.switchTo('carlos');
+  await ui.reset();
+  assert.doesNotMatch(ui.root.innerHTML, /Mensagem do Carlos/);
+  await ui.switchTo('pedro-miranda');
+  assert.match(ui.root.innerHTML, /Mensagem da Ana/);
+  const reset = calls.find(([url]) => url === '/api/jup/conversation/reset');
+  assert.equal(reset[1].headers['X-Demo-Identity'], 'carlos');
+});
+
+test('requester chat survives requests, article, and request CTA navigation', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const ui = await boot('/jup', url => {
+    if (url === '/api/jup/messages') return { status: 'REQUESTS_LISTED', assistant_message: 'Veja suas solicitações.', presentation: { cta: 'REQUESTS' } };
+    if (url === '/api/faq/KB-1') return { knowledge_id: 'KB-1', title: 'Artigo', answer: 'Resposta aprovada.' };
+    return [];
+  });
+  await ui.send('/solicitacoes'); t.mock.timers.tick(2500); await tick();
+  await ui.go('/requests'); await ui.go('/jup');
+  assert.match(ui.root.innerHTML, /Veja suas solicitações/);
+  await ui.go('/solucoes/KB-1'); await ui.go('/jup');
+  assert.match(ui.root.innerHTML, /Veja suas solicitações/);
 });
 
 test('slash command is selectable by keyboard-ready menu control and sends the deterministic message', async () => {
