@@ -7,6 +7,7 @@ import pytest
 import requests
 
 from ai_service_desk.integrations.cdm_fake_api import build_cdm_server
+from tests.engine.phase16_authorized_blobs import PHASE16_AUTHORIZED_EXTENSIONS
 
 ROOT = Path(__file__).resolve().parents[2]
 PROTECTED_BLOBS = {
@@ -55,12 +56,17 @@ def test_phase8_protected_blobs_remain_exact(path, expected_sha):
             "6ab28ad86d7d40e4873e9a76b6c3cd9f3b4c843b",
         ),
     }
+    authorized_extensions.update(PHASE16_AUTHORIZED_EXTENSIONS)
     if path in authorized_extensions:
         historical, authorized = authorized_extensions[path]
         assert expected_sha == historical
         expected_sha = authorized
     completed = subprocess.run(
-        ["git", "rev-parse", f"HEAD:{path}"],
+        (
+            ["git", "hash-object", path]
+            if path in PHASE16_AUTHORIZED_EXTENSIONS
+            else ["git", "rev-parse", f"HEAD:{path}"]
+        ),
         cwd=ROOT,
         check=True,
         capture_output=True,

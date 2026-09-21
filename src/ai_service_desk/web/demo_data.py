@@ -39,7 +39,7 @@ def write_demo_knowledge(path: str | Path) -> Path:
             },
             {
                 "knowledge_id": "KB-SYN-M365-PASSWORD-001",
-                "title": "Recuperar acesso ao Microsoft 365",
+                "title": "Redefinir sua senha do Microsoft 365",
                 "question": "O que fazer quando não consigo acessar o Microsoft 365 por senha?",
                 "answer": (
                     "Vamos redefinir sua senha do Microsoft 365.\n\n"

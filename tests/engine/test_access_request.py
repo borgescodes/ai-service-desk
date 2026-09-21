@@ -21,7 +21,7 @@ def valid_identity() -> SessionIdentity:
         username="synthetic.user",
         name="Synthetic User",
         email="synthetic.user@example.invalid",
-        area="Revenda Sintetica",
+        area="Revenda",
     )
 
 
@@ -296,3 +296,63 @@ def test_prepare_access_request_preserves_purpose_with_strip_only() -> None:
 def test_prepare_access_request_rejects_corrupt_descriptor(descriptor: dict) -> None:
     with pytest.raises(AccessRequestValidationError):
         prepare_access_request(valid_identity(), answered_triage(), descriptor)
+
+
+@pytest.mark.parametrize(("area", "scope"), [("UBS", "ubs"), ("Revenda", "revenda")])
+def test_prepare_resolves_cdm_scope_from_trusted_area(area, scope):
+    result = prepare_access_request(
+        replace(valid_identity(), area=area), answered_triage(), cdm_descriptor()
+    )
+    assert result.context.business_scope == scope
+    assert result.context.scope_mismatch is False
+
+
+def test_catalog_extension_resolves_new_scope_without_new_domain_rules():
+    from ai_service_desk.engine.cdm_scope import CDMBusinessScope, CDMScopeCatalog
+
+    catalog = CDMScopeCatalog((CDMBusinessScope("financeiro", "Financeiro"),))
+    result = prepare_access_request(
+        replace(valid_identity(), area="Financeiro"),
+        answered_triage(),
+        cdm_descriptor(),
+        scope_catalog=catalog,
+    )
+    assert result.context.business_scope == "financeiro"
+    assert result.context.scope_source == "TRUSTED_SESSION"
+
+
+def test_prepare_unknown_area_does_not_use_model_entities():
+    triage = replace(answered_triage(), entities={"business_scope": "ubs", "area": "UBS"})
+    result = prepare_access_request(
+        replace(valid_identity(), area="Financeiro"), triage, cdm_descriptor()
+    )
+    assert result.status == "NEEDS_CLARIFICATION"
+    assert result.context is None
+    assert result.reason_code == "CDM_SCOPE_REQUIRED"
+
+
+def test_policy_does_not_accept_unconfirmed_scope_mismatch():
+    from ai_service_desk.engine.policy import PolicyEngine
+
+    result = prepare_access_request(
+        replace(valid_identity(), area="Revenda"),
+        answered_triage("Quero acesso ao CDM para UBS"),
+        cdm_descriptor(),
+    )
+    assert result.status == "NEEDS_CONFIRMATION"
+    assert PolicyEngine().evaluate(result.context).decision == "DENY"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"business_scope": ""},
+        {"scope_source": "MODEL_INFERRED"},
+        {"scope_mismatch": "true"},
+        {"scope_confirmed": "true"},
+    ],
+)
+def test_scope_context_rejects_invalid_authority_or_shape(change):
+    context = replace(valid_context(), business_scope="revenda", scope_source="TRUSTED_SESSION")
+    with pytest.raises(AccessRequestValidationError):
+        validate_access_request_context(replace(context, **change))

@@ -4,9 +4,10 @@ import { readFileSync } from 'node:fs';
 
 const appSource = readFileSync(new URL('../src/app.mjs', import.meta.url), 'utf8');
 
-test('public identity is route controlled instead of a visible persisted selector', () => {
+test('configured identity stays backend controlled without browser persistence', () => {
   assert.doesNotMatch(appSource, /jup-demo-identity/);
-  assert.doesNotMatch(appSource, /#demo-identity/);
+  assert.doesNotMatch(appSource, /localStorage|sessionStorage/);
+  assert.match(appSource, /api\/session\/identities/);
 });
 
 import { renderAppHeader, renderJupWorkspace } from '../src/components.mjs';
@@ -14,7 +15,7 @@ import { renderAppHeader, renderJupWorkspace } from '../src/components.mjs';
 test('public header contains only requester navigation', () => {
   const html = renderAppHeader({ activeRoute: 'solutions', operational: false });
   assert.match(html, /Jup Resolve/);
-  assert.match(html, />Soluções</);
+  assert.match(html, />Central de Suporte</);
   assert.match(html, />Falar com o Jup</);
   assert.doesNotMatch(html, /Identidade demo|Operação|Prevenção|Assistente de IA|Inteligência para/i);
   assert.doesNotMatch(html, /<select/);
@@ -28,7 +29,8 @@ test('empty Jup workspace is concise and task-first', () => {
     loading: false,
     sourceContext: null,
   });
-  assert.match(html, /Olá, eu sou o/);
+  assert.match(html, /welcome-line--greeting[^>]*>Olá, <strong>Pedro!<\/strong>/);
+  assert.match(html, /welcome-line--question[^>]*>Como posso ajudar\?/);
   assert.match(html, /Digite sua mensagem aqui/);
   assert.doesNotMatch(html, /Eu organizo o contexto|O que entendi|Contexto estruturado/i);
 });
@@ -58,7 +60,7 @@ test('Juparana brand tokens are exact', () => {
   const tokens = readFileSync(new URL('../src/tokens.css', import.meta.url), 'utf8');
   assert.match(tokens, /--color-primary:\s*#45813c/i);
   assert.match(tokens, /--color-accent:\s*#eeb41e/i);
-  assert.match(tokens, /--color-neutral:\s*#808285/i);
+  assert.match(tokens, /--color-canvas:\s*#f6f8f5/i);
 });
 
 test('handoff keeps its technical summary behind a native disclosure', () => {
@@ -66,4 +68,21 @@ test('handoff keeps its technical summary behind a native disclosure', () => {
   assert.match(html, /<details[^>]*><summary>Resumo para o especialista<\/summary>/);
   assert.doesNotMatch(html, /<details[^>]*open/);
   assert.match(html, /Detalhe aprovado para continuidade/);
+});
+
+test('request-status response renders an explicit route CTA without inspecting its text', () => {
+  const html = renderJupWorkspace({
+    messages: [{ role: 'JUP', text: 'Você tem 1 solicitação em andamento.', requestCta: 'REQUESTS' }],
+  });
+  assert.match(html, /href="\/requests"[^>]*data-route/);
+  assert.match(html, />Ver todas as solicitações /);
+});
+
+test('composer renders a compact slash menu only for command search', () => {
+  const menu = renderJupWorkspace({ draft: '/', messages: [] });
+  const plain = renderJupWorkspace({ draft: 'olá', messages: [] });
+  assert.match(menu, /data-command-menu/);
+  assert.match(menu, /\/solicitacoes/);
+  assert.match(menu, /Ver minhas solicitações e seus status/);
+  assert.doesNotMatch(plain, /data-command-menu/);
 });

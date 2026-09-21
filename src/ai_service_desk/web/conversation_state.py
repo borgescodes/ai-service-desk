@@ -48,6 +48,7 @@ class TrustedConversationContext:
     email: str
     area: str
     role: str
+    job_title: str = "Colaborador"
 
 
 @dataclass(frozen=True)
@@ -120,9 +121,17 @@ _PROTECTED_KEYS = frozenset(
         "name",
         "email",
         "area",
+        "job_title",
+        "cargo",
         "role",
         "user_role",
         "requested_role",
+        "business_scope",
+        "requested_scope",
+        "trusted_area",
+        "scope_source",
+        "scope_mismatch",
+        "scope_confirmed",
         "policy",
         "request_id",
         "request_state",
@@ -222,7 +231,7 @@ def reduce_conversation_context(context, delta, *, user_message):
     )
 
 
-def new_conversation_context(identity_id, name, email, area, role):
+def new_conversation_context(identity_id, name, email, area, role, job_title="Colaborador"):
     return ConversationContext(
         trusted=TrustedConversationContext(
             identity_id,
@@ -230,6 +239,7 @@ def new_conversation_context(identity_id, name, email, area, role):
             email,
             area,
             role,
+            job_title,
         )
     )
 

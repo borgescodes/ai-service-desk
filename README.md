@@ -273,7 +273,7 @@ A Fase 7 decide policy e confidence de forma deterministica para o fluxo de aces
 
 ## Fase 12: Jup Resolve web demo
 
-A Fase 12 expõe o domínio homologado das Fases 1 a 11 em uma aplicação web local chamada **Jup Resolve**. A camada visual é uma SPA em HTML semântico, CSS e ES Modules, servida pelo FastAPI no mesmo origin e sem dependências npm de runtime.
+A Fase 12 expõe o domínio homologado das Fases 1 a 11 em uma aplicação web local chamada **Jup Resolve**. A camada visual é uma SPA em HTML semântico, CSS e ES Modules, servida pelo FastAPI no mesmo origin; fontes, ícones e motion são empacotados localmente durante o build.
 
 O princípio de arquitetura permanece: **UI apresenta estado; backend decide estado.** O frontend não implementa Policy, Routing, Approval, Execution ou regras de Prevenção.
 

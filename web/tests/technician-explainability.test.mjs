@@ -47,13 +47,48 @@ test('technician detail explains trusted requester, request, confidence and back
   assert.match(html, /Fulano de Tal/);
   assert.match(html, /fulano\.tal@juparana\.com\.br/);
   assert.match(html, /Revenda - Matriz/);
-  assert.match(html, /Perfil solicitado/);
+  assert.match(html, /Escopo solicitado/);
   assert.match(html, /Solicitante/i);
   assert.match(html, /Análise do Jup/);
   assert.match(html, /Por que essa confiança\?/);
   assert.match(html, /Área de atuação compatível com Revenda/);
   assert.match(html, /Finalidade de solicitação de materiais confirmada/);
-  assert.match(html, /Decisão do backend/);
+  assert.match(html, />Decisão<\/h3>/);
+  assert.doesNotMatch(html, /Decisão do backend/);
   assert.match(html, /Aprovação humana/i);
   assert.doesNotMatch(html, /87%|95%/);
+});
+
+test('technician detail presents the demo reading order and progressively discloses internals', () => {
+  const html = renderTrackingDetail(pendingRequest(), { operational: true });
+  const request = html.indexOf('Preciso de acesso ao CDM');
+  const requester = html.indexOf('aria-label="Contexto essencial"');
+  const summary = html.indexOf('aria-label="Resumo do Jup"');
+  const progress = html.indexOf('aria-label="Andamento"');
+  const action = html.indexOf('aria-label="Ação"');
+  const disclosure = html.indexOf('<details class="technical-disclosure"');
+  const analysis = html.indexOf('Análise do Jup');
+  const backendDecision = html.indexOf('>Decisão</h3>');
+
+  assert.ok(request < requester, 'the request should precede requester context');
+  assert.ok(requester < summary, 'requester context should precede the Jup summary');
+  assert.ok(summary < progress, 'the summary should precede progress');
+  assert.ok(progress < action, 'progress should precede the expected action');
+  assert.ok(action < disclosure, 'the primary action should precede technical detail');
+  assert.ok(disclosure < analysis, 'confidence analysis should be progressively disclosed');
+  assert.ok(disclosure < backendDecision, 'backend decision should be progressively disclosed');
+});
+
+test('technician sees trusted job title and explicit scope mismatch', () => {
+  const item = pendingRequest();
+  item.requester.job_title = 'Analista';
+  item.business_scope = 'ubs';
+  item.scope_mismatch = true;
+  item.scope_confirmed = true;
+  const html = renderTrackingDetail(item, { operational: true });
+  assert.match(html, /Analista/);
+  assert.match(html, /Escopo solicitado/);
+  assert.match(html, /ubs/i);
+  assert.match(html, /Divergência/);
+  assert.match(html, /Confirmada pelo solicitante/);
 });

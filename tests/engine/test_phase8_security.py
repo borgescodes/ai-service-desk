@@ -11,6 +11,7 @@ import requests
 
 from ai_service_desk.engine.execution import FakeActionExecutor
 from ai_service_desk.engine.ollama import LocalEmbedder, OllamaClient
+from tests.engine.phase16_authorized_blobs import PHASE16_AUTHORIZED_EXTENSIONS
 from tests.engine.test_approval import make_system
 from tests.engine.test_execution import PolicySpy, make_engine
 from tests.engine.test_technician_authorization import TECH
@@ -47,12 +48,21 @@ def test_phase7_protected_git_blob_is_exact(path, expected_sha):
             "9864ed510a0de3270d30e9088aec407bfd16392d",
         ),
     }
+    authorized_extensions.update(PHASE16_AUTHORIZED_EXTENSIONS)
     if path in authorized_extensions:
         historical, authorized = authorized_extensions[path]
         assert expected_sha == historical
         expected_sha = authorized
     completed = subprocess.run(
-        ["git", "rev-parse", f"HEAD:{path}"], cwd=ROOT, check=True, capture_output=True, text=True
+        (
+            ["git", "hash-object", path]
+            if path in PHASE16_AUTHORIZED_EXTENSIONS
+            else ["git", "rev-parse", f"HEAD:{path}"]
+        ),
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     assert completed.stdout.strip() == expected_sha
 

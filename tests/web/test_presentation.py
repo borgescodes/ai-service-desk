@@ -34,6 +34,7 @@ def test_present_request_uses_portuguese_state_label_and_explainable_confidence(
             "username": "fulano.tal",
             "email": "fulano.tal@juparana.com.br",
             "area": "Revenda - Matriz",
+            "job_title": "Colaborador",
             "identity_source": "BACKEND_SESSION_PROVIDER",
         }
         assert payload["confidence"]["level"] == "HIGH"

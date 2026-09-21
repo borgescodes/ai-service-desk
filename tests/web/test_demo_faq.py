@@ -125,6 +125,34 @@ def test_m365_password_detail_exposes_only_fixed_procedure_url(tmp_path):
     )
 
 
+def test_featured_groups_prioritize_real_m365_article_over_scenographic_items(tmp_path):
+    source = tmp_path / "knowledge.jsonl"
+    rows = [
+        _article(
+            f"KB-FAQ-OFFICE-{index}",
+            system="OFFICE 365",
+            tags=["faq-impressao-office-aplicativos"],
+            title=f"Office cenográfico {index}",
+        )
+        for index in range(4)
+    ]
+    rows.append(
+        _article(
+            "KB-SYN-M365-PASSWORD-001",
+            system="OFFICE 365",
+            tags=["microsoft-365", "senha"],
+            title="Redefinir sua senha do Microsoft 365",
+        )
+    )
+    _write(source, rows)
+
+    groups = DemoFaqCatalog.from_sources([source]).featured_groups()
+    office = next(group for group in groups if group["key"] == "impressao-office-aplicativos")
+
+    assert len(office["items"]) == 4
+    assert "KB-SYN-M365-PASSWORD-001" in {item["knowledge_id"] for item in office["items"]}
+
+
 def test_unknown_detail_fails_closed(tmp_path):
     source = tmp_path / "knowledge.jsonl"
     _write(source, [_article("KB-ONE")])

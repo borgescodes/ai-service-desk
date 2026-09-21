@@ -64,6 +64,9 @@ def test_unresolved_general_it_is_handed_to_general_technician() -> None:
     try:
         result = runtime.send_message("pedro-miranda", "meu pc ta travando muito")
 
+        assert result["status"] == "NEEDS_CLARIFICATION"
+        result = runtime.send_message("pedro-miranda", "principalmente no Excel")
+
         assert result["status"] == "SUPPORT_HANDOFF_PENDING"
         assert result["support_handoff"]["technician"]["technician_id"] == "TECH-GENERAL"
         assert result["support_handoff"]["capability"] == "GENERAL_IT_SUPPORT"

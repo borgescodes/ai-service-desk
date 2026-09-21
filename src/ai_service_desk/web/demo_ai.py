@@ -5,6 +5,8 @@ import unicodedata
 
 import numpy as np
 
+from ai_service_desk.web.general_triage import is_general_it_problem
+
 _CDM_SYSTEM = re.compile(r"\b(?:cdm|central de dados mestres)\b")
 _PRIVILEGED_ROLE = re.compile(
     r"\b(?:adm|admin|administrador(?:a)?|administrativ(?:o|a)|superadmin)\b"
@@ -52,6 +54,13 @@ class DemoClassifierClient:
                 "system": "OFFICE 365",
                 "entities": {},
                 "confidence": 0.91,
+            }
+        elif is_general_it_problem(text):
+            result = {
+                "intent": "ERRO_SISTEMA",
+                "system": "",
+                "entities": {},
+                "confidence": 0.9,
             }
         else:
             result = {

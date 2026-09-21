@@ -14,6 +14,7 @@ APPROVED_PROCEDURE_URLS = {
     "KB-SYN-M365-PASSWORD-001": APPROVED_M365_PASSWORD_URL,
     "KB-SYN-FAQ-CDM-REQUEST-001": "https://cdm.juparana.com.br/",
 }
+FUNCTIONAL_ARTICLE_IDS = frozenset(APPROVED_PROCEDURE_URLS)
 
 _FEATURED_CATEGORY_ORDER = (
     ("acessos-rotinas", "Acessos e rotinas"),
@@ -103,8 +104,15 @@ class DemoFaqCatalog:
     def featured_groups(self) -> list[dict]:
         groups = []
         for key, label in _FEATURED_CATEGORY_ORDER[:MAX_FEATURED_CATEGORIES]:
-            items = [self._summary(entry) for entry in self._entries if entry.category_key == key][
-                :MAX_FEATURED_PER_CATEGORY
+            entries = [entry for entry in self._entries if entry.category_key == key]
+            functional = [
+                entry
+                for entry in entries
+                if entry.article["knowledge_id"] in FUNCTIONAL_ARTICLE_IDS
+            ]
+            other = [entry for entry in entries if entry not in functional]
+            items = [
+                self._summary(entry) for entry in (functional + other)[:MAX_FEATURED_PER_CATEGORY]
             ]
             if items:
                 groups.append({"key": key, "label": label, "items": items})

@@ -8,7 +8,8 @@ from time import perf_counter
 from ai_service_desk.engine.access_request import prepare_access_request
 from ai_service_desk.engine.approval import ApprovalService
 from ai_service_desk.engine.cdm_execution import CDMActionExecutor
-from ai_service_desk.engine.classification import classify_ticket
+from ai_service_desk.engine.cdm_scope import LOCAL_CDM_SCOPE_CATALOG
+from ai_service_desk.engine.classification import TicketClassification, classify_ticket
 from ai_service_desk.engine.confidence import assess_support_context
 from ai_service_desk.engine.execution import ExecutionEngine
 from ai_service_desk.engine.knowledge import build_knowledge_index
@@ -42,10 +43,12 @@ from ai_service_desk.engine.technician_authorization import (
     TechnicianRegistryEntry,
 )
 from ai_service_desk.engine.triage import TriageEngine
+from ai_service_desk.engine.validation import normalize_text
 from ai_service_desk.integrations.cdm import CDMAdapter
 from ai_service_desk.integrations.cdm_fake_api import CDMFakeStore, build_cdm_server
 from ai_service_desk.web.business_context import BusinessVocabulary
 from ai_service_desk.web.conversation import (
+    general_handoff_options,
     generate_natural_response,
     greeting_message,
     is_outside_it_support_scope,
@@ -59,6 +62,7 @@ from ai_service_desk.web.conversation_interpreter import (
     parse_interpretation_response,
 )
 from ai_service_desk.web.conversation_state import (
+    TurnRelation,
     append_turn,
     apply_backend_updates,
     new_conversation_context,
@@ -85,6 +89,7 @@ from ai_service_desk.web.demo_support import (
     SupportStage,
 )
 from ai_service_desk.web.errors import WebDemoError
+from ai_service_desk.web.general_triage import QUESTIONS, GeneralTriage, is_general_it_problem
 from ai_service_desk.web.presentation import present_confidence, present_prevention, present_request
 
 DEMO_MODES = frozenset({"DETERMINISTIC", "LOCAL_AI"})
@@ -96,12 +101,22 @@ _ADMIN_ROLE_ALIAS = re.compile(
 )
 _ENTER_ACCESS_ALIAS = re.compile(r"\bentrar\b", re.IGNORECASE)
 _GENERAL_IT_CLEAR = re.compile(
-    r"\b(?:pc|computador|notebook|windows)\b.*\b(?:travando|travou|trava|lento|lentidao|"
-    r"erro|nao liga|nao abre)\b|\b(?:travando|travou|lentidao)\b.*\b(?:pc|computador|notebook)\b",
+    r"\b(?:pc|computador|notebook|note|windows)\b.*\b(?:travando|travou|trava|lento|lentidao|"
+    r"erro|nao liga|nao abre)\b|\b(?:travando|travou|lentidao)\b.*"
+    r"\b(?:pc|computador|notebook|note)\b",
     re.IGNORECASE,
 )
 _ACCESS_REQUEST = re.compile(
     r"\b(?:acesso|acessar|entrar|permissao|permissoes|libera|liberar|perfil)\b",
+    re.IGNORECASE,
+)
+_REQUEST_STATUS_QUERY = re.compile(
+    r"(?:\bcomo\s+est[ãa]o?\s+(?:as\s+)?minhas?\s+solicita(?:ç|c)[õo]es\b|"
+    r"\btenho\s+alguma\s+solicita(?:ç|c)[ãa]o\s+pendente\b|"
+    r"\btenho\s+algum\s+pedido\s+pendente\b|"
+    r"\bquais?\s+(?:pedidos?|solicita(?:ç|c)[õo]es)\s+eu\s+tenho\b|"
+    r"\bcomo\s+est[áa]\s+meu\s+pedido\b|"
+    r"\bo\s+que\s+aconteceu\s+com\s+minha\s+solicita(?:ç|c)[ãa]o\b)",
     re.IGNORECASE,
 )
 _LOCAL_SUPPORT_SIGNALS = {
@@ -117,12 +132,17 @@ def _canonicalize_access_request_language(text: str) -> str:
     return _ENTER_ACCESS_ALIAS.sub("acessar", canonical)
 
 
+def _is_request_status_query(message: str) -> bool:
+    return bool(_REQUEST_STATUS_QUERY.search(" ".join(message.split())))
+
+
 class DemoRuntime:
     def __init__(
         self,
         *,
         mode: str = DEFAULT_DEMO_MODE,
         fail_cdm_request_ids: set[str] | frozenset[str] | None = None,
+        scope_catalog=LOCAL_CDM_SCOPE_CATALOG,
     ) -> None:
         if mode not in DEMO_MODES:
             raise ValueError(f"Modo de demo invalido: {mode!r}.")
@@ -147,6 +167,7 @@ class DemoRuntime:
             finally:
                 self._local_ai_startup_ms = max(0.0, (perf_counter() - startup_started) * 1000)
             self._ollama_client = client
+        self.cdm_scope_catalog = scope_catalog
         self.mode = mode
         self.identity_provider = DemoIdentityProvider()
         self._fail_cdm_request_ids = frozenset(fail_cdm_request_ids or ())
@@ -165,8 +186,11 @@ class DemoRuntime:
         *,
         mode: str = DEFAULT_DEMO_MODE,
         fail_cdm_request_ids: set[str] | frozenset[str] | None = None,
+        scope_catalog=LOCAL_CDM_SCOPE_CATALOG,
     ) -> DemoRuntime:
-        return cls(mode=mode, fail_cdm_request_ids=fail_cdm_request_ids)
+        return cls(
+            mode=mode, fail_cdm_request_ids=fail_cdm_request_ids, scope_catalog=scope_catalog
+        )
 
     def _close_knowledge_resources(self) -> None:
         triage = getattr(self, "_triage", None)
@@ -233,7 +257,7 @@ class DemoRuntime:
         else:
             self.demo_embedder = DemoEmbedder()
             retrieval_client = DemoClassifierClient()
-        self.business_vocabulary = BusinessVocabulary()
+        self.business_vocabulary = BusinessVocabulary(self.cdm_scope_catalog)
         self.demo_classifier_client = DemoClassifierClient()
         build_knowledge_index(knowledge_source, knowledge_index, self.demo_embedder, batch_size=2)
         build_playbook_catalog(playbook_source, knowledge_index, playbook_catalog)
@@ -252,6 +276,7 @@ class DemoRuntime:
         self._conversation_contexts = {}
         self._conversation_generations: dict[str, int] = {}
         self._triage: dict[str, tuple[TriageEngine, object]] = {}
+        self._pending_cdm_scope = {}
         self.created_request_ids: list[str] = []
         self.request_metadata: dict[str, dict] = {}
         self.support_state = DemoSupportState()
@@ -259,6 +284,7 @@ class DemoRuntime:
         self._support_resolution_outcomes: dict[str, str] = {}
         self._support_handoff_ids: dict[str, str] = {}
         self._general_handoff_ids: dict[str, str] = {}
+        self._general_triage: dict[str, GeneralTriage] = {}
 
         cdm_technician = self.identity_provider.technician_identity("tecnico-cdm")
         m365_technician = self.identity_provider.technician_identity("tecnico-m365")
@@ -309,7 +335,7 @@ class DemoRuntime:
         for outcome in demo_outcomes():
             self.outcome_store.ingest(outcome)
 
-        self.fake_cdm_store = CDMFakeStore()
+        self.fake_cdm_store = CDMFakeStore(self.cdm_scope_catalog)
         self.fake_cdm_server = build_cdm_server(
             "127.0.0.1",
             0,
@@ -324,6 +350,7 @@ class DemoRuntime:
             f"http://{host}:{port}",
             "phase12-demo-service-token",
             timeout_seconds=2,
+            scope_catalog=self.cdm_scope_catalog,
         )
         self.execution_engine = ExecutionEngine(
             self.request_repository,
@@ -366,6 +393,7 @@ class DemoRuntime:
             requester.email,
             requester.area,
             identity.role,
+            requester.job_title,
         )
 
     def _interpret_conversation(self, context, message):
@@ -438,6 +466,10 @@ class DemoRuntime:
                 "request_id": result.get("request_id"),
                 "request_state": result.get("state"),
                 "policy": result.get("policy"),
+                "business_scope": result.get("business_scope"),
+                "scope_mismatch": result.get("scope_mismatch"),
+                "scope_confirmed": result.get("scope_confirmed"),
+                "requested_role": result.get("requested_role"),
                 "support_handoff_id": handoff.get("handoff_id"),
                 "support_handoff_system": handoff.get("system"),
                 "support_handoff_capability": handoff.get("capability"),
@@ -445,6 +477,21 @@ class DemoRuntime:
             },
         )
 
+        context = replace(
+            context,
+            dialogue=replace(
+                context.dialogue, stage="IDLE", pending_information=(), last_question=""
+            ),
+        )
+        if result.get("offer_action") == "CDM_ACCESS_REQUEST":
+            context = replace(
+                context,
+                dialogue=replace(
+                    context.dialogue,
+                    stage="OFFERING_CDM_REQUEST",
+                    pending_information=(result["offer_purpose"],),
+                ),
+            )
         if result.get("status") == "NEEDS_CLARIFICATION":
             question = result.get("question")
             if isinstance(question, str) and question.strip():
@@ -452,7 +499,13 @@ class DemoRuntime:
                     context,
                     dialogue=replace(
                         context.dialogue,
-                        stage="DIAGNOSING",
+                        stage=(
+                            "CONFIRMING_CDM_SCOPE"
+                            if result.get("reason") == "CDM_SCOPE_CONFIRMATION_REQUIRED"
+                            else "SELECTING_CDM_SCOPE"
+                            if result.get("reason") == "CDM_SCOPE_REQUIRED"
+                            else "DIAGNOSING"
+                        ),
                         pending_information=(question.strip(),),
                         last_question=question.strip(),
                     ),
@@ -504,18 +557,25 @@ class DemoRuntime:
         context,
         delta,
     ):
+        pending = self._continue_cdm_scope(identity_id, message, requester)
+        if pending is not None:
+            return pending
+
         if delta.domain == "SOCIAL":
             return {
                 "status": "SOCIAL",
                 "request_id": None,
             }
 
+        if identity_id in self._general_triage:
+            return self._general_triage_turn(identity_id, requester, message)
+
         if delta.domain == "OTHER":
             return {
                 "status": "OUT_OF_SCOPE",
                 "request_id": None,
                 "support_handoff": None,
-                "understood_topic": delta.understood_topic,
+                "understood_topic": delta.understood_topic or message,
                 "business_context": {
                     "system": "",
                     "product": "",
@@ -596,25 +656,37 @@ class DemoRuntime:
             )
 
         state = self._triage[identity_id][1]
-        if result.get("status") == "TRIAGE_ABSTAINED" and delta.domain == "IT_SUPPORT":
+        if (
+            result.get("status") in {"TRIAGE_ABSTAINED", "NEEDS_CLARIFICATION"}
+            and delta.domain == "IT_SUPPORT"
+            and result.get("reason") not in {"MISSING_SYSTEM", "AMBIGUOUS_SYSTEM"}
+        ):
             system = state.system or context.dialogue.system.value
             intent = state.intent or delta.intent or "OUTRO"
 
-            if system == "OFFICE 365":
+            if system == "OFFICE 365" and result.get("status") == "TRIAGE_ABSTAINED":
                 handoff = self._materialize_m365_knowledge_gap_handoff(
                     identity_id,
                     requester,
                     message,
                     intent=intent,
                 )
-            else:
-                handoff = self._materialize_general_handoff(
+            elif system != "OFFICE 365" and (
+                system != "CDM" or result.get("status") == "TRIAGE_ABSTAINED"
+            ):
+                return self._general_triage_turn(
                     identity_id,
                     requester,
                     message,
                     system=system or "GENERAL_IT",
                     intent=intent,
                 )
+            else:
+                result["business_context"] = {
+                    "system": system,
+                    "product": state.entities.get("product", ""),
+                }
+                return result
 
             result = {
                 "status": "SUPPORT_HANDOFF_PENDING",
@@ -626,6 +698,8 @@ class DemoRuntime:
             "system": state.system,
             "product": state.entities.get("product", ""),
         }
+        if state.system == "CDM":
+            result["system"] = "CDM"
         return result
 
     def _send_local_ai_message(
@@ -663,17 +737,34 @@ class DemoRuntime:
             delta,
             user_message=message,
         )
+        self._cancel_general_for_new_goal(identity_id, message, delta)
+
+        if delta.semantic_signal == "REQUEST_STATUS_QUERY" or _is_request_status_query(message):
+            result = self._request_status_result(identity_id)
+            context_after_backend = self._apply_result_to_context(context_after_delta, result)
+            grounding = ground_response(result, context_after_backend, delta)
+            assistant_message = grounding.fallback_message
+            context_final = append_turn(context_after_backend, "USER", message.strip())
+            self._conversation_contexts[identity_id] = append_turn(
+                context_final, "ASSISTANT", assistant_message
+            )
+            result["assistant_message"] = assistant_message
+            return result
 
         self.knowledge_engine.last_search_ms = 0.0
         backend_started = perf_counter()
         try:
-            result = self._resolve_local_ai_turn(
-                identity_id,
-                requester,
-                message,
-                context_after_delta,
-                delta,
+            result = self._cdm_conversation_turn(
+                identity_id, requester, message, context_before, delta
             )
+            if result is None:
+                result = self._resolve_local_ai_turn(
+                    identity_id,
+                    requester,
+                    message,
+                    context_after_delta,
+                    delta,
+                )
         finally:
             backend_total_ms = max(
                 0.0,
@@ -727,6 +818,7 @@ class DemoRuntime:
         )
 
         self._conversation_contexts[identity_id] = context_final
+        self._record_general_response(identity_id, result, assistant_message)
         result["assistant_message"] = assistant_message
         return result
 
@@ -799,6 +891,7 @@ class DemoRuntime:
 
     def reset_conversation(self, identity_id: str) -> None:
         self._requester(identity_id)
+        self._pending_cdm_scope.pop(identity_id, None)
         self._triage.pop(identity_id, None)
         self.conversations.pop(identity_id, None)
         self._conversation_contexts.pop(identity_id, None)
@@ -806,13 +899,33 @@ class DemoRuntime:
         self._support_resolution_outcomes.pop(identity_id, None)
         self._support_handoff_ids.pop(identity_id, None)
         self._general_handoff_ids.pop(identity_id, None)
+        self._general_triage.pop(identity_id, None)
         self._conversation_generations[identity_id] = (
             self._conversation_generations.get(identity_id, 0) + 1
         )
 
     def send_message(self, identity_id: str, message: str) -> dict:
+        if isinstance(message, str):
+            self._cancel_general_for_new_goal(identity_id, message)
+        if isinstance(message, str) and message.strip() == "/solicitacoes":
+            context = self._context_for(identity_id, self._requester(identity_id))
+            result = self._request_status_result(identity_id)
+            context = self._apply_result_to_context(context, result)
+            context = append_turn(context, "USER", message)
+            self._conversation_contexts[identity_id] = append_turn(
+                context, "ASSISTANT", result["assistant_message"]
+            )
+            return result
         if self.mode != "LOCAL_AI":
-            return self._send_message_impl(identity_id, message)
+            context = self._context_for(identity_id, self._requester(identity_id))
+            result = self._send_message_impl(identity_id, message)
+            self._record_general_response(identity_id, result, result["assistant_message"])
+            context = self._apply_result_to_context(context, result)
+            context = append_turn(context, "USER", message)
+            self._conversation_contexts[identity_id] = append_turn(
+                context, "ASSISTANT", result["assistant_message"]
+            )
+            return result
 
         before_calls = self._local_ai_total_calls
         started = perf_counter()
@@ -841,6 +954,23 @@ class DemoRuntime:
         if not isinstance(message, str) or not message.strip():
             raise ValueError("Mensagem vazia.")
 
+        if _is_request_status_query(message):
+            return self._request_status_result(identity_id)
+
+        cdm = self._cdm_conversation_turn(
+            identity_id, requester, message, self._context_for(identity_id, requester)
+        )
+        if cdm is not None:
+            cdm["assistant_message"] = ground_response(
+                cdm, self._context_for(identity_id, requester), None
+            ).fallback_message
+            return cdm
+
+        pending = self._continue_cdm_scope(identity_id, message, requester)
+        if pending is not None:
+            pending["assistant_message"] = operational_message(pending, message, None)
+            return pending
+
         if is_social_greeting(message):
             chat = (
                 self._ollama_client.chat
@@ -864,6 +994,10 @@ class DemoRuntime:
             return result
 
         systems = self.business_vocabulary.systems(message)
+        if identity_id in self._general_triage:
+            result = self._general_triage_turn(identity_id, requester, message)
+            result["assistant_message"] = result["general_triage"]["response_options"][0]
+            return result
         support_turn = self.support_state.handle(
             identity_id,
             message,
@@ -917,23 +1051,97 @@ class DemoRuntime:
             }
         elif self._should_general_handoff(message, systems, result, state):
             system = systems[0] if len(systems) == 1 else "GENERAL_IT"
-            handoff = self._materialize_general_handoff(
+            result = self._general_triage_turn(
                 identity_id,
                 requester,
                 message,
                 system=system,
                 intent=state.intent or "OUTRO",
             )
-            result = {
-                "status": "SUPPORT_HANDOFF_PENDING",
-                "request_id": None,
-                "support_handoff": handoff.as_result(),
-            }
         result["business_context"] = {
             "system": state.system,
             "product": state.entities.get("product", ""),
         }
         result["assistant_message"] = operational_message(result, message, None)
+        return result
+
+    def _cancel_general_for_new_goal(self, identity_id, message, delta=None):
+        if identity_id not in self._general_triage:
+            return
+        systems = self.business_vocabulary.systems(message)
+        contextual_reply = bool(
+            re.match(
+                r"(?:principalmente|somente|apenas|so|no|na|quando|ao)\b", normalize_text(message)
+            )
+        )
+        explicit_switch = bool(
+            re.search(
+                r"\b(?:na verdade|pensando bem|mudei de ideia|agora eu preciso|agora preciso)\b",
+                normalize_text(message),
+            )
+        )
+        switched = (
+            explicit_switch
+            or (bool(systems) and not contextual_reply)
+            or _is_request_status_query(message)
+            or message.strip() == "/solicitacoes"
+            or is_outside_it_support_scope(message)
+            or bool(
+                re.search(
+                    r"\b(?:deixa isso|outro assunto|outro problema|esquece isso)\b",
+                    normalize_text(message),
+                )
+            )
+            or (delta is not None and delta.relation == TurnRelation.TOPIC_SWITCH)
+            or (
+                delta is not None
+                and delta.domain == "OTHER"
+                and delta.relation == TurnRelation.NEW_GOAL
+            )
+        )
+        if switched:
+            self._general_triage.pop(identity_id, None)
+            self._general_handoff_ids.pop(identity_id, None)
+            self._triage.pop(identity_id, None)
+
+    def _record_general_response(self, identity_id, result, response):
+        current = self._general_triage.get(identity_id)
+        if current is not None and result.get("general_triage") and not current.handoff_id:
+            self._general_triage[identity_id] = current.with_response(response)
+
+    def _general_triage_turn(
+        self, identity_id, requester, message, *, system="GENERAL_IT", intent="OUTRO"
+    ):
+        current = self._general_triage.get(identity_id)
+        if current is None:
+            self._general_handoff_ids.pop(identity_id, None)
+            current = GeneralTriage(message.strip(), system, intent)
+        if current.handoff_id:
+            handoff = self.support_handoff_store.get(current.handoff_id)
+            dimension = None
+        else:
+            current, dimension = current.collect(
+                message.strip(),
+                sufficient_initial=bool(self.business_vocabulary.canonical(system)),
+            )
+            self._general_triage[identity_id] = current
+            if dimension is None:
+                handoff = self._materialize_general_handoff(
+                    identity_id, requester, message, system=current.system, intent=current.intent
+                )
+                current = replace(current, handoff_id=handoff.handoff_id)
+                self._general_triage[identity_id] = current
+        result = {"request_id": None, "business_context": {"system": current.system, "product": ""}}
+        if dimension is not None:
+            options = QUESTIONS[dimension]
+            result.update(status="NEEDS_CLARIFICATION", question=options[0])
+        else:
+            options = general_handoff_options(current.history)
+            result.update(status="SUPPORT_HANDOFF_PENDING", support_handoff=handoff.as_result())
+        result["general_triage"] = {
+            "questions_asked": len(current.questions),
+            "response_options": options,
+        }
         return result
 
     @staticmethod
@@ -945,7 +1153,7 @@ class DemoRuntime:
         normalized = " ".join(message.casefold().split())
         if systems == ("UBS",) and _ACCESS_REQUEST.search(normalized):
             return True
-        if _GENERAL_IT_CLEAR.search(normalized):
+        if _GENERAL_IT_CLEAR.search(normalized) or is_general_it_problem(message):
             return True
         if (
             result.get("status") == "TRIAGE_ABSTAINED"
@@ -1115,20 +1323,27 @@ class DemoRuntime:
         if existing_id is not None:
             return self.support_handoff_store.get(existing_id)
 
-        technician = self.identity_provider.technician_identity("tecnico-geral")
+        technician = self.routing_registry.resolve("GENERAL_IT", "GENERAL_IT_SUPPORT")
         assessment = assess_support_context(requester.area, system, message)
         confidence = present_confidence(assessment)
-        conversation_history = tuple(
-            SupportHistoryEntry("USER", item["text"])
-            for item in self.conversations.get(identity_id, [])
-            if item.get("role") == "USER" and item.get("text")
+        triage = self._general_triage.get(identity_id)
+        conversation_history = (
+            triage.history
+            if triage is not None
+            else tuple(
+                SupportHistoryEntry(item.role, item.text)
+                for item in self._context_for(identity_id, requester).recent_turns
+            )
         )
         if not conversation_history or conversation_history[-1].text != message.strip():
             conversation_history += (SupportHistoryEntry("USER", message.strip()),)
         support = SupportConversation(
             stage=SupportStage.HANDOFF,
-            original_symptom=message.strip(),
-            evidence=(message.strip(),),
+            original_symptom=triage.original_symptom if triage else message.strip(),
+            evidence=tuple(item.text for item in conversation_history if item.role == "USER"),
+            questions_asked=tuple(
+                item.text for item in conversation_history if item.role == "ASSISTANT"
+            ),
             history=conversation_history,
         )
         public_system = system if system != "GENERAL_IT" else "TI geral"
@@ -1137,6 +1352,7 @@ class DemoRuntime:
                 f"Solicitante: {requester.name}",
                 f"E-mail: {requester.email}",
                 f"Área: {requester.area}",
+                f"Cargo: {requester.job_title}",
                 f"Sistema/contexto: {public_system}",
                 f"Intenção interpretada: {intent or 'OUTRO'}",
                 f"Sintoma/pedido informado: {message.strip()}",
@@ -1144,6 +1360,8 @@ class DemoRuntime:
                 f"Confiança de contexto: {confidence['label']}",
                 "Motivos: " + ", ".join(assessment.reason_codes),
                 f"Encaminhamento: {technician.name}",
+                "Conversa de triagem:",
+                *(f"{item.role}: {item.text}" for item in conversation_history),
             )
         )
         handoff_id = f"DEMO-GENERAL-HANDOFF-{len(self.support_handoff_store.snapshot()) + 1:03d}"
@@ -1208,6 +1426,55 @@ class DemoRuntime:
         lines.append(f"Encaminhamento: {technician_name}")
         return "\n".join(lines)
 
+    def _cdm_conversation_turn(self, identity_id, requester, message, context, delta=None):
+        normalized = normalize_text(message)
+        informational = (
+            "CDM" in self.business_vocabulary.systems(message)
+            and _ACCESS_REQUEST.search(normalized)
+            and (
+                bool(re.search(r"^(?:como|o que preciso para)\b|\bcomo funciona\b", normalized))
+                or (
+                    delta is not None
+                    and delta.intent == "ORIENTACAO"
+                    and delta.semantic_signal == "NONE"
+                )
+            )
+        )
+        acceptance = normalized in {
+            "pode solicitar",
+            "pode solicitar para mim",
+            "pode fazer pra mim",
+            "pode fazer para mim",
+            "sim solicita",
+            "quero sim",
+            "pode abrir",
+            "sim",
+        }
+        if delta is not None and delta.relation == TurnRelation.CONFIRMATION:
+            acceptance = acceptance or (
+                delta.semantic_signal == "ACCESS_REQUEST"
+                and delta.domain == "IT_SUPPORT"
+                and not set(self.business_vocabulary.systems(message)) - {"CDM"}
+            )
+        if not informational and not (
+            context.dialogue.stage == "OFFERING_CDM_REQUEST" and acceptance
+        ):
+            return None
+        purpose = message
+        if not informational:
+            purpose = context.dialogue.pending_information[0]
+            purpose = f"Quero acesso ao CDM. {purpose}\n{message}"
+        self._pending_cdm_scope.pop(identity_id, None)
+        return self._send_operational_message(
+            identity_id,
+            purpose,
+            requester,
+            classification=TicketClassification(
+                intent="PROBLEMA_ACESSO", system="CDM", entities={}, confidence=0.9
+            ),
+            informational=informational,
+        )
+
     def _send_operational_message(
         self,
         identity_id: str,
@@ -1215,6 +1482,7 @@ class DemoRuntime:
         requester,
         *,
         classification=None,
+        informational=False,
     ) -> dict:
         current = self._triage.get(identity_id)
         if current is None or current[1].status != "ACTIVE":
@@ -1231,6 +1499,14 @@ class DemoRuntime:
         )
 
         if knowledge_result["status"] != "KNOWLEDGE_FOUND":
+            if informational:
+                return {
+                    "status": "NEEDS_CLARIFICATION",
+                    "system": "CDM",
+                    "reason": knowledge_result.get("reason"),
+                    "question": "Não encontrei uma orientação aprovada para esse acesso.",
+                    "request_id": None,
+                }
             return {
                 "status": knowledge_result["status"],
                 "question": knowledge_result.get("question"),
@@ -1239,8 +1515,42 @@ class DemoRuntime:
             }
 
         knowledge = knowledge_result["knowledge"]
+        if informational:
+            if knowledge["knowledge_id"] != "KB-SYN-CDM-ACCESS-001":
+                return {
+                    "status": "NEEDS_CLARIFICATION",
+                    "system": "CDM",
+                    "question": "Não encontrei uma orientação aprovada para esse acesso.",
+                    "request_id": None,
+                }
+            try:
+                self.faq_catalog.detail(knowledge["knowledge_id"])
+                article = self.faq_catalog.detail("KB-SYN-FAQ-CDM-REQUEST-001")
+            except FaqNotFoundError:
+                return {
+                    "status": "NEEDS_CLARIFICATION",
+                    "system": "CDM",
+                    "question": "O artigo de acesso ao CDM não está disponível agora.",
+                    "request_id": None,
+                }
+            return {
+                "status": "KNOWLEDGE_FOUND",
+                "system": "CDM",
+                "request_id": None,
+                "knowledge_id": knowledge["knowledge_id"],
+                "answer": knowledge["answer"],
+                "article": {key: article[key] for key in ("knowledge_id", "title", "provenance")},
+                "offer_action": "CDM_ACCESS_REQUEST",
+                "offer_purpose": message,
+            }
         playbook_result = self.playbook_engine.resolve(knowledge)
         if playbook_result["status"] == "KNOWLEDGE_ONLY":
+            article = None
+            if knowledge["knowledge_id"] == "KB-SYN-M365-PASSWORD-001":
+                try:
+                    article = self.faq_catalog.detail(knowledge["knowledge_id"])
+                except FaqNotFoundError:
+                    article = None
             if knowledge["knowledge_id"] != "KB-SYN-M365-PASSWORD-001":
                 interaction_id = f"DEMO-KNOWLEDGE-{len(self.outcome_store.snapshot()) + 1:03d}"
                 self.outcome_store.ingest(
@@ -1251,12 +1561,17 @@ class DemoRuntime:
                         area=requester.area,
                     )
                 )
-            return {
+            result = {
                 "status": "KNOWLEDGE_FOUND",
                 "knowledge_id": knowledge["knowledge_id"],
                 "answer": knowledge["answer"],
                 "request_id": None,
             }
+            if article is not None:
+                result["article"] = {
+                    key: article[key] for key in ("knowledge_id", "title", "provenance")
+                }
+            return result
 
         if playbook_result["status"] != "PLAYBOOK_FOUND":
             return {
@@ -1277,17 +1592,112 @@ class DemoRuntime:
         canonical_problem = _canonicalize_access_request_language(next_state.problem_text)
         if canonical_problem != next_state.problem_text:
             preparation_state = replace(next_state, problem_text=canonical_problem)
-        preparation = prepare_access_request(requester, preparation_state, descriptor)
-        if preparation.status != "READY" or preparation.context is None:
+        preparation = prepare_access_request(
+            requester, preparation_state, descriptor, scope_catalog=self.cdm_scope_catalog
+        )
+        if preparation.status != "READY":
+            if preparation.reason_code.startswith("CDM_SCOPE_"):
+                self._pending_cdm_scope[identity_id] = (preparation_state, descriptor, preparation)
+                return self._scope_question(requester, preparation)
             return {
                 "status": "NEEDS_CLARIFICATION",
                 "reason": preparation.reason_code,
+                "system": "CDM",
+                "question": "Qual tipo de acesso você precisa no CDM?",
                 "request_id": None,
             }
 
         request_context = preparation.context
         if canonical_problem != next_state.problem_text:
             request_context = replace(request_context, purpose=next_state.problem_text)
+        return self._materialize_cdm_request(request_context, next_state)
+
+    def _scope_question(self, requester, preparation):
+        context = preparation.context
+        scope = context.business_scope if context else None
+        mismatch = context.scope_mismatch if context else False
+        labels = ", ".join(scope.label for scope in self.cdm_scope_catalog.scopes)
+        question = (
+            f"Seu perfil está associado a {requester.area}, mas o acesso solicitado é para "
+            f"{self.cdm_scope_catalog.label(scope)}. É isso mesmo?"
+            if mismatch
+            else f"Seu perfil está associado a {requester.area}. "
+            f"Para o CDM, qual área você precisa acessar: {labels}? "
+            "Ao escolher uma área diferente do seu perfil, vou considerar essa escolha "
+            "como sua confirmação."
+        )
+        return {
+            "status": "NEEDS_CLARIFICATION",
+            "system": "CDM",
+            "reason": preparation.reason_code,
+            "question": question,
+            "request_id": None,
+            "trusted_area": requester.area,
+            "business_scope": scope,
+            "scope_mismatch": mismatch,
+            "requested_role": preparation.requested_role,
+        }
+
+    def _continue_cdm_scope(self, identity_id, message, requester):
+        pending = self._pending_cdm_scope.get(identity_id)
+        if pending is None:
+            return None
+        state, descriptor, preparation = pending
+        normalized = normalize_text(message)
+        if normalized in {"nao", "cancelar", "cancele"}:
+            self._pending_cdm_scope.pop(identity_id)
+            return {
+                "status": "NEEDS_CLARIFICATION",
+                "system": "CDM",
+                "request_id": None,
+                "question": "Pedido cancelado. Como posso ajudar?",
+            }
+        confirmed_scope = re.fullmatch(r"sim e para (.+)", normalized)
+        confirms_pending_scope = (
+            confirmed_scope is not None
+            and preparation.context is not None
+            and self.cdm_scope_catalog.match_area(confirmed_scope[1])
+            == preparation.context.business_scope
+        )
+        if (
+            normalized in {"sim", "confirmo", "pode solicitar", "sim confirmo"}
+            or confirms_pending_scope
+        ):
+            if preparation.context is None:
+                return self._scope_question(requester, preparation)
+            self._pending_cdm_scope.pop(identity_id)
+            return self._materialize_cdm_request(
+                replace(preparation.context, scope_confirmed=True), state
+            )
+        answer = re.sub(r"^(?:para|no escopo|na area) (?:a |o |uma |um )?", "", normalized)
+        scope = self.cdm_scope_catalog.match_area(answer)
+        if scope is None:
+            self._pending_cdm_scope.pop(identity_id)
+            return None
+        previous_reason = preparation.reason_code
+        preparation = prepare_access_request(
+            requester,
+            state,
+            descriptor,
+            scope_catalog=self.cdm_scope_catalog,
+            scope_answer=scope,
+        )
+        if preparation.status == "READY":
+            self._pending_cdm_scope.pop(identity_id)
+            return self._materialize_cdm_request(preparation.context, state)
+        if (
+            previous_reason == "CDM_SCOPE_REQUIRED"
+            and preparation.context is not None
+            and preparation.reason_code == "CDM_SCOPE_CONFIRMATION_REQUIRED"
+        ):
+            self._pending_cdm_scope.pop(identity_id)
+            return self._materialize_cdm_request(
+                replace(preparation.context, scope_confirmed=True), state
+            )
+        self._pending_cdm_scope[identity_id] = (state, descriptor, preparation)
+        return self._scope_question(requester, preparation)
+
+    def _materialize_cdm_request(self, request_context, next_state):
         record = self.routed_requests.create_request(request_context)
         self.created_request_ids.append(record.request_id)
         self.request_metadata[record.request_id] = {
@@ -1296,10 +1706,15 @@ class DemoRuntime:
         }
         return {
             "status": "REQUEST_CREATED" if record.state == "PENDING_APPROVAL" else record.state,
+            "system": "CDM",
             "request_id": record.request_id,
             "state": record.state,
             "confidence": record.confidence.level,
             "policy": record.creation_policy.decision,
+            "business_scope": record.context.business_scope,
+            "scope_mismatch": record.context.scope_mismatch,
+            "scope_confirmed": record.context.scope_confirmed,
+            "requested_role": record.context.requested_role,
         }
 
     def list_requests(self, identity_id: str) -> list[dict]:
@@ -1312,6 +1727,33 @@ class DemoRuntime:
             assignment = self.routing_store.get_optional(request_id)
             items.append(self._present(record, assignment=assignment))
         return items
+
+    def _request_status_result(self, identity_id: str) -> dict:
+        items = self.list_requests(identity_id)
+        summary_items = [
+            {
+                "request_id": item["request_id"],
+                "system": item["system"],
+                "state_label": item["state_label"],
+            }
+            for item in items
+        ]
+        count = len(summary_items)
+        if not count:
+            message = "Você ainda não tem solicitações para acompanhar."
+        else:
+            noun = "solicitação" if count == 1 else "solicitações"
+            message = f"Você tem {count} {noun} para acompanhar.\n\n" + "\n".join(
+                f"{item['system']} · {item['state_label']} ({item['request_id']})"
+                for item in summary_items
+            )
+        return {
+            "status": "REQUESTS_LISTED",
+            "request_id": None,
+            "request_summary": {"count": count, "items": summary_items},
+            "presentation": {"cta": "REQUESTS" if count else None},
+            "assistant_message": message,
+        }
 
     def get_request(self, identity_id: str, request_id: str) -> dict:
         requester = self._requester(identity_id)

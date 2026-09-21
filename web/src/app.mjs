@@ -1,4 +1,4 @@
-import { presentChat, dismissThinking, createWelcomeEntry } from './presentation.mjs';
+import { animateJupFlip, animatePersonaPopover, captureJupFlip, presentChat, presentQueueChanges, dismissThinking, createWelcomeEntry } from './presentation.mjs';
 import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
 import { captureConversationScroll, restoreConversationScroll } from './conversation.mjs';
 import { createFaqSearch, renderSolutionDetail, renderSolutionsHome, renderSolutionsResults } from './solutions.mjs';
@@ -6,20 +6,38 @@ import { apiRequest, ApiError } from './api.mjs';
 import {
   renderAppHeader,
   renderApprovalQueue,
+  renderHandoffWorkspace,
   renderHandoffs,
   renderJupWorkspace,
   renderOperationDetail,
   renderRequestList,
 } from './components.mjs';
+import { sortNewestFirst } from './tracking.mjs';
 import { escapeHtml, renderErrorState, renderUnauthorizedState } from './render.mjs';
 import { demoIdentityForPath, resolveRoute, routeParams } from './router.mjs';
-import { createInitialState, selectIdentity, resetConversation, personaPath } from './state.mjs';
+import { activateIdentity, clearRequesterChatState, corporateEmailFromName, createInitialState, resetConversation, personaPath } from './state.mjs';
 
 const app = document.querySelector('#app');
+if (document.defaultView && (!globalThis.gsap || !globalThis.Flip)) {
+  const [{ gsap }, { Flip }] = await Promise.all([
+    import('/vendor/gsap/index.js'),
+    import('/vendor/gsap/Flip.js'),
+  ]);
+  globalThis.gsap = gsap;
+  globalThis.Flip = Flip;
+}
+if (globalThis.gsap && globalThis.Flip) globalThis.gsap.registerPlugin(globalThis.Flip);
 let identityRevision = 0;
 let renderedMessageCount = 0;
 let finishPresentation = () => {};
+let thinkingTimer = null;
+const renderedQueueIdsByScope = new Map();
 const welcomeEntry = createWelcomeEntry();
+document.addEventListener?.('toggle', event => {
+  if (event.target?.matches?.('.persona-menu')) {
+    animatePersonaPopover(event.target, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
+  }
+}, true);
 // IDs only, scoped to the current page session and technician. Details are always reauthorized.
 const knownOperationalRequests = new Map();
 async function loadOperationalItems(identityId) {
@@ -42,26 +60,83 @@ let state = {
   route: resolveRoute(window.location.pathname),
   composerFocused: false,
   composerDraft: '',
+  commandMenuOpen: false,
   faqCategory: '',
   lastBackendStatus: null,
   messageError: null,
+  processingActivity: null,
+  identityConfigError: null,
   messages: [],
   understood: null,
   loading: false,
   selectedRequestId: null,
   selectedOpportunityId: null,
+  selectedHandoffId: null,
 };
+
+function processingContextFromMessages(messages) {
+  for (const item of [...messages].reverse()) {
+    if (item.role !== 'USER') continue;
+
+    const text = String(item.text || '');
+    const isCdm = /\bcdm\b/i.test(text);
+    const isMicrosoft365 = /\b(?:m365|365|office|outlook|teams|sharepoint)\b/i.test(text);
+
+    if (isCdm && isMicrosoft365) return null;
+    if (isCdm) return 'CDM';
+    if (isMicrosoft365) return 'MICROSOFT_365';
+  }
+
+  return null;
+}
+
+function processingFeedbackSteps(messages) {
+  const context = processingContextFromMessages(messages);
+
+  const contextualStep = context === 'CDM'
+    ? 'Verificando informações de acesso ao CDM'
+    : context === 'MICROSOFT_365'
+      ? 'Verificando orientações sobre Microsoft 365'
+      : 'Organizando as informações do atendimento';
+
+  return [
+    'Entendendo sua solicitação',
+    'Consultando as informações necessárias',
+    contextualStep,
+    'Preparando sua resposta',
+  ];
+}
+
+function scheduleProcessingFeedback(steps, revision) {
+  // Presentation feedback only. This is not a trace of backend execution.
+  const update = (activity) => {
+    if (
+      revision !== identityRevision ||
+      state.pendingAction !== 'message' ||
+      state.route !== 'jup'
+    ) return;
+
+    state.processingActivity = activity;
+    render();
+  };
+
+  const timers = [
+    setTimeout(() => update(steps[1]), 4000),
+    setTimeout(() => update(steps[2]), 9000),
+    setTimeout(() => update(steps[3]), 14000),
+  ];
+
+  return () => timers.forEach(timer => clearTimeout(timer));
+}
 
 function selectedIdentity() {
   return state.identities.find((item) => item.identity_id === state.identityId) ?? null;
 }
 
-function pageHeading(title, description) {
-  return `<div class="page-heading"><div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p></div></div>`;
-}
-
 function operationPath() {
-  return state.identityId === 'tecnico-m365' ? '/demo/operacao/m365' : '/demo/operacao/cdm';
+  if (state.identityId === 'tecnico-m365') return '/demo/operacao/m365';
+  if (state.identityId === 'tecnico-geral') return '/demo/operacao/general';
+  return '/demo/operacao/cdm';
 }
 
 function renderRoute() {
@@ -84,43 +159,88 @@ function renderRoute() {
       messageError: state.messageError,
       visualState: state.composerFocused && !state.pendingAction ? 'listening' : null,
       draft: state.composerDraft,
+      commandMenuOpen: state.commandMenuOpen,
       animateFrom: renderedMessageCount,
       messages: state.messages,
       understood: state.understood,
       loading: state.pendingAction === 'message',
+      processingActivity: state.processingActivity,
     });
   }
 
   if (state.route === 'requests') {
-    return `${pageHeading('Acompanhar chamados', 'Acompanhe o andamento dos seus atendimentos.')}${renderRequestList(state.routeData.items ?? [], state.selectedRequestId)}`;
+    return renderRequestList(state.routeData.items ?? [], state.selectedRequestId);
   }
 
   if (state.route === 'approvals') {
-    const items = state.routeData.items ?? [];
+    const items = sortNewestFirst(state.routeData.items ?? []);
     const selected = state.routeData.selected ?? items.find((item) => item.request_id === state.selectedRequestId) ?? items[0] ?? null;
-    return `${pageHeading('Solicitações recebidas', 'Revise o contexto e dê continuidade ao atendimento.')}<div class="tracking-workspace"><section class="tracking-list" aria-label="Fila de solicitações"><header class="tracking-list-header"><h2>Fila de atendimento</h2><span>${items.length}</span></header>${renderApprovalQueue(items, selected?.request_id)}</section><section aria-label="Detalhe da pendência">${renderOperationDetail(selected, state)}</section></div>${renderHandoffs(state.routeData.handoffs ?? [])}`;
+    return `<h1 class="sr-only">Solicitações recebidas</h1><div class="tracking-workspace"><section class="tracking-list" aria-label="Fila de solicitações"><header class="tracking-list-header"><h2>Fila de atendimento</h2><span>${items.length}</span></header>${renderApprovalQueue(items, selected?.request_id)}</section><section aria-label="Detalhe da pendência">${renderOperationDetail(selected, state)}</section></div>${renderHandoffs(state.routeData.handoffs ?? [])}`;
   }
 
-  return '<section class="tracking-empty"><strong>Área não disponível nesta demonstração</strong><p>Use o menu de usuários para acessar uma fila de atendimento.</p></section>';
+  if (state.route === 'handoffs') {
+    const items = state.routeData.handoffs ?? [];
+    return `<h1 class="sr-only">Encaminhamentos</h1>${renderHandoffWorkspace(items, state.selectedHandoffId)}`;
+  }
+
+  return '<section class="tracking-empty"><strong>Área indisponível</strong><p>Escolha outro destino no menu principal.</p></section>';
+}
+
+function syncThinkingClock() {
+  clearInterval(thinkingTimer);
+  thinkingTimer = null;
+  if (state.pendingAction !== 'message' || !state.processingStartedAt) return;
+  const update = () => {
+    const seconds = Math.max(0, Math.floor((Date.now() - state.processingStartedAt) / 1000));
+    const node = app.querySelector('[data-thinking-seconds]');
+    if (!node) return;
+    node.textContent = String(seconds);
+    node.dataset.thinkingSeconds = String(seconds);
+  };
+  update();
+  thinkingTimer = setInterval(update, 1000);
 }
 
 function render() {
   finishPresentation();
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  const flipState = captureJupFlip(app, reducedMotion);
   const scroll = captureConversationScroll(app.querySelector('.conversation-thread'));
-  const focused = document.activeElement?.id === 'jup-message';
+  const activeElement = document.activeElement;
+  const focused = activeElement?.id === 'jup-message';
+  const selectionStart = focused ? activeElement.selectionStart : null;
+  const selectionEnd = focused ? activeElement.selectionEnd : null;
   app.innerHTML = `${renderAppHeader({
     activeRoute: state.route,
-    identities: state.identities, identity: selectedIdentity() ?? {}, pending: Boolean(state.pendingAction),
-    operational: ['approvals', 'prevention'].includes(state.route),
+    identities: state.identities, identity: selectedIdentity() ?? {}, pending: state.pendingAction || false,
+    operational: ['approvals', 'handoffs', 'prevention'].includes(state.route),
     operationPath: operationPath(),
+    identityError: state.identityConfigError,
   })}<main id="main-content" class="main-content main-content--${['solutions', 'solution'].includes(state.route) ? 'public' : 'workspace'}" tabindex="-1">${renderRoute()}</main>`;
   app.setAttribute('aria-busy', String(state.loading));
   bindInteractions();
+  syncThinkingClock();
+  animateJupFlip(app, flipState, reducedMotion);
   const hasWelcome = Boolean(app.querySelector('.chat-welcome:not(.chat-welcome--leaving)'));
-  finishPresentation = presentChat(app, { welcome: welcomeEntry.update(hasWelcome), followConversation: scroll?.atEnd ?? true, reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false });
+  const finishChat = presentChat(app, { welcome: welcomeEntry.update(hasWelcome), followConversation: scroll?.atEnd ?? true, reducedMotion });
+  const queueScope = `${state.identityId || 'anonymous'}:${state.route}`;
+  const queuePresentation = presentQueueChanges(app, renderedQueueIdsByScope.get(queueScope) || new Set(), reducedMotion);
+  if (queuePresentation.ids.size || state.routeData.loaded) renderedQueueIdsByScope.set(queueScope, queuePresentation.ids);
+  finishPresentation = () => { finishChat(); queuePresentation.finish(); };
   renderedMessageCount = state.messages.length;
-  restoreConversationScroll(app.querySelector('.conversation-thread'), app.querySelector('[data-action="scroll-bottom"]'), scroll, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
-  if (focused && !state.pendingAction) app.querySelector('#jup-message')?.focus?.({ preventScroll: true });
+  restoreConversationScroll(app.querySelector('.conversation-thread'), app.querySelector('[data-action="scroll-bottom"]'), scroll, reducedMotion);
+  if (focused && !state.pendingAction) {
+    const composer = app.querySelector('#jup-message');
+    composer?.focus?.({ preventScroll: true });
+    if (
+      composer &&
+      Number.isInteger(selectionStart) &&
+      Number.isInteger(selectionEnd) &&
+      typeof composer.setSelectionRange === 'function'
+    ) {
+      composer.setSelectionRange(selectionStart, selectionEnd);
+    }
+  }
 }
 
 function friendlyError(error) {
@@ -152,15 +272,20 @@ function friendlyError(error) {
 }
 
 function syncRouteIdentity() {
-  const desiredIdentityId = demoIdentityForPath(window.location.pathname);
+  const routeIdentityId = demoIdentityForPath(window.location.pathname);
+  const currentIdentity = selectedIdentity();
+  const desiredIdentityId = ['solutions', 'solution', 'jup', 'requests'].includes(state.route)
+    && currentIdentity?.role === 'REQUESTER'
+    ? currentIdentity.identity_id
+    : routeIdentityId;
   if (!state.identities.some((item) => item.identity_id === desiredIdentityId)) {
     throw new Error('Identidade de demonstração esperada não está disponível.');
   }
   if (state.identityId !== desiredIdentityId) {
     identityRevision += 1;
-    Object.assign(state, selectIdentity(state, desiredIdentityId), {
-      messages: [], understood: null, lastBackendStatus: null, composerFocused: false, composerDraft: '', messageError: null,
-    });
+    Object.assign(state, activateIdentity(state, state.identities.find(item => item.identity_id === desiredIdentityId)));
+    renderedMessageCount = 0;
+    welcomeEntry.reset();
   }
 }
 
@@ -195,10 +320,14 @@ async function loadRoute() {
     } else if (routeState.route === 'requests') {
       routeState.routeData = { items: await apiRequest('/api/requests', { identityId: routeState.identityId }), loaded: true };
     } else if (routeState.route === 'approvals') {
-      const items = await loadOperationalItems(routeState.identityId);
+      const items = sortNewestFirst(await loadOperationalItems(routeState.identityId));
       routeState.selectedRequestId = items[0]?.request_id ?? null;
       const handoffs = await apiRequest('/api/operations/handoffs', { identityId: routeState.identityId });
       routeState.routeData = { items, handoffs, selected: items[0] ?? null, loaded: true };
+    } else if (routeState.route === 'handoffs') {
+      const handoffs = await apiRequest('/api/operations/handoffs', { identityId: routeState.identityId });
+      routeState.selectedHandoffId = handoffs[0]?.handoff_id ?? null;
+      routeState.routeData = { handoffs, loaded: true };
     } else if (routeState.route === 'prevention') {
       const items = await apiRequest('/api/operations/prevention', { identityId: routeState.identityId });
       routeState.routeData = { items, loaded: true };
@@ -220,6 +349,7 @@ async function navigate(path) {
   if (window.location.pathname + window.location.search !== path) window.history.pushState({}, '', path);
   state.route = resolveRoute(window.location.pathname);
   await loadRoute();
+  window.scrollTo?.({ top: 0, left: 0, behavior: 'auto' });
   document.querySelector('#main-content')?.focus({ preventScroll: true });
 }
 
@@ -245,22 +375,27 @@ function settleSuccessAvatar(message) {
   }, 1200);
 }
 
-async function submitMessage(form) {
-  const field = form.querySelector('#jup-message');
-  const message = field?.value?.trim();
+async function submitMessage(form, messageOverride = null) {
+  const field = form?.querySelector?.('#jup-message');
+  const message = (messageOverride ?? field?.value)?.trim();
   if (!message || state.pendingAction) return;
 
   const revision = identityRevision;
   const identityId = state.identityId;
-  const presentationReady = new Promise(resolve => setTimeout(resolve, 2400));
-  state.messages = [...state.messages, { role: 'USER', text: message, sentAt: new Date().toISOString() }];
+  const nextMessages = [...state.messages, { role: 'USER', text: message, sentAt: new Date().toISOString() }];
+  const feedback = processingFeedbackSteps(nextMessages);
+  state.messages = nextMessages;
   state.composerDraft = '';
+  state.commandMenuOpen = false;
   state.lastBackendStatus = null;
   state.messageError = null;
   state.composerFocused = false;
   state.pendingAction = 'message';
+  state.processingStartedAt = Date.now();
+  state.processingActivity = feedback[0];
   state.transientError = null;
   render();
+  const stopProcessingFeedback = scheduleProcessingFeedback(feedback, revision);
 
   try {
     const result = await apiRequest('/api/jup/messages', {
@@ -282,7 +417,6 @@ async function submitMessage(form) {
     } else {
       state.understood = null;
     }
-    await presentationReady;
     if (revision !== identityRevision) return;
     await dismissThinking(app, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
     if (revision !== identityRevision) return;
@@ -293,17 +427,23 @@ async function submitMessage(form) {
         sentAt: new Date().toISOString(),
         status: result.status,
         context: state.understood,
-        knowledge_id: result.knowledge?.knowledge_id,
+        knowledge_id: result.knowledge_id ?? result.knowledge?.knowledge_id,
+        article: result.article,
         text: result.assistant_message,
         procedure_url: result.procedure_url,
         support_handoff: result.support_handoff,
+        request_summary: result.request_summary,
+        requestCta: result.presentation?.cta === 'REQUESTS' ? 'REQUESTS' : null,
       },
     ];
   } catch (error) {
     if (revision !== identityRevision) return;
     state.messageError = friendlyError(error).message;
   } finally {
+    stopProcessingFeedback();
     if (revision === identityRevision) {
+      state.processingActivity = null;
+      state.processingStartedAt = null;
       state.pendingAction = null;
       render();
       if (state.route === 'jup') {
@@ -434,7 +574,7 @@ async function newChat() {
     await apiRequest('/api/jup/conversation/reset', { method: 'POST', identityId: state.identityId });
     if (revision !== identityRevision) return;
     identityRevision += 1;
-    state = resetConversation(state);
+    state = clearRequesterChatState(resetConversation(state), state.identityId);
     renderedMessageCount = 0;
     welcomeEntry.reset();
     await navigate('/jup');
@@ -447,15 +587,63 @@ async function newChat() {
   }
 }
 
+async function configureDemoIdentity(form) {
+  if (state.pendingAction) return;
+  const formData = new FormData(form);
+  const body = Object.fromEntries(['name', 'email', 'job_title', 'area'].map(key => [key, formData.get(key)]));
+  state.pendingAction = 'identity';
+  state.identityConfigError = null;
+  render();
+  try {
+    const configured = await apiRequest('/api/session/identities', { method: 'POST', body });
+    identityRevision += 1;
+    state = activateIdentity({ ...state, identities: [...state.identities, configured] }, configured);
+    state.identityConfigError = null;
+    renderedMessageCount = 0;
+    welcomeEntry.reset();
+    await navigate('/jup');
+  } catch (error) {
+    state.pendingAction = null;
+    state.identityConfigError = friendlyError(error).message;
+    render();
+  }
+}
+
+function syncComposerPresentation() {
+  const welcome = app.querySelector('.chat-welcome:not(.chat-welcome--leaving)');
+  const listening = Boolean(state.composerDraft.trim());
+  app.querySelector('.composer-leading-icon')?.setAttribute('data-composing', String(listening));
+  if (welcome) {
+    welcome.setAttribute('data-listening', String(listening));
+    welcome.querySelector('[data-welcome-state="idle"]')?.setAttribute('aria-hidden', String(listening));
+    welcome.querySelector('[data-welcome-state="listening"]')?.setAttribute('aria-hidden', String(!listening));
+  }
+}
+
 function bindInteractions() {
   bindRouteLinks(app);
   app.querySelector('[data-action="new-chat"]')?.addEventListener('click', newChat);
+  app.querySelector('#demo-identity-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    void configureDemoIdentity(event.currentTarget);
+  });
+  app.querySelector('[data-identity-name]')?.addEventListener('input', event => {
+    const preview = app.querySelector('[data-email-preview]');
+    if (preview) preview.value = corporateEmailFromName(event.target.value);
+  });
   app.querySelectorAll('[data-persona]').forEach(button => {
     button.addEventListener('click', async () => {
       if (state.pendingAction) return;
       const identity = state.identities.find(item => item.identity_id === button.dataset.persona);
       const path = personaPath(identity);
-      if (path) await navigate(path);
+      if (!path) return;
+      if (identity.identity_id !== state.identityId) {
+        identityRevision += 1;
+        state = activateIdentity(state, identity);
+        renderedMessageCount = 0;
+        welcomeEntry.reset();
+      }
+      await navigate(path);
     });
   });
   app.querySelectorAll('[data-category]').forEach(button => {
@@ -473,7 +661,16 @@ function bindInteractions() {
     state.faqSearchQuery = event.target.value;
     faqSearch.input(state.faqSearchQuery, state.faqCategory);
   });
-  app.querySelector('#jup-message')?.addEventListener('input', event => { state.composerDraft = event.target.value; });
+  app.querySelector('#jup-message')?.addEventListener('input', event => {
+    const commandMenuWasOpen = state.commandMenuOpen;
+    state.composerDraft = event.target.value;
+    state.commandMenuOpen = /^\/\S*$/.test(state.composerDraft);
+    if (commandMenuWasOpen !== state.commandMenuOpen) {
+      render();
+      return;
+    }
+    syncComposerPresentation();
+  });
 
   app.querySelector('#jup-form')?.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -491,10 +688,30 @@ function bindInteractions() {
     });
   }
   app.querySelector('#jup-message')?.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown' && app.querySelector('[data-command-menu] [data-command]')) {
+      event.preventDefault();
+      app.querySelector('[data-command-menu] [data-command]')?.focus();
+      return;
+    }
+    if (event.key === 'Escape' && state.commandMenuOpen) {
+      state.commandMenuOpen = false;
+      render();
+      return;
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
     }
+  });
+  app.querySelector('[data-command="/solicitacoes"]')?.addEventListener('click', () =>
+    void submitMessage(null, '/solicitacoes'),
+  );
+  app.querySelector('[data-command="/solicitacoes"]')?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    state.commandMenuOpen = false;
+    render();
+    app.querySelector('#jup-message')?.focus({ preventScroll: true });
   });
 
   app.querySelectorAll('[data-request-select]').forEach(button => {
@@ -502,6 +719,12 @@ function bindInteractions() {
   });
   app.querySelectorAll('.queue-row[data-request-id]').forEach((button) => {
     button.addEventListener('click', () => void selectApproval(button.dataset.requestId));
+  });
+  app.querySelectorAll('[data-handoff-id]').forEach(button => {
+    button.addEventListener('click', () => {
+      state.selectedHandoffId = button.dataset.handoffId;
+      render();
+    });
   });
   app.querySelector('[data-action="approve"]')?.addEventListener('click', () =>
     void decide('approve'),

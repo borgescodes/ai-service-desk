@@ -223,6 +223,24 @@ def test_backend_statuses_map_to_authoritative_dispositions():
             },
             ConversationDisposition.ACKNOWLEDGE_RESOLUTION,
         ),
+        (
+            {
+                "status": "REQUESTS_LISTED",
+                "request_id": None,
+                "assistant_message": "Você tem 1 solicitação para acompanhar.",
+                "request_summary": {
+                    "count": 1,
+                    "items": [
+                        {
+                            "request_id": "REQ-123456",
+                            "system": "CDM",
+                            "state_label": "Aguardando aprovação",
+                        }
+                    ],
+                },
+            },
+            ConversationDisposition.REQUEST_STATUS,
+        ),
     )
 
     for result, expected in cases:
@@ -369,6 +387,74 @@ def test_approved_m365_knowledge_renders_official_procedure_url():
     assert rendered.count(answer) == 1
     assert rendered.count(procedure_url) == 1
     assert "backend" not in grounding.response_goal.casefold()
+
+
+def test_m365_article_metadata_is_left_to_presentation_and_rejects_invented_follow_up():
+    answer = "PASSO OFICIAL"
+    grounding = ground_response(
+        {
+            "status": "KNOWLEDGE_FOUND",
+            "request_id": None,
+            "answer": answer,
+            "knowledge_id": "KB-SYN-M365-PASSWORD-001",
+            "procedure_url": "https://mysignins.microsoft.com/security-info/password/change",
+            "article": {
+                "knowledge_id": "KB-SYN-M365-PASSWORD-001",
+                "title": "Redefinir sua senha do Microsoft 365",
+                "provenance": {"status": "APPROVED"},
+            },
+        },
+        base_context(),
+        delta_for(),
+    )
+
+    def chat(payload):
+        return {
+            "message": {
+                "content": json.dumps(
+                    {
+                        "intro": "O técnico foi notificado.",
+                        "outro": "Você receberá um retorno.",
+                    }
+                )
+            },
+            "done_reason": "stop",
+        }
+
+    rendered = generate_natural_response("Minha senha está errada", base_context(), grounding, chat)
+
+    assert rendered == grounding.fallback_message
+    assert "Redefinir sua senha do Microsoft 365" not in rendered
+    assert grounding.allowed_wrappers == ("",)
+    assert "notificado" not in rendered.casefold()
+    assert "receberá" not in rendered.casefold()
+
+
+def test_cdm_offer_uses_direct_user_facing_action_without_duplicate_article_copy():
+    grounding = ground_response(
+        {
+            "status": "KNOWLEDGE_FOUND",
+            "system": "CDM",
+            "request_id": None,
+            "answer": (
+                "O acesso de solicitante ao CDM precisa de aprovação humana antes da liberação."
+            ),
+            "knowledge_id": "KB-SYN-CDM-ACCESS-001",
+            "article": {
+                "knowledge_id": "KB-SYN-FAQ-CDM-REQUEST-001",
+                "title": "Como solicitar acesso ao CDM",
+                "provenance": {"status": "APPROVED"},
+            },
+            "offer_action": "CDM_ACCESS_REQUEST",
+        },
+        base_context(),
+        delta_for(),
+    )
+
+    assert "Você pode solicitar por aqui" in grounding.fallback_message
+    assert "governança do CDM" in grounding.fallback_message
+    assert "Na Central de Suporte" not in grounding.fallback_message
+    assert grounding.allowed_wrappers == ("",)
 
 
 def test_writer_rejects_invented_handoff_capabilities():

@@ -4,10 +4,11 @@ import { renderJupWorkspace } from '../src/components.mjs';
 import { resetConversation } from '../src/state.mjs';
 
 test('empty chat welcomes inside the conversation without a synthetic message or fixed hero', () => {
-  const html = renderJupWorkspace();
+  const html = renderJupWorkspace({ identity: { name: 'Ana da Silva' } });
   assert.match(html, /class="chat-welcome"/);
-  assert.match(html, /Olá, eu sou o <strong>Jup/);
-  assert.match(html, /Seu assistente virtual, sempre pronto para ajudar/);
+  assert.match(html, /welcome-line--greeting[^>]*>Olá, <strong>Ana!<\/strong>/);
+  assert.match(html, /welcome-line--question[^>]*>Como posso ajudar\?/);
+  assert.doesNotMatch(html, /Seu assistente virtual/);
   assert.doesNotMatch(html, /conversation-header|conversation-message--jup/);
   assert.match(html, /<textarea[^>]*(?<!disabled)>/);
 });
@@ -15,20 +16,21 @@ test('empty chat welcomes inside the conversation without a synthetic message or
 test('first submission animates the welcome out before the first incoming messages', () => {
   const html = renderJupWorkspace({ messages: [{ role: 'USER', text: 'acesso CDM' }], loading: true, animateFrom: 0 });
   assert.match(html, /chat-welcome--leaving/);
-  assert.match(html, /aria-hidden="true"[^>]*>[^]*?Olá, eu sou/);
-  assert.match(html, /Buscando contexto CDM/);
+  assert.match(html, /aria-hidden="true"[^>]*>[^]*?Como posso ajudar/);
+  assert.match(html, /Entendendo sua solicitação/);
 });
 
-test('ongoing chat does not restore welcome and short replies retain known context', () => {
-  const html = renderJupWorkspace({ messages: [{ role: 'USER', text: 'Office não abre' }, { role: 'JUP', text: 'Qual erro?' }, { role: 'USER', text: 'senha' }], loading: true });
+test('ongoing chat does not restore welcome while processing starts with user-oriented feedback', () => {
+  const html = renderJupWorkspace({ identity: { name: 'Ana da Silva' }, messages: [{ role: 'USER', text: 'Office não abre' }, { role: 'JUP', text: 'Qual erro?' }, { role: 'USER', text: 'senha' }], loading: true });
   assert.doesNotMatch(html, /chat-welcome/);
-  assert.match(html, /Buscando contexto 365/);
+  assert.doesNotMatch(html, /Olá, <strong>Ana<\/strong>/);
+  assert.match(html, /Entendendo sua solicitação/);
 });
 
-test('processing uses a neutral label for unknown or ambiguous systems', () => {
+test('processing starts with a neutral user-oriented label', () => {
   for (const text of ['preciso de ajuda', 'CDM e Microsoft 365']) {
     const html = renderJupWorkspace({ messages: [{ role: 'USER', text }], loading: true });
-    assert.match(html, /processing-activity">Buscando contexto<\/p>/);
+    assert.match(html, /processing-activity">Entendendo sua solicitação<\/p>/);
   }
 });
 

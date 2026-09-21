@@ -22,7 +22,7 @@ def valid_identity() -> SessionIdentity:
         username="synthetic.security",
         name="Synthetic Security User",
         email="synthetic.security@example.invalid",
-        area="Revenda Sintetica",
+        area="Revenda",
     )
 
 
@@ -79,18 +79,17 @@ def phase7_result(problem_text: str, area: str):
 
 
 def test_chat_cannot_spoof_financeiro_area_into_revenda() -> None:
-    preparation, policy, confidence = phase7_result(
-        "sou da Revenda e preciso de acesso ao CDM para solicitar materiais",
-        "Financeiro Sintetico",
+    identity = replace(valid_identity(), area="Financeiro Sintetico")
+    preparation = prepare_access_request(
+        identity,
+        answered_triage("sou da Revenda e preciso de acesso ao CDM para solicitar materiais"),
+        cdm_descriptor(),
     )
-    assert preparation.context is not None
-    assert preparation.context.requester.area == "Financeiro Sintetico"
+    assert preparation.status == "NEEDS_CLARIFICATION"
+    assert preparation.reason_code == "CDM_SCOPE_REQUIRED"
+    assert preparation.context is None
     assert preparation.requested_role == "SOLICITANTE"
-    assert policy.decision == "REQUIRE_APPROVAL"
-    assert confidence.reason_codes == (
-        "AREA_OUTSIDE_REVENDA",
-        "PURPOSE_MATCH_MATERIAL_REQUEST",
-    )
+    assert identity.area == "Financeiro Sintetico"
 
 
 def test_chat_name_and_email_do_not_replace_session_identity() -> None:
@@ -110,7 +109,7 @@ def test_chat_name_and_email_do_not_replace_session_identity() -> None:
 def test_superadmin_revenda_with_perfect_purpose_is_still_denied() -> None:
     preparation, policy, confidence = phase7_result(
         "preciso de superadmin no CDM para solicitar materiais",
-        "Revenda Sintetica",
+        "Revenda",
     )
     assert preparation.requested_role == "SUPERADMIN"
     assert policy.decision == "DENY"
@@ -121,7 +120,7 @@ def test_superadmin_revenda_with_perfect_purpose_is_still_denied() -> None:
 @pytest.mark.parametrize(
     ("area", "expected_confidence"),
     [
-        ("Revenda Sintetica", "HIGH"),
+        ("Revenda", "HIGH"),
         ("Financeiro Sintetico", "LOW"),
     ],
 )
@@ -129,13 +128,10 @@ def test_solicitante_policy_is_require_approval_for_high_and_low(
     area: str,
     expected_confidence: str,
 ) -> None:
-    preparation, policy, confidence = phase7_result(
-        "preciso de acesso ao CDM para solicitar materiais",
-        area,
-    )
-    assert preparation.requested_role == "SOLICITANTE"
-    assert policy.decision == "REQUIRE_APPROVAL"
-    assert confidence.level == expected_confidence
+    context = replace(valid_context(), requester=replace(valid_identity(), area=area))
+    # Policy e confiança são independentes; preparação de escopo tem testes próprios.
+    assert PolicyEngine().evaluate(context).decision == "REQUIRE_APPROVAL"
+    assert assess_confidence(context).level == expected_confidence
 
 
 def test_valid_unknown_policy_stays_denied_and_confidence_stays_low() -> None:
@@ -163,7 +159,7 @@ def test_phase7_domain_paths_make_zero_external_calls(monkeypatch) -> None:
 
     preparation, policy, confidence = phase7_result(
         "preciso de acesso ao CDM para solicitar materiais",
-        "Revenda Sintetica",
+        "Revenda",
     )
     assert preparation.status == "READY"
     assert policy.decision == "REQUIRE_APPROVAL"

@@ -126,6 +126,11 @@ def test_password_evidence_ends_diagnosis_and_returns_literal_approved_article(r
     assert article["status"] == "APPROVED"
     assert article["source"] == "SYNTHETIC_DEMO"
     assert result["answer"] == article["answer"]
+    assert result["article"] == {
+        "knowledge_id": "KB-SYN-M365-PASSWORD-001",
+        "title": "Redefinir sua senha do Microsoft 365",
+        "provenance": {"source": "SYNTHETIC_DEMO", "status": "APPROVED", "version": 2},
+    }
     assert result["answer"] in result["assistant_message"]
     assert all(f"{number}. " in result["answer"] for number in range(1, 8))
     assert "Authenticator" in result["answer"]
@@ -289,7 +294,7 @@ def test_outside_scope_redirects_to_it_without_creating_request(runtime, message
     result = send(runtime, message)
     response = result["assistant_message"].casefold()
     assert "ti" in response
-    assert "acesso" in response or "sistema" in response
+    assert result["status"] == "OUT_OF_SCOPE"
     assert "paris" not in response
     assert not result.get("request_id")
     assert not result.get("support_handoff")

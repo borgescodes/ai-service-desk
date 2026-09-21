@@ -90,6 +90,98 @@ def test_api_requires_controlled_demo_identity() -> None:
         runtime.close()
 
 
+def test_demo_api_configures_a_backend_owned_requester_identity() -> None:
+    runtime = DemoRuntime.create()
+    client = _client(runtime)
+    try:
+        response = client.post(
+            "/api/session/identities",
+            json={
+                "name": "Carlos Souza",
+                "email": "carlos.souza@juparana.com.br",
+                "job_title": "Analista Financeiro",
+                "area": "Financeiro",
+            },
+        )
+
+        assert response.status_code == 201
+        configured = response.json()
+        assert configured["identity_id"].startswith("demo-requester-")
+        assert configured["name"] == "Carlos Souza"
+        assert configured["email"] == "carlos.souza@juparana.com.br"
+        assert configured["job_title"] == "Analista Financeiro"
+        assert configured["area"] == "Financeiro"
+        assert configured["role"] == "REQUESTER"
+        assert configured in client.get("/api/session/identities").json()
+
+        requester = runtime.identity_provider.requester_identity(configured["identity_id"])
+        assert requester.name == "Carlos Souza"
+        assert requester.job_title == "Analista Financeiro"
+        assert requester.area == "Financeiro"
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "name": "",
+            "email": "ana.silva@juparana.com.br",
+            "job_title": "Analista UBS",
+            "area": "UBS",
+        },
+        {
+            "name": "Ana da Silva",
+            "email": "ana.silva@example.com",
+            "job_title": "Analista UBS",
+            "area": "UBS",
+        },
+        {
+            "name": "Ana da Silva",
+            "email": "ana.silva@juparana.com.br",
+            "job_title": "",
+            "area": "UBS",
+        },
+        {
+            "name": "Ana da Silva",
+            "email": "ana.silva@juparana.com.br",
+            "job_title": "Analista UBS",
+            "area": "",
+        },
+    ],
+)
+def test_demo_api_rejects_invalid_requester_identity(payload: dict[str, str]) -> None:
+    runtime = DemoRuntime.create()
+    client = _client(runtime)
+    try:
+        response = client.post("/api/session/identities", json=payload)
+
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "INVALID_DEMO_IDENTITY"
+    finally:
+        runtime.close()
+
+
+def test_identity_configuration_is_unavailable_outside_demo_mode() -> None:
+    runtime = DemoRuntime.create()
+    client = _client(runtime, demo_mode=False)
+    try:
+        response = client.post(
+            "/api/session/identities",
+            json={
+                "name": "Ana da Silva",
+                "email": "ana.silva@juparana.com.br",
+                "job_title": "Analista UBS",
+                "area": "UBS",
+            },
+        )
+
+        assert response.status_code == 405
+    finally:
+        runtime.close()
+
+
 def test_api_rejects_requester_approval_without_external_execution() -> None:
     runtime = DemoRuntime.create()
     client = _client(runtime)
@@ -286,8 +378,11 @@ def test_static_build_serves_assets_with_safe_mime_and_csp(tmp_path) -> None:
         root = client.get("/")
         assert css.status_code == 200
         assert css.headers["content-type"].startswith("text/css")
+        assert css.headers["cache-control"] == "no-store"
         assert js.status_code == 200
         assert "javascript" in js.headers["content-type"]
+        assert js.headers["cache-control"] == "no-store"
+        assert root.headers["cache-control"] == "no-store"
         csp = root.headers["content-security-policy"]
         assert "default-src 'self'" in csp
         assert "connect-src 'self'" in csp

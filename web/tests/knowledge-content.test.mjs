@@ -4,6 +4,16 @@ import { renderApprovedKnowledgeBody } from '../src/knowledge_content.mjs';
 
 const SAFE_URL = 'https://mysignins.microsoft.com/security-info/password/change';
 
+test('knowledge body stays literal while contextual source navigation is rendered by the chat', () => {
+  const article = { knowledge_id: 'KB-SYN-M365-PASSWORD-001', title: 'Redefinir sua senha do Microsoft 365', provenance: { status: 'APPROVED' } };
+  const html = renderApprovedKnowledgeBody({ text: 'Orientação aprovada.', article });
+  assert.match(html, /Orientação aprovada/);
+  assert.doesNotMatch(html, /href=|Redefinir sua senha/);
+  for (const invalid of [{ ...article, provenance: { status: 'DRAFT' } }, { ...article, knowledge_id: 'https://evil.example' }]) {
+    assert.doesNotMatch(renderApprovedKnowledgeBody({ text: 'Orientação', article: invalid }), /<a /);
+  }
+});
+
 test('approved numbered procedure keeps semantic ordered list and exact safe anchor', () => {
   const html = renderApprovedKnowledgeBody({
     text: 'Procedimento\n\n1. Acesse a página.\n2. Confirme sua identidade.\n\nDepois, teste novamente.',

@@ -12,7 +12,7 @@ export function visualStateFromUi({ pending = false, backendStatus = null, focus
   if (Object.hasOwn(STATUS_TO_VISUAL, backendStatus)) return STATUS_TO_VISUAL[backendStatus];
   return focused ? 'listening' : 'idle';
 }
-export function renderJupVisual({ state = 'idle', compact = false } = {}) {
+export function renderJupVisual({ state = 'idle', compact = false, flipId = null } = {}) {
   const safeState = Object.hasOwn(JUP_ASSETS, state) ? state : 'idle';
-  return `<div class="jup-avatar${compact ? ' jup-avatar--compact' : ''}" data-state="${safeState}" role="img" aria-label="${LABELS[safeState]}"><div class="jup-avatar__body"><div class="jup-avatar__surface"></div><svg class="jup-face" viewBox="0 0 1600 1600" aria-hidden="true"><g class="jup-face__ink">${JUP_ASSETS[safeState]}</g></svg><img class="jup-avatar__shell" src="${JUP_SHELL}" alt="" width="3919" height="3919" draggable="false"></div></div>`;
+  return `<div class="jup-avatar${compact ? ' jup-avatar--compact' : ''}" data-state="${safeState}"${flipId ? ` data-flip-id="${flipId}"` : ''} role="img" aria-label="${LABELS[safeState]}"><div class="jup-avatar__body"><div class="jup-avatar__surface"></div><svg class="jup-face" viewBox="0 0 1600 1600" aria-hidden="true"><g class="jup-face__ink">${JUP_ASSETS[safeState]}</g></svg><img class="jup-avatar__shell" src="${JUP_SHELL}" alt="" width="3919" height="3919" draggable="false"></div></div>`;
 }

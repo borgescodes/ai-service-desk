@@ -3,6 +3,8 @@ from typing import Literal
 
 import requests
 
+from ai_service_desk.engine.cdm_scope import LOCAL_CDM_SCOPE_CATALOG
+
 
 @dataclass(frozen=True)
 class AccessLookup:
@@ -11,6 +13,7 @@ class AccessLookup:
     role: str | None
     status: str | None
     access_id: str | None
+    business_scopes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -78,6 +81,7 @@ class CDMAdapter:
         *,
         timeout_seconds: float = 3.0,
         session: requests.Session | None = None,
+        scope_catalog=LOCAL_CDM_SCOPE_CATALOG,
     ):
         if not isinstance(base_url, str) or not base_url.strip():
             raise ValueError("base_url deve ser texto nao vazio.")
@@ -85,6 +89,7 @@ class CDMAdapter:
             raise ValueError("timeout_seconds invalido.")
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds deve ser positivo.")
+        self.scope_catalog = scope_catalog
         self.base_url = base_url.rstrip("/")
         self.service_token = validate_service_token(service_token)
         self.timeout_seconds = float(timeout_seconds)
@@ -109,6 +114,7 @@ class CDMAdapter:
         allowed_shapes = (
             {"exists", "email"},
             {"exists", "email", "role", "status", "access_id"},
+            {"exists", "email", "role", "status", "access_id", "business_scopes"},
         )
         if set(body) not in allowed_shapes:
             raise CDMProtocolError("Schema inesperado na consulta CDM.")
@@ -125,7 +131,13 @@ class CDMAdapter:
         access_id = _text(body.get("access_id"))
         if role != "SOLICITANTE" or status != "ACTIVE":
             raise CDMProtocolError("Acesso CDM retornou role ou status fora do contrato.")
-        return AccessLookup(True, email_value, role, status, access_id)
+        scopes = body.get("business_scopes", [])
+        if not isinstance(scopes, list) or any(
+            not isinstance(scope, str) or scope not in {s.key for s in self.scope_catalog.scopes}
+            for scope in scopes
+        ):
+            raise CDMProtocolError("Escopos CDM inválidos.")
+        return AccessLookup(True, email_value, role, status, access_id, tuple(scopes))
 
     def create_access(
         self,
@@ -133,6 +145,8 @@ class CDMAdapter:
         username: str,
         email: str,
         role: str,
+        *,
+        business_scopes: tuple[str, ...] = (),
     ) -> AccessCreationResult:
         try:
             response = self.session.post(
@@ -142,6 +156,7 @@ class CDMAdapter:
                     "username": username,
                     "email": email,
                     "role": role,
+                    **({"business_scopes": list(business_scopes)} if business_scopes else {}),
                 },
                 headers={"Authorization": f"Bearer {self.service_token}"},
                 timeout=self.timeout_seconds,

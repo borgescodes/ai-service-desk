@@ -21,3 +21,51 @@ test('restoring a reading position exposes bottom action and respects reduced mo
   module.restoreConversationScroll(thread, button, { top: 100, atEnd: true }, false);
   assert.equal(thread.scrollTop, 1200);
 });
+
+test('progressive delivery follows growth until the reader manually scrolls upward', async () => {
+  const { createProgressiveScrollFollower } = await import('../src/conversation.mjs');
+  assert.equal(typeof createProgressiveScrollFollower, 'function');
+  const events = {};
+  const thread = {
+    scrollTop: 600,
+    scrollHeight: 1000,
+    clientHeight: 400,
+    addEventListener(name, fn) { events[name] = fn; },
+    removeEventListener() {},
+  };
+  const follower = createProgressiveScrollFollower(thread, true);
+
+  thread.scrollHeight = 1120;
+  follower.update();
+  assert.equal(thread.scrollTop, 1120);
+
+  thread.scrollTop = 520;
+  events.scroll();
+  thread.scrollHeight = 1280;
+  follower.update();
+  assert.equal(thread.scrollTop, 520);
+
+  thread.scrollTop = 880;
+  events.scroll();
+  thread.scrollHeight = 1360;
+  follower.update();
+  assert.equal(thread.scrollTop, 1360);
+  follower.stop();
+});
+
+test('upward wheel intent interrupts progressive following before the next animation frame', async () => {
+  const { createProgressiveScrollFollower } = await import('../src/conversation.mjs');
+  const events = {};
+  const thread = {
+    scrollTop: 600,
+    scrollHeight: 1000,
+    clientHeight: 400,
+    addEventListener(name, fn) { events[name] = fn; },
+    removeEventListener() {},
+  };
+  const follower = createProgressiveScrollFollower(thread, true);
+  events.wheel({ deltaY: -12 });
+  thread.scrollHeight = 1200;
+  follower.update();
+  assert.equal(thread.scrollTop, 600);
+});

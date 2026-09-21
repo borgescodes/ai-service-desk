@@ -19,7 +19,8 @@ test('escapeHtml neutralizes active markup and quotes', () => {
 
 test('HIGH confidence uses confidence semantics instead of approval or success semantics', () => {
   const html = renderConfidence({ level: 'HIGH', label: 'Alta', percent: 92, tone: 'confidence' });
-  assert.match(html, /Confiança/);
+  assert.match(html, />Alta</);
+  assert.match(html, /confidence-meter__bars/);
   assert.match(html, /92%/);
   assert.doesNotMatch(html, /success|aprovad/i);
 });
@@ -63,18 +64,19 @@ import {
   renderRequestList,
 } from '../src/components.mjs';
 
-test('header shows public product navigation without identity options', () => {
+test('header shows public navigation and the bounded demo identity tool', () => {
+  const requester = { identity_id: 'pedro-miranda', name: 'Pedro Miranda', email: 'pedro.miranda@juparana.com.br', job_title: 'Analista', area: 'Revenda - Matriz', role: 'REQUESTER', can_operate: false };
   const html = renderAppHeader({
     activeRoute: 'jup',
-    selectedIdentityId: 'pedro-miranda',
-    identities: [
-      { identity_id: 'pedro-miranda', name: 'Pedro Miranda', area: 'Revenda - Matriz', role: 'REQUESTER', can_operate: false },
-    ],
+    identity: requester,
+    identities: [requester],
   });
   assert.match(html, /Jup Resolve/);
   assert.match(html, /Falar com o Jup/);
   assert.doesNotMatch(html, /<select/);
-  assert.doesNotMatch(html, /email|username|capabilit/i);
+  assert.match(html, /id="demo-identity-form"/);
+  assert.match(html, /data-email-preview/);
+  assert.doesNotMatch(html, /username|capabilit/i);
 });
 
 test('Jup workspace renders conversation and compact backend state', () => {
@@ -138,7 +140,7 @@ test('operation detail exposes server evidence and action state without deciding
   );
   assert.match(html, /Aprovar solicitação/);
   assert.match(html, /Rejeitar/);
-  assert.match(html, /Técnico CDM/);
+  assert.match(html, /Contexto essencial/);
   assert.match(html, /Aprovação humana necessária/);
 });
 

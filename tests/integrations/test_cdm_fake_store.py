@@ -73,3 +73,12 @@ def test_two_threads_same_email_create_at_most_once():
     assert sorted(result.outcome for result in results) == ["ALREADY_EXISTS", "CREATED"]
     assert {result.access.access_id for result in results} == {"100001"}
     assert store.access_count == 1
+
+
+def test_scope_is_part_of_fake_store_idempotency():
+    store = CDMFakeStore()
+    first = create(store, business_scopes=("ubs",))
+    assert first.access.business_scopes == ("ubs",)
+    assert create(store, business_scopes=("ubs",)).outcome == "REPLAYED"
+    with pytest.raises(CDMStoreConflict):
+        create(store, business_scopes=("revenda",))

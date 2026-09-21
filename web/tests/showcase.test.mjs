@@ -39,7 +39,7 @@ test('conversation owns contextual avatars and thinking message with three dots'
   assert.match(html, /conversation-message--jup[^]*?jup-avatar/);
   assert.doesNotMatch(html, /conversation-visual|jup-welcome/);
   assert.match(html, /conversation-message--thinking[^]*?data-state="thinking"/);
-  assert.match(html, /thinking-dots[^]*?<span[^>]*>\.<\/span><span[^>]*>\.<\/span><span[^>]*>\.<\/span>/);
+  assert.match(html, /thinking-dots[^]*?<span><\/span><span><\/span><span><\/span>/);
   assert.match(html, /data-action="scroll-bottom"/);
   assert.match(html, /<textarea[^>]*disabled/);
 });
@@ -105,26 +105,32 @@ test('FAQ accordion is independent, animated and catalog rows do not expose demo
 test('Jup contextual sidebar keeps only new conversation and request tracking', () => {
   const html = renderAppHeader({ activeRoute: 'jup', identity: { name: 'Pedro Miranda' } });
   assert.match(html, /Nova conversa/);
-  assert.match(html, /Acompanhar chamado/);
+  assert.match(html, /Minhas solicitações/);
   assert.doesNotMatch(html, /Artigos de ajuda/);
 });
 
-test('welcome tagline is typewriter-ready and draft content switches the welcome avatar to listening', () => {
+test('welcome has authored reveal lines and draft content switches the welcome avatar to listening', () => {
   const idle = renderJupWorkspace({ draft: '' });
   const listening = renderJupWorkspace({ draft: 'oi' });
-  assert.match(idle, /class="chat-welcome-tagline"/);
+  assert.match(idle, /welcome-line--greeting/);
+  assert.match(idle, /welcome-line--question/);
+  assert.doesNotMatch(idle, /chat-welcome-tagline/);
   assert.match(idle, /data-listening="false"/);
   assert.match(idle, /chat-welcome[^]*?data-state="idle"/);
   assert.match(listening, /data-listening="true"/);
   assert.match(listening, /chat-welcome[^]*?data-state="listening"/);
 });
 
-test('desktop shell allows FAQ document scrolling and gives conversation a branded minimal scrollbar', () => {
+test('desktop shell uses one branded minimal scrollbar across document and overflow surfaces', () => {
   const baseCss = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
   const responsiveCss = readFileSync(new URL('../src/desktop-responsive.css', import.meta.url), 'utf8');
   const css = `${baseCss}\n${responsiveCss}`;
   assert.match(css, /scrollbar-gutter:\s*stable/);
   assert.doesNotMatch(css, /body:has\(\.solutions-home\)[^}]*overflow:\s*hidden/);
-  assert.match(css, /\.conversation-thread[^}]*scrollbar-color:/);
-  assert.match(css, /\.chat-welcome-tagline/);
+  assert.match(css, /\*\s*\{[^}]*scrollbar-width:\s*thin[^}]*scrollbar-color:/);
+  assert.match(css, /\*::\-webkit-scrollbar\s*\{/);
+  assert.match(css, /\*::\-webkit-scrollbar-thumb\s*\{/);
+  assert.match(css, /\.jup-surface\s*\{[^}]*height:\s*calc\(100dvh - var\(--header-height\)\)[^}]*min-height:\s*0/);
+  assert.match(css, /\.jup-workspace-body,\s*\.conversation-stage,\s*\.jup-conversation\s*\{[^}]*min-height:\s*0/);
+  assert.match(css, /\.welcome-line/);
 });

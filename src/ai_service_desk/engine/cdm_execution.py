@@ -21,13 +21,21 @@ class CDMActionExecutor:
             or context.intent != CDM_ACCESS_INTENT
             or context.capability != CDM_ACCESS_CAPABILITY
             or context.requested_role != "SOLICITANTE"
+            or (context.scope_mismatch and not context.scope_confirmed)
         ):
             return ActionExecutionResult(False, "CDM_EXECUTION_CONTEXT_INVALID")
 
         try:
             lookup = self.adapter.get_access(context.requester.email)
             if lookup.exists:
-                if lookup.role == "SOLICITANTE" and lookup.status == "ACTIVE":
+                if (
+                    lookup.role == "SOLICITANTE"
+                    and lookup.status == "ACTIVE"
+                    and (
+                        context.business_scope is None
+                        or context.business_scope in lookup.business_scopes
+                    )
+                ):
                     return ActionExecutionResult(True, "CDM_ACCESS_ALREADY_EXISTS")
                 return ActionExecutionResult(False, "CDM_EXISTING_ACCESS_CONFLICT")
 
@@ -36,7 +44,19 @@ class CDMActionExecutor:
                 context.requester.username,
                 context.requester.email,
                 context.requested_role,
+                **(
+                    {"business_scopes": (context.business_scope,)} if context.business_scope else {}
+                ),
             )
+            if created.outcome == "ALREADY_EXISTS" and context.business_scope:
+                lookup = self.adapter.get_access(context.requester.email)
+                if (
+                    not lookup.exists
+                    or lookup.role != "SOLICITANTE"
+                    or lookup.status != "ACTIVE"
+                    or context.business_scope not in lookup.business_scopes
+                ):
+                    return ActionExecutionResult(False, "CDM_EXISTING_ACCESS_CONFLICT")
         except CDMAdapterError as exc:
             return ActionExecutionResult(False, exc.reason_code)
 

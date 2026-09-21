@@ -1,5 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
+
+from ai_service_desk.web.conversation import scope_redirect_fallback
 
 
 class ConversationDisposition(StrEnum):
@@ -11,6 +13,7 @@ class ConversationDisposition(StrEnum):
     WAIT_FOR_APPROVAL = "WAIT_FOR_APPROVAL"
     HANDOFF = "HANDOFF"
     ACKNOWLEDGE_RESOLUTION = "ACKNOWLEDGE_RESOLUTION"
+    REQUEST_STATUS = "REQUEST_STATUS"
     OUT_OF_SCOPE = "OUT_OF_SCOPE"
 
 
@@ -31,6 +34,8 @@ class ResponseGrounding:
     required_information: tuple[str, ...]
     fallback_message: str
     allowed_operational_values: frozenset[str]
+    allowed_wrappers: tuple[str, ...] | None = None
+    response_options: tuple[str, ...] = ()
 
 
 def _consolidated_facts(context) -> tuple[str, ...]:
@@ -44,6 +49,55 @@ def _consolidated_facts(context) -> tuple[str, ...]:
 
 
 def ground_response(result, context, delta) -> ResponseGrounding:
+    grounding = _ground_response(result, context, delta)
+    if result.get("general_triage"):
+        options = tuple(result["general_triage"]["response_options"])
+        return replace(
+            grounding,
+            facts=(),
+            response_goal="Use somente a pergunta ou o encaminhamento confirmado, com o relato.",
+            fallback_message=options[0],
+            response_options=options,
+            forbidden_claims=(
+                *grounding.forbidden_claims,
+                "Não acrescente procedimentos, causas, diagnóstico, fatos técnicos ou perguntas.",
+                "Não prometa contato, notificação, prazo, resolução ou acompanhamento.",
+            ),
+        )
+    article = result.get("article") or {}
+    article_is_approved = article.get("provenance", {}).get("status") == "APPROVED"
+    if result.get("system") != "CDM" and not article_is_approved:
+        return grounding
+    # The writer may connect confirmed content, never author operational facts.
+    content = grounding.protected_content or (
+        ProtectedContent("BACKEND_RESULT", grounding.fallback_message),
+    )
+    if result.get("offer_action") == "CDM_ACCESS_REQUEST":
+        content = (
+            *content,
+            ProtectedContent(
+                "ACTION_OFFER",
+                "Você pode solicitar por aqui: eu registro a solicitação para análise da governança do CDM.",
+            ),
+        )
+    return replace(
+        grounding,
+        protected_content=content,
+        fallback_message="\n\n".join(item.content for item in content),
+        response_goal=(
+            "Conecte brevemente o conteúdo confirmado usando somente as expressões permitidas. "
+            "Não repita nem complemente o conteúdo protegido."
+        ),
+        allowed_wrappers=("",),
+        forbidden_claims=(
+            *grounding.forbidden_claims,
+            "Não acrescente notificações, acompanhamento, contato futuro, técnico ou SLA.",
+            "Não invente status, aprovação, criação, execução ou procedimentos.",
+        ),
+    )
+
+
+def _ground_response(result, context, delta) -> ResponseGrounding:
     status = result.get("status")
     facts = list(_consolidated_facts(context))
     protected_content = ()
@@ -64,6 +118,39 @@ def ground_response(result, context, delta) -> ResponseGrounding:
         "Nao afirme execucao sem confirmacao operacional.",
         "Nao afirme que acesso foi liberado sem confirmacao operacional.",
     )
+
+    if status == "REQUESTS_LISTED":
+        summary = result.get("request_summary") or {}
+        items = summary.get("items") if isinstance(summary, dict) else None
+        if not isinstance(items, list):
+            raise ValueError("REQUESTS_LISTED requer resumo autoritativo.")
+        facts.extend(
+            f"solicitação confirmada: {item.get('request_id')} · {item.get('system')} · "
+            f"{item.get('state_label')}"
+            for item in items
+            if isinstance(item, dict)
+        )
+        fallback = result.get("assistant_message")
+        if not isinstance(fallback, str) or not fallback.strip():
+            raise ValueError("REQUESTS_LISTED requer mensagem factual.")
+        return ResponseGrounding(
+            disposition=ConversationDisposition.REQUEST_STATUS,
+            response_goal="Apresente somente o resumo autoritativo já fornecido.",
+            verbosity="concise",
+            facts=tuple(facts),
+            protected_content=(ProtectedContent("REQUEST_SUMMARY", fallback.strip()),),
+            forbidden_claims=forbidden_claims,
+            required_information=(),
+            fallback_message=fallback.strip(),
+            allowed_operational_values=frozenset(
+                str(value)
+                for item in items
+                if isinstance(item, dict)
+                for value in (item.get("request_id"), item.get("system"), item.get("state_label"))
+                if value is not None and str(value).strip()
+            ),
+            allowed_wrappers=("",),
+        )
 
     if status == "SOCIAL":
         return ResponseGrounding(
@@ -278,16 +365,17 @@ def ground_response(result, context, delta) -> ResponseGrounding:
                 "Reconheça naturalmente o assunto entendido, explique que ele está "
                 "fora do papel de suporte de TI do Jup e redirecione a conversa para "
                 "assuntos de TI. Não invente encaminhamento para técnico."
+                " Não responda o conteúdo solicitado: nenhuma receita, placar, poema ou conselho."
+                " Use no máximo duas frases curtas e acolhedoras: reconheça o tema e convide "
+                "a trazer uma necessidade de TI. Evite explicações formais sobre restrições, "
+                "infraestrutura, escopo operacional ou regras."
             ),
             verbosity="concise",
             facts=tuple(facts),
             protected_content=(),
             forbidden_claims=forbidden_claims,
             required_information=(),
-            fallback_message=(
-                "Esse assunto fica fora do meu papel aqui. "
-                "Posso ajudar com suporte e solicitações de TI."
-            ),
+            fallback_message=scope_redirect_fallback(topic),
             allowed_operational_values=allowed_values,
         )
 
