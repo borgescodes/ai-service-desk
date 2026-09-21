@@ -74,7 +74,7 @@ test('header shows public navigation and the bounded demo identity tool', () => 
   assert.match(html, /Falar com o Jup/);
   assert.doesNotMatch(html, /<select/);
   assert.match(html, /id="demo-identity-form"/);
-  assert.match(html, /E-mail corporativo/);
+  assert.match(html, /data-email-preview/);
   assert.doesNotMatch(html, /username|capabilit/i);
 });
 

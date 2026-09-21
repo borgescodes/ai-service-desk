@@ -1,28 +1,41 @@
 import { escapeHtml as esc, formatTimestamp, renderStatus, renderConfidence } from './render.mjs';
+import { navIcon } from './icons.mjs';
 
 const subject = item => item.purpose || item.requested_role || 'Solicitação de atendimento';
-const updated = item => item.updated_at || item.timeline?.at(-1)?.occurred_at || item.created_at;
+const timestamp = item => [item.updated_at, item.created_at, item.timeline?.at(-1)?.occurred_at]
+  .filter(Boolean)
+  .map(value => Date.parse(value))
+  .filter(Number.isFinite)
+  .sort((a, b) => b - a)[0] ?? 0;
+const updated = item => {
+  const value = timestamp(item);
+  return value ? new Date(value).toISOString() : null;
+};
 const roleLabel = role => ({ SOLICITANTE: 'Solicitante', APROVADOR: 'Aprovador', ADMIN: 'Administrador', SUPERADMIN: 'Superadmin' }[role] || role || 'Não informado');
+
+export function sortNewestFirst(items = []) {
+  return [...items].sort((a, b) => timestamp(b) - timestamp(a));
+}
 
 export function renderTrackingQueue(items, selectedId, operational = false) {
   if (!items.length) return '<div class="tracking-empty"><strong>Nenhuma solicitação na fila</strong><p>Novos atendimentos atribuídos a você aparecerão aqui.</p></div>';
-  return `<div class="tracking-queue">${items.map(item => `<button type="button" class="${operational ? 'queue-row' : 'tracking-row'}" ${operational ? 'data-request-id' : 'data-request-select'}="${esc(item.request_id)}" aria-current="${item.request_id === selectedId}">
+  return `<div class="tracking-queue">${sortNewestFirst(items).map(item => `<button type="button" class="${operational ? 'queue-row' : 'tracking-row'}" ${operational ? 'data-request-id' : 'data-request-select'}="${esc(item.request_id)}" aria-current="${item.request_id === selectedId}">
     <span class="tracking-row-top"><span class="tracking-system">${esc(item.system)}</span><small>${esc(item.request_id)}</small></span>
     ${operational ? `<strong class="tracking-requester">${esc(item.requester?.name)}</strong>` : ''}
     <span class="tracking-subject">${esc(subject(item))}</span>
-    ${renderStatus(item)}<small class="tracking-updated">Atualizado · ${esc(formatTimestamp(updated(item)))}</small>
+    <span class="tracking-row-state">${renderStatus(item)}${updated(item) ? `<small class="tracking-updated">${navIcon('clock')} ${esc(formatTimestamp(updated(item)))}</small>` : ''}</span>
   </button>`).join('')}</div>`;
 }
 
 function renderTimeline(events = []) {
   if (!events.length) return '<p class="tracking-muted">Sem atualizações registradas.</p>';
-  return `<ol class="tracking-timeline">${events.map((event, index) => `<li><span class="timeline-marker" aria-hidden="true">${index === events.length - 1 ? '●' : '✓'}</span><div><strong>${esc(event.label || 'Atualização registrada')}</strong>${event.occurred_at ? `<time datetime="${esc(event.occurred_at)}">${esc(formatTimestamp(event.occurred_at))}</time>` : ''}</div></li>`).join('')}</ol>`;
+  return `<ol class="tracking-timeline">${events.map((event, index) => `<li><span class="timeline-marker" aria-hidden="true">${navIcon(index === events.length - 1 ? 'clock' : 'check')}</span><div><strong>${esc(event.label || 'Atualização registrada')}</strong>${event.occurred_at ? `<time datetime="${esc(event.occurred_at)}">${esc(formatTimestamp(event.occurred_at))}</time>` : ''}</div></li>`).join('')}</ol>`;
 }
 
 function renderConfidenceReasons(confidence = {}) {
   const items = confidence.explanations || [];
   if (!items.length) return '<p class="tracking-muted">Sem evidências adicionais registradas.</p>';
-  return `<ul class="confidence-reasons">${items.map(item => `<li data-kind="${esc(item.kind || 'missing')}"><span aria-hidden="true">${item.kind === 'positive' ? '✓' : item.kind === 'conflict' ? '×' : '?'}</span><span>${esc(item.text)}</span></li>`).join('')}</ul>`;
+  return `<ul class="confidence-reasons">${items.map(item => `<li data-kind="${esc(item.kind || 'missing')}"><span aria-hidden="true">${navIcon(item.kind === 'positive' ? 'check' : 'warning')}</span><span>${esc(item.text)}</span></li>`).join('')}</ul>`;
 }
 
 function renderBackendDecision(item) {
@@ -51,8 +64,8 @@ export function renderTrackingDetail(item, { operational = false, pendingAction 
     : '';
   return `<article class="tracking-detail${operational ? ' tracking-detail--operational' : ''}">
     <header class="tracking-detail-header"><div><p class="tracking-kicker">${esc(item.request_id)} <span>·</span> ${esc(item.system)}</p><h2>${operational ? 'Atendimento em análise' : 'Resumo da solicitação'}</h2></div>${renderStatus(item)}</header>
-    ${operational ? `<section class="tracking-requester-card" aria-label="Solicitante"><h3>Solicitante</h3><div class="tracking-person"><span class="tracking-person-icon" aria-hidden="true">${esc((item.requester?.name || '?').slice(0, 1))}</span><div><strong>${esc(item.requester?.name)}</strong><p>${esc(item.requester?.email || '')}</p><div class="tracking-person-context"><span>${esc(item.requester?.job_title || '')}</span><span>${esc(item.requester?.area || '')}</span></div></div></div></section>
-    <section class="tracking-request-facts" aria-label="Solicitação"><h3>Solicitação</h3><p class="tracking-request-title">${esc(subject(item))}</p><dl>${technicalRow('Sistema', item.system)}${technicalRow('Perfil solicitado', roleLabel(item.requested_role))}${technicalRow('Escopo CDM', item.business_scope?.toLocaleUpperCase('pt-BR'))}</dl>${mismatch}</section>
+    ${operational ? `<section class="tracking-request-facts" aria-label="Solicitação"><h3>Solicitação</h3><p class="tracking-request-title">${esc(subject(item))}</p><dl>${technicalRow('Sistema', item.system)}${technicalRow('Perfil solicitado', roleLabel(item.requested_role))}${technicalRow('Escopo CDM', item.business_scope?.toLocaleUpperCase('pt-BR'))}</dl>${mismatch}</section>
+    <section class="tracking-requester-card" aria-label="Solicitante"><h3>Solicitante</h3><div class="tracking-person"><span class="tracking-person-icon" aria-hidden="true">${esc((item.requester?.name || '?').slice(0, 1))}</span><div><strong>${esc(item.requester?.name)}</strong><p>${esc(item.requester?.email || '')}</p><div class="tracking-person-context"><span>${esc(item.requester?.job_title || '')}</span><span>${esc(item.requester?.area || '')}</span></div></div></div></section>
     <section class="tracking-summary-panel" aria-label="Resumo do Jup"><h3>Resumo do Jup</h3><p>${esc(jupSummary)}</p></section>` : `<p class="tracking-summary">${esc(subject(item))}</p>`}
     ${operational ? '' : `<section class="tracking-assignment"><h3>Responsável</h3><strong>${esc(item.routing?.technician_name || 'Aguardando atribuição')}</strong>${item.policy?.reason ? `<p>${esc(item.policy.reason)}</p>` : ''}</section>`}
     <section class="tracking-progress" aria-label="Andamento"><h3>Andamento</h3>${renderTimeline(item.timeline)}</section>
@@ -63,6 +76,7 @@ export function renderTrackingDetail(item, { operational = false, pendingAction 
 
 export function renderTrackingWorkspace(items = [], selectedId = null) {
   if (!items.length) return '<section class="tracking-empty tracking-empty--requester"><strong>Nenhuma solicitação ainda</strong><p>Quando você iniciar um atendimento, poderá acompanhar o andamento por aqui.</p><a class="button button--primary" href="/jup" data-route="jup">Falar com o Jup →</a></section>';
-  const selected = items.find(item => item.request_id === selectedId) || items[0];
-  return `<div class="tracking-workspace"><section class="tracking-list" aria-label="Suas solicitações"><header class="tracking-list-header"><h2>Solicitações</h2><span>${items.length}</span></header>${renderTrackingQueue(items, selected.request_id)}</section><section aria-label="Detalhe da solicitação">${renderTrackingDetail(selected)}</section></div>`;
+  const sorted = sortNewestFirst(items);
+  const selected = sorted.find(item => item.request_id === selectedId) || sorted[0];
+  return `<div class="tracking-workspace"><section class="tracking-list" aria-label="Suas solicitações"><header class="tracking-list-header"><h2>Solicitações</h2><span>${sorted.length}</span></header>${renderTrackingQueue(sorted, selected.request_id)}</section><section aria-label="Detalhe da solicitação">${renderTrackingDetail(selected)}</section></div>`;
 }

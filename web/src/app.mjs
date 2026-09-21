@@ -1,4 +1,4 @@
-import { presentChat, dismissThinking, createWelcomeEntry } from './presentation.mjs';
+import { animateJupFlip, animatePersonaPopover, captureJupFlip, presentChat, presentQueueChanges, dismissThinking, createWelcomeEntry } from './presentation.mjs';
 import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
 import { captureConversationScroll, restoreConversationScroll } from './conversation.mjs';
 import { createFaqSearch, renderSolutionDetail, renderSolutionsHome, renderSolutionsResults } from './solutions.mjs';
@@ -6,20 +6,38 @@ import { apiRequest, ApiError } from './api.mjs';
 import {
   renderAppHeader,
   renderApprovalQueue,
+  renderHandoffWorkspace,
   renderHandoffs,
   renderJupWorkspace,
   renderOperationDetail,
   renderRequestList,
 } from './components.mjs';
+import { sortNewestFirst } from './tracking.mjs';
 import { escapeHtml, renderErrorState, renderUnauthorizedState } from './render.mjs';
 import { demoIdentityForPath, resolveRoute, routeParams } from './router.mjs';
-import { activateIdentity, clearRequesterChatState, createInitialState, resetConversation, personaPath } from './state.mjs';
+import { activateIdentity, clearRequesterChatState, corporateEmailFromName, createInitialState, resetConversation, personaPath } from './state.mjs';
 
 const app = document.querySelector('#app');
+if (document.defaultView && (!globalThis.gsap || !globalThis.Flip)) {
+  const [{ gsap }, { Flip }] = await Promise.all([
+    import('/vendor/gsap/index.js'),
+    import('/vendor/gsap/Flip.js'),
+  ]);
+  globalThis.gsap = gsap;
+  globalThis.Flip = Flip;
+}
+if (globalThis.gsap && globalThis.Flip) globalThis.gsap.registerPlugin(globalThis.Flip);
 let identityRevision = 0;
 let renderedMessageCount = 0;
 let finishPresentation = () => {};
+let thinkingTimer = null;
+const renderedQueueIdsByScope = new Map();
 const welcomeEntry = createWelcomeEntry();
+document.addEventListener?.('toggle', event => {
+  if (event.target?.matches?.('.persona-menu')) {
+    animatePersonaPopover(event.target, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
+  }
+}, true);
 // IDs only, scoped to the current page session and technician. Details are always reauthorized.
 const knownOperationalRequests = new Map();
 async function loadOperationalItems(identityId) {
@@ -53,6 +71,7 @@ let state = {
   loading: false,
   selectedRequestId: null,
   selectedOpportunityId: null,
+  selectedHandoffId: null,
 };
 
 function processingContextFromMessages(messages) {
@@ -119,7 +138,9 @@ function pageHeading(title, description) {
 }
 
 function operationPath() {
-  return state.identityId === 'tecnico-m365' ? '/demo/operacao/m365' : '/demo/operacao/cdm';
+  if (state.identityId === 'tecnico-m365') return '/demo/operacao/m365';
+  if (state.identityId === 'tecnico-geral') return '/demo/operacao/general';
+  return '/demo/operacao/cdm';
 }
 
 function renderRoute() {
@@ -156,16 +177,38 @@ function renderRoute() {
   }
 
   if (state.route === 'approvals') {
-    const items = state.routeData.items ?? [];
+    const items = sortNewestFirst(state.routeData.items ?? []);
     const selected = state.routeData.selected ?? items.find((item) => item.request_id === state.selectedRequestId) ?? items[0] ?? null;
     return `${pageHeading('Solicitações recebidas', 'Revise o contexto e dê continuidade ao atendimento.')}<div class="tracking-workspace"><section class="tracking-list" aria-label="Fila de solicitações"><header class="tracking-list-header"><h2>Fila de atendimento</h2><span>${items.length}</span></header>${renderApprovalQueue(items, selected?.request_id)}</section><section aria-label="Detalhe da pendência">${renderOperationDetail(selected, state)}</section></div>${renderHandoffs(state.routeData.handoffs ?? [])}`;
   }
 
-  return '<section class="tracking-empty"><strong>Área não disponível nesta demonstração</strong><p>Use o menu de usuários para acessar uma fila de atendimento.</p></section>';
+  if (state.route === 'handoffs') {
+    const items = state.routeData.handoffs ?? [];
+    return `${pageHeading('Encaminhamentos', 'Atendimentos que precisam de continuidade humana.')}${renderHandoffWorkspace(items, state.selectedHandoffId)}`;
+  }
+
+  return '<section class="tracking-empty"><strong>Área indisponível</strong><p>Escolha outro destino no menu principal.</p></section>';
+}
+
+function syncThinkingClock() {
+  clearInterval(thinkingTimer);
+  thinkingTimer = null;
+  if (state.pendingAction !== 'message' || !state.processingStartedAt) return;
+  const update = () => {
+    const seconds = Math.max(0, Math.floor((Date.now() - state.processingStartedAt) / 1000));
+    const node = app.querySelector('[data-thinking-seconds]');
+    if (!node) return;
+    node.textContent = String(seconds);
+    node.dataset.thinkingSeconds = String(seconds);
+  };
+  update();
+  thinkingTimer = setInterval(update, 1000);
 }
 
 function render() {
   finishPresentation();
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  const flipState = captureJupFlip(app, reducedMotion);
   const scroll = captureConversationScroll(app.querySelector('.conversation-thread'));
   const activeElement = document.activeElement;
   const focused = activeElement?.id === 'jup-message';
@@ -174,16 +217,22 @@ function render() {
   app.innerHTML = `${renderAppHeader({
     activeRoute: state.route,
     identities: state.identities, identity: selectedIdentity() ?? {}, pending: state.pendingAction || false,
-    operational: ['approvals', 'prevention'].includes(state.route),
+    operational: ['approvals', 'handoffs', 'prevention'].includes(state.route),
     operationPath: operationPath(),
     identityError: state.identityConfigError,
   })}<main id="main-content" class="main-content main-content--${['solutions', 'solution'].includes(state.route) ? 'public' : 'workspace'}" tabindex="-1">${renderRoute()}</main>`;
   app.setAttribute('aria-busy', String(state.loading));
   bindInteractions();
+  syncThinkingClock();
+  animateJupFlip(app, flipState, reducedMotion);
   const hasWelcome = Boolean(app.querySelector('.chat-welcome:not(.chat-welcome--leaving)'));
-  finishPresentation = presentChat(app, { welcome: welcomeEntry.update(hasWelcome), followConversation: scroll?.atEnd ?? true, reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false });
+  const finishChat = presentChat(app, { welcome: welcomeEntry.update(hasWelcome), followConversation: scroll?.atEnd ?? true, reducedMotion });
+  const queueScope = `${state.identityId || 'anonymous'}:${state.route}`;
+  const queuePresentation = presentQueueChanges(app, renderedQueueIdsByScope.get(queueScope) || new Set(), reducedMotion);
+  if (queuePresentation.ids.size || state.routeData.loaded) renderedQueueIdsByScope.set(queueScope, queuePresentation.ids);
+  finishPresentation = () => { finishChat(); queuePresentation.finish(); };
   renderedMessageCount = state.messages.length;
-  restoreConversationScroll(app.querySelector('.conversation-thread'), app.querySelector('[data-action="scroll-bottom"]'), scroll, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
+  restoreConversationScroll(app.querySelector('.conversation-thread'), app.querySelector('[data-action="scroll-bottom"]'), scroll, reducedMotion);
   if (focused && !state.pendingAction) {
     const composer = app.querySelector('#jup-message');
     composer?.focus?.({ preventScroll: true });
@@ -275,10 +324,14 @@ async function loadRoute() {
     } else if (routeState.route === 'requests') {
       routeState.routeData = { items: await apiRequest('/api/requests', { identityId: routeState.identityId }), loaded: true };
     } else if (routeState.route === 'approvals') {
-      const items = await loadOperationalItems(routeState.identityId);
+      const items = sortNewestFirst(await loadOperationalItems(routeState.identityId));
       routeState.selectedRequestId = items[0]?.request_id ?? null;
       const handoffs = await apiRequest('/api/operations/handoffs', { identityId: routeState.identityId });
       routeState.routeData = { items, handoffs, selected: items[0] ?? null, loaded: true };
+    } else if (routeState.route === 'handoffs') {
+      const handoffs = await apiRequest('/api/operations/handoffs', { identityId: routeState.identityId });
+      routeState.selectedHandoffId = handoffs[0]?.handoff_id ?? null;
+      routeState.routeData = { handoffs, loaded: true };
     } else if (routeState.route === 'prevention') {
       const items = await apiRequest('/api/operations/prevention', { identityId: routeState.identityId });
       routeState.routeData = { items, loaded: true };
@@ -300,6 +353,7 @@ async function navigate(path) {
   if (window.location.pathname + window.location.search !== path) window.history.pushState({}, '', path);
   state.route = resolveRoute(window.location.pathname);
   await loadRoute();
+  window.scrollTo?.({ top: 0, left: 0, behavior: 'auto' });
   document.querySelector('#main-content')?.focus({ preventScroll: true });
 }
 
@@ -341,6 +395,7 @@ async function submitMessage(form, messageOverride = null) {
   state.messageError = null;
   state.composerFocused = false;
   state.pendingAction = 'message';
+  state.processingStartedAt = Date.now();
   state.processingActivity = feedback[0];
   state.transientError = null;
   render();
@@ -392,6 +447,7 @@ async function submitMessage(form, messageOverride = null) {
     stopProcessingFeedback();
     if (revision === identityRevision) {
       state.processingActivity = null;
+      state.processingStartedAt = null;
       state.pendingAction = null;
       render();
       if (state.route === 'jup') {
@@ -573,6 +629,10 @@ function bindInteractions() {
     event.preventDefault();
     void configureDemoIdentity(event.currentTarget);
   });
+  app.querySelector('[data-identity-name]')?.addEventListener('input', event => {
+    const preview = app.querySelector('[data-email-preview]');
+    if (preview) preview.value = corporateEmailFromName(event.target.value);
+  });
   app.querySelectorAll('[data-persona]').forEach(button => {
     button.addEventListener('click', async () => {
       if (state.pendingAction) return;
@@ -661,6 +721,12 @@ function bindInteractions() {
   });
   app.querySelectorAll('.queue-row[data-request-id]').forEach((button) => {
     button.addEventListener('click', () => void selectApproval(button.dataset.requestId));
+  });
+  app.querySelectorAll('[data-handoff-id]').forEach(button => {
+    button.addEventListener('click', () => {
+      state.selectedHandoffId = button.dataset.handoffId;
+      render();
+    });
   });
   app.querySelector('[data-action="approve"]')?.addEventListener('click', () =>
     void decide('approve'),

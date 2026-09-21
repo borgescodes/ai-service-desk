@@ -21,7 +21,7 @@ export function draftPath(text) {
 }
 
 export function renderDemoScenarios() {
-  return `<aside class="demo-scenarios" aria-labelledby="demo-title"><div class="demo-scenarios__eyebrow">Comece por um exemplo</div><h2 id="demo-title">Experimente com o Jup</h2><p>Escolha uma situação para começar. Você pode editar antes de enviar.</p><ul>${DEMO_PROMPTS.map(prompt => `<li><a href="${draftPath(prompt)}" data-route="jup"><span>${escapeHtml(prompt)}</span><span aria-hidden="true">↗</span></a></li>`).join('')}</ul><small>Exemplos para conversar, sem solução pré-definida.</small></aside>`;
+  return `<aside class="demo-scenarios" aria-labelledby="demo-title"><div class="demo-scenarios__eyebrow">Comece por um exemplo</div><h2 id="demo-title">Experimente com o Jup</h2><ul>${DEMO_PROMPTS.map(prompt => `<li><a href="${draftPath(prompt)}" data-route="jup"><span>${escapeHtml(prompt)}</span>${navIcon('arrow-right')}</a></li>`).join('')}</ul></aside>`;
 }
 
 export function faqSearchPath(query, category = '') {
@@ -51,8 +51,8 @@ export function createFaqSearch({ request, update }) {
 }
 
 const FUNCTIONAL_ARTICLES = Object.freeze({
-  'KB-SYN-FAQ-CDM-REQUEST-001': { category: 'acessos-rotinas', symbol: 'cdm-simbol.svg', intro: 'Siga as orientações abaixo para solicitar seu acesso.', officialLabel: 'Abrir o CDM ↗' },
-  'KB-SYN-M365-PASSWORD-001': { category: 'impressao-office-aplicativos', icon: 'key-round', intro: 'Siga as orientações aprovadas para redefinir sua senha.', officialLabel: 'Abrir página oficial da Microsoft ↗' },
+  'KB-SYN-FAQ-CDM-REQUEST-001': { category: 'acessos-rotinas', symbol: 'cdm-simbol.svg', intro: 'Siga as orientações abaixo para solicitar seu acesso.', officialLabel: 'Abrir o CDM' },
+  'KB-SYN-M365-PASSWORD-001': { category: 'impressao-office-aplicativos', icon: 'key-round', intro: 'Siga as orientações aprovadas para redefinir sua senha.', officialLabel: 'Abrir página oficial da Microsoft' },
 });
 
 const VISUAL_EXAMPLES = Object.freeze([
@@ -128,6 +128,6 @@ export function renderSolutionDetail(detail) {
     <header class="solution-article-header">${icon}<p class="solution-category">${escapeHtml(detail.category || '')} · ${escapeHtml(detail.system || '')}</p><h1>${escapeHtml(detail.title)}</h1><p>${metadata?.intro || 'Siga as orientações abaixo.'}</p>${officialUrl ? `<a class="button button--primary" href="${officialUrl}" target="_blank" rel="noopener noreferrer">${metadata?.officialLabel || 'Abrir referência oficial ↗'}</a>` : ''}</header>
     <div class="knowledge-body">${renderApprovedKnowledgeBody({ text: detail.answer, procedureUrl: detail.procedure_url, knowledgeId: detail.knowledge_id })}</div>
     <aside class="security-note"><strong>Cuide da sua segurança</strong><p>Não compartilhe senhas ou códigos de verificação. Use sempre o endereço oficial do sistema.</p></aside>
-    <footer class="solution-outcome"><div><h2>Ainda precisa de ajuda?</h2><p>Continue o atendimento com o Jup.</p></div><a class="button button--primary" href="/jup?from=${encodeURIComponent(detail.knowledge_id)}" data-route="jup">Falar com o Jup →</a></footer>
+    <footer class="solution-outcome"><div><h2>Ainda precisa de ajuda?</h2><p>Continue o atendimento com o Jup.</p></div><a class="button button--primary" href="/jup?from=${encodeURIComponent(detail.knowledge_id)}" data-route="jup">Falar com o Jup ${navIcon('arrow-right')}</a></footer>
   </article>`;
 }

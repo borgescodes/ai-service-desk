@@ -69,8 +69,8 @@ test('technician detail presents the demo reading order and progressively disclo
   const analysis = html.indexOf('Análise do Jup');
   const backendDecision = html.indexOf('Decisão do backend');
 
-  assert.ok(requester < request, 'requester should precede the request');
-  assert.ok(request < summary, 'the request should precede the Jup summary');
+  assert.ok(request < requester, 'the request should precede requester context');
+  assert.ok(requester < summary, 'requester context should precede the Jup summary');
   assert.ok(summary < progress, 'the summary should precede progress');
   assert.ok(progress < action, 'progress should precede the expected action');
   assert.ok(action < disclosure, 'the primary action should precede technical detail');

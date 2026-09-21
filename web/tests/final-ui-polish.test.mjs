@@ -13,15 +13,15 @@ test('FAQ categories are independent and the help CTA sits outside the natural c
   assert.match(html, /<\/details><\/div><aside class="faq-help-strip"/);
 });
 
-test('FAQ catalog and shell use the shared Lucide icon registry', () => {
+test('FAQ catalog and shell use the shared Boxicons registry', () => {
   const faq = renderSolutionsHome({ groups, searchQuery: '', searchResults: null, searching: false });
   const header = renderAppHeader({ activeRoute: 'jup', identity: { name: 'Pedro Miranda' } });
-  assert.match(faq, /data-lucide="search"/);
-  assert.match(faq, /data-lucide="chevron-down"/);
-  assert.match(faq, /data-lucide="arrow-right"/);
-  assert.match(header, /data-lucide="search"/);
-  assert.match(header, /data-lucide="clipboard-list"/);
-  assert.match(header, /data-lucide="plus"/);
+  assert.match(faq, /class="bx bxs-search/);
+  assert.match(faq, /class="bx bx-chevron-down/);
+  assert.match(faq, /class="bx bx-right-arrow-alt/);
+  assert.match(header, /class="bx bxs-book-open/);
+  assert.match(header, /class="bx bxs-receipt/);
+  assert.match(header, /class="bx bx-plus/);
 });
 
 test('utility icon rendering is centralized instead of being defined inside components', () => {
@@ -41,7 +41,7 @@ test('FAQ interaction scrolls the page only when needed and does not close sibli
 });
 
 test('FAQ layout grows naturally with a separate CTA, and subtle motion', () => {
-  const css = readFileSync(new URL('../src/desktop-responsive.css', import.meta.url), 'utf8');
+  const css = `${readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')}\n${readFileSync(new URL('../src/desktop-responsive.css', import.meta.url), 'utf8')}`;
   assert.doesNotMatch(css, /\.faq-directory-scroll/);
   assert.match(css, /\.faq-help-strip[^}]*position:\s*relative/);
   assert.match(css, /\.faq-category-panel[^}]*transition:/);
@@ -56,7 +56,7 @@ test('FAQ category headings omit decorative icons and keep expansion chevrons', 
   assert.equal(headings.length, 4);
   for (const heading of headings) {
     assert.doesNotMatch(heading, /faq-category-icon|key-round|circle-alert|printer|wifi/);
-    assert.equal((heading.match(/data-lucide=/g) || []).length, 1);
-    assert.match(heading, /chevron-down/);
+    assert.equal((heading.match(/class="bx /g) || []).length, 1);
+    assert.match(heading, /bx-chevron-down/);
   }
 });

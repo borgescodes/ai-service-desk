@@ -70,5 +70,17 @@ export function resetConversation(state) {
 export function personaPath(identity) {
   if (identity?.role === 'REQUESTER') return '/jup';
   return ({ 'pedro-miranda': '/jup', 'tecnico-cdm': '/demo/operacao/cdm',
-    'tecnico-m365': '/demo/operacao/m365', 'tecnico-geral': '/demo/operacao/prevention' })[identity?.identity_id] ?? null;
+    'tecnico-m365': '/demo/operacao/m365', 'tecnico-geral': '/demo/operacao/general' })[identity?.identity_id] ?? null;
+}
+
+export function corporateEmailFromName(name) {
+  const segments = String(name ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('pt-BR')
+    .split(/\s+/)
+    .map(segment => segment.replace(/[^a-z0-9]/g, ''))
+    .filter(Boolean);
+  const local = segments.length > 1 ? `${segments[0]}.${segments.at(-1)}` : segments[0] || 'usuario';
+  return `${local.replace(/\.+/g, '.').replace(/^\.|\.$/g, '')}@juparana.com.br`;
 }

@@ -15,7 +15,7 @@ import { renderAppHeader, renderJupWorkspace } from '../src/components.mjs';
 test('public header contains only requester navigation', () => {
   const html = renderAppHeader({ activeRoute: 'solutions', operational: false });
   assert.match(html, /Jup Resolve/);
-  assert.match(html, />Soluções</);
+  assert.match(html, />Central de Suporte</);
   assert.match(html, />Falar com o Jup</);
   assert.doesNotMatch(html, /Identidade demo|Operação|Prevenção|Assistente de IA|Inteligência para/i);
   assert.doesNotMatch(html, /<select/);
@@ -59,7 +59,7 @@ test('Juparana brand tokens are exact', () => {
   const tokens = readFileSync(new URL('../src/tokens.css', import.meta.url), 'utf8');
   assert.match(tokens, /--color-primary:\s*#45813c/i);
   assert.match(tokens, /--color-accent:\s*#eeb41e/i);
-  assert.match(tokens, /--color-neutral:\s*#808285/i);
+  assert.match(tokens, /--color-canvas:\s*#f6f8f5/i);
 });
 
 test('handoff keeps its technical summary behind a native disclosure', () => {

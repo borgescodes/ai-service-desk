@@ -39,7 +39,7 @@ test('conversation owns contextual avatars and thinking message with three dots'
   assert.match(html, /conversation-message--jup[^]*?jup-avatar/);
   assert.doesNotMatch(html, /conversation-visual|jup-welcome/);
   assert.match(html, /conversation-message--thinking[^]*?data-state="thinking"/);
-  assert.match(html, /thinking-dots[^]*?<span[^>]*>\.<\/span><span[^>]*>\.<\/span><span[^>]*>\.<\/span>/);
+  assert.match(html, /thinking-dots[^]*?<span><\/span><span><\/span><span><\/span>/);
   assert.match(html, /data-action="scroll-bottom"/);
   assert.match(html, /<textarea[^>]*disabled/);
 });

@@ -1,14 +1,13 @@
 import { escapeHtml } from './render.mjs';
 
 export const APPROVED_PROCEDURE_URL = 'https://mysignins.microsoft.com/security-info/password/change';
-const CENTRAL_ARTICLE_IDS = new Set(['KB-SYN-FAQ-CDM-REQUEST-001', 'KB-SYN-M365-PASSWORD-001']);
 
 export function renderMessageBody(text) {
   return String(text ?? '').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean)
     .map(p => `<p>${escapeHtml(p)}</p>`).join('');
 }
 
-export function renderApprovedKnowledgeBody({ text, procedureUrl = null, knowledgeId = null, article = null }) {
+export function renderApprovedKnowledgeBody({ text, procedureUrl = null, knowledgeId = null }) {
   const approvedUrl = procedureUrl === APPROVED_PROCEDURE_URL ? APPROVED_PROCEDURE_URL
     : knowledgeId === 'KB-SYN-FAQ-CDM-REQUEST-001' && procedureUrl === 'https://cdm.juparana.com.br/'
       ? 'https://cdm.juparana.com.br/' : null;
@@ -34,8 +33,5 @@ export function renderApprovedKnowledgeBody({ text, procedureUrl = null, knowled
     else { flushParagraph(); }
   }
   flushParagraph(); flushSteps();
-  if (CENTRAL_ARTICLE_IDS.has(article?.knowledge_id) && article.provenance?.status === 'APPROVED') {
-    output.push(`<p><a href="/solucoes/${article.knowledge_id}" data-solution-link data-knowledge-id="${article.knowledge_id}">${escapeHtml(article.title)}</a></p>`);
-  }
   return output.join('');
 }

@@ -1,34 +1,31 @@
 # Sistema visual do Jup Resolve
 
-Direção de frontend atualizada em 14/09/2026 a partir do ZIP `jup-ui-central-suporte.zip` e do briefing explícito do usuário. Substitui a direção visual anterior da Fase 14.
+Direção de frontend atualizada em 21/09/2026 a partir da apresentação institucional fornecida e do briefing da Fase 16. A apresentação é a autoridade visual; os screenshots da aplicação anterior servem somente como evidência dos problemas substituídos.
 
-## Linguagem compartilhada
+## Fundamentos
 
-Inter, servida localmente com licença OFL, verde estrutural `#45813c`, verde profundo `#173e25`, amarelo de acento `#eeb41e`, canvas `#f6f8f5` e superfícies brancas. Tokens em `web/src/tokens.css`; componentes e layouts em `web/src/styles.css`. As camadas antigas `premium.css` e `showcase-desktop.css` foram removidas.
+O produto usa Magistral Bold somente em display e momentos de marca, com Montserrat Variable em navegação, controles, dados e leitura. Ambas são servidas pela própria aplicação. A paleta estrutural parte do verde profundo `#173e25`, verde principal `#45813c`, amarelo de acento `#eeb41e`, canvas `#f6f8f5`, branco e neutros derivados de verde e cinza. Tokens vivem em `web/src/tokens.css`; não há dependência de CDN.
 
-Navbar de 80 px com Soluções e Falar com o Jup, sidebar contextual de 232 px somente na conversa e na operação, controles compactos, raios de 8 a 22 px e transições de 150–180 ms. Desktop prioritário em 1440, 1600 e 1920 px. Sem refinamento mobile nesta missão; navegação e conteúdo continuam acessíveis em larguras menores.
+Raios usuais ficam entre 10 e 14 px. Pills pertencem a status e controles compactos. Superfícies usam hairlines e espaço em branco; sombras são reservadas ao composer, popover e elevação real. A interface evita card dentro de card, fundos amarelos dominantes, gradientes, glassmorphism e ornamentação gratuita.
 
-## Superfícies
+Boxicons Filled é a família de ícones da interface. O build copia somente CSS e fonte necessários de Boxicons, Montserrat Variable e os runtimes locais de GSAP e Flip para `dist/vendor`.
 
-- Central editorial sem sidebar, hero central, busca destacada, pills e quatro categorias expansíveis. Por orientação explícita posterior do usuário, a composição contém 17 títulos do ZIP; 16 são exemplos não interativos. Somente o tutorial CDM `KB-SYN-FAQ-CDM-REQUEST-001`, disponível no backend, possui link funcional.
-- Artigo com breadcrumb, conteúdo aprovado literal, endereço oficial e continuidade com o Jup.
-- Chat com sidebar Nova conversa / Acompanhar chamado / Artigos de ajuda; boas-vindas centralizadas dentro da conversa, com avatar original ampliado e sem hero permanente; conversa à esquerda e coluna de artigos relacionados e apoio à direita. Mensagens alinhadas por autor, horário de apresentação e composer compacto mantêm o comportamento já validado.
-- Operação com fila, detalhe, policy, routing, contexto e timeline reais; encaminhamentos de suporte mostram o resumo armazenado no backend.
-- Solicitações do usuário com status e detalhe expansível.
+## Shell e superfícies
 
-## Interação e autoridade
+Todas as páginas usam a mesma navbar de 76 px, fundo, logo, tipografia e estados de interação. Central de Suporte, Jup e Minhas solicitações permanecem destinos globais; a operação usa a mesma estrutura com navegação contextual. O seletor “Trocar usuário” contém Requester, Técnico CDM, Técnico Microsoft 365 e Técnico Geral, além de “Novo usuário”. O e-mail do novo requester é derivado de primeiro e último nome, normalizado e exibido como preview somente leitura.
 
-O menu de usuários lista identidades retornadas pelo provider; as rotas mantêm o mapeamento demo existente. O backend valida cada chamada. Novo chat reinicia somente contexto conversacional da identidade, preservando solicitações e encaminhamentos.
+- A Central de Suporte tem hierarquia editorial, título Magistral, busca protagonista, categorias expansíveis e linhas de artigos enriquecidas. Não há grade de cards nem CTA fixo cobrindo o conteúdo.
+- O artigo mantém literalmente o conhecimento aprovado. Procedimentos numerados viram uma sequência visual, com medida de leitura de 68–70 caracteres, ação oficial, callout de segurança e continuidade com o Jup.
+- O chat é conversation-first: leitura central de até 850 px, poucas molduras, mensagens distintas sem bubbles grandes, composer flutuante estável e Jup reconhecível. Artigos aparecem como source cards progressivos somente quando o backend devolve referência `APPROVED`.
+- Minhas solicitações e as caixas técnicas usam fila à esquerda e detalhe à direita, com status reconhecível, densidade adequada e itens mais recentes no topo por `updated_at`, `created_at` ou último evento.
+- Técnico Geral usa exclusivamente os handoffs já autorizados por `/api/operations/handoffs`. Contexto do usuário, resumo do Jup, conversa e metadados técnicos são separados; tokens internos ficam em “Detalhes técnicos”.
 
-No primeiro envio, as boas-vindas saem em 280 ms e cedem lugar à mensagem e ao processamento. Os demais envios mantêm a entrada já estabelecida. A resposta bem-sucedida respeita um mínimo visual de 2,4 segundos contado desde o envio; backend lento não recebe atraso adicional. O indicador mostra “Pensando...” e “Buscando contexto”, com CDM ou 365 quando mencionado nas mensagens. O rótulo é contextual de apresentação, sem descrever raciocínio ou etapas internas do backend. Erros aparecem sem espera artificial. Redução de movimento desativa as animações.
+## Motion e continuidade
 
-`REQUEST_CREATED` mantém estado `success`; handoffs de suporte usam `escalation`; `warning` usa o emote sem rosto. Dados e links são escapados; somente destinos oficiais explicitamente permitidos são clicáveis. A CSP permanece restrita à própria origem.
+A animação explica mudança de estado. No primeiro envio, GSAP Flip preserva a continuidade do avatar entre o welcome e a conversa em 460 ms. Respostas entram completas: o status de pensamento compacta em uma timeline GSAP e o novo bloco surge com duração curta e stagger leve entre blocos sem simular digitação ou streaming. O contador “Pensando · Ns” usa tempo real desde o envio e atualiza somente o nó de texto, sem rerender do chat.
 
+Popover de persona, seleção e entrada de filas usam motion apenas quando a mudança estrutural exige continuidade; hover, foco, active e disabled ficam em CSS. A preferência `prefers-reduced-motion` elimina movimento espacial, staggers e animações repetidas, preservando conteúdo, estado, foco e feedback.
 
-## Correção editorial da Central e do artigo CDM
+## Autoridade e segurança
 
-Central e artigo pertencem ao modo de leitura: página branca, navbar em neutral-100, conteúdo organizado por largura de leitura, espaços e divisórias. Não há superfície própria ou card externo na Central, no diretório ou no artigo. CTAs finais integram o fluxo da página. A callout de segurança conserva sua função semântica com linha lateral discreta. A representação da scrollbar é oculta somente nas páginas públicas de ajuda; rolagem nativa permanece habilitada e a conversa conserva sua scrollbar.
-
-O welcome usa uma única transição de entrada na página vazia, inclusive ao retornar de Soluções e após Nova conversa. A largura do bloco é reservada. O corpo do avatar no welcome acomoda-se uma vez; piscadas e emotes continuam animados, enquanto a camada invisível fica pausada. Mensagens progressivas e contratos não mudam.
-
-Ajuste final autorizado: o CTA da FAQ fica fixo no rodapé da viewport, com espaço inferior reservado no documento. Títulos de categorias exibem texto, contagem e chevron, sem ícones decorativos. O CTA do artigo continua no fluxo normal.
+A UI apresenta estado; o backend decide policy, routing, approval, execution, grounding e identidade. O requester nunca recebe dados internos como policy, confidence, capability ou origem da identidade. Na operação, esses valores ficam restritos ao disclosure técnico quando necessários. Conteúdo e links são escapados; somente destinos oficiais explicitamente permitidos são clicáveis. A CSP permanece same-origin.
