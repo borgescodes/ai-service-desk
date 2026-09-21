@@ -121,12 +121,16 @@ test('welcome has authored reveal lines and draft content switches the welcome a
   assert.match(listening, /chat-welcome[^]*?data-state="listening"/);
 });
 
-test('desktop shell allows FAQ document scrolling and gives conversation a branded minimal scrollbar', () => {
+test('desktop shell uses one branded minimal scrollbar across document and overflow surfaces', () => {
   const baseCss = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
   const responsiveCss = readFileSync(new URL('../src/desktop-responsive.css', import.meta.url), 'utf8');
   const css = `${baseCss}\n${responsiveCss}`;
   assert.match(css, /scrollbar-gutter:\s*stable/);
   assert.doesNotMatch(css, /body:has\(\.solutions-home\)[^}]*overflow:\s*hidden/);
-  assert.match(css, /\.conversation-thread[^}]*scrollbar-color:/);
+  assert.match(css, /\*\s*\{[^}]*scrollbar-width:\s*thin[^}]*scrollbar-color:/);
+  assert.match(css, /\*::\-webkit-scrollbar\s*\{/);
+  assert.match(css, /\*::\-webkit-scrollbar-thumb\s*\{/);
+  assert.match(css, /\.jup-surface\s*\{[^}]*height:\s*calc\(100dvh - var\(--header-height\)\)[^}]*min-height:\s*0/);
+  assert.match(css, /\.jup-workspace-body,\s*\.conversation-stage,\s*\.jup-conversation\s*\{[^}]*min-height:\s*0/);
   assert.match(css, /\.welcome-line/);
 });

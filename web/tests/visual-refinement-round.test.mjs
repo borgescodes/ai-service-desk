@@ -7,6 +7,7 @@ import {
   renderJupWorkspace,
   renderRequestList,
 } from '../src/components.mjs';
+import { navIcon } from '../src/icons.mjs';
 import * as presentation from '../src/presentation.mjs';
 import { renderConfidence } from '../src/render.mjs';
 import { renderTrackingDetail, renderTrackingQueue } from '../src/tracking.mjs';
@@ -30,6 +31,32 @@ test('welcome has two explicit lines and no tagline', () => {
   assert.match(html, /welcome-line--greeting[^>]*>Olá, <strong>Fulano!<\/strong>/);
   assert.match(html, /welcome-line--question[^>]*>Como posso ajudar\?/);
   assert.doesNotMatch(html, /Seu assistente virtual|chat-welcome-tagline/);
+});
+
+test('composer uses the exact filled Boxicons message circle assets for idle and typing states', () => {
+  const idle = renderJupWorkspace({ draft: '' });
+  const typing = renderJupWorkspace({ draft: 'Preciso de ajuda' });
+
+  assert.match(navIcon('message-circle-dots'), /data-boxicon="message-circle-dots"/);
+  assert.match(navIcon('message-circle-edit'), /data-boxicon="message-circle-edit"/);
+  assert.doesNotMatch(`${idle}${typing}`, /message-rounded-(?:dots|edit)/);
+  assert.match(idle, /composer-leading-icon[^>]*data-composing="false"[^]*data-boxicon="message-circle-dots"[^]*data-boxicon="message-circle-edit"/);
+  assert.match(typing, /composer-leading-icon[^>]*data-composing="true"/);
+});
+
+test('persona selector gives each technician a filled user-family icon and semantic color role', () => {
+  const identities = [
+    { identity_id: 'requester', role: 'REQUESTER', name: 'Fulano' },
+    { identity_id: 'tecnico-cdm', role: 'TECHNICIAN', name: 'CDM' },
+    { identity_id: 'tecnico-m365', role: 'TECHNICIAN', name: 'Microsoft 365' },
+    { identity_id: 'tecnico-geral', role: 'TECHNICIAN', name: 'Geral' },
+  ];
+  const html = renderAppHeader({ activeRoute: 'jup', identities, identity: identities[0] });
+
+  assert.match(html, /persona-choice-icon persona-choice-icon--requester[^]*?bxs-user/);
+  assert.match(html, /persona-choice-icon persona-choice-icon--cdm[^]*?bxs-user-badge/);
+  assert.match(html, /persona-choice-icon persona-choice-icon--m365[^]*?bxs-user-detail/);
+  assert.match(html, /persona-choice-icon persona-choice-icon--general[^]*?bxs-user-voice/);
 });
 
 test('thinking contains no processing context tile', () => {

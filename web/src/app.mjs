@@ -611,11 +611,13 @@ async function configureDemoIdentity(form) {
 
 function syncComposerPresentation() {
   const welcome = app.querySelector('.chat-welcome:not(.chat-welcome--leaving)');
-  if (!welcome) return;
   const listening = Boolean(state.composerDraft.trim());
-  welcome.setAttribute('data-listening', String(listening));
-  welcome.querySelector('[data-welcome-state="idle"]')?.setAttribute('aria-hidden', String(listening));
-  welcome.querySelector('[data-welcome-state="listening"]')?.setAttribute('aria-hidden', String(!listening));
+  app.querySelector('.composer-leading-icon')?.setAttribute('data-composing', String(listening));
+  if (welcome) {
+    welcome.setAttribute('data-listening', String(listening));
+    welcome.querySelector('[data-welcome-state="idle"]')?.setAttribute('aria-hidden', String(listening));
+    welcome.querySelector('[data-welcome-state="listening"]')?.setAttribute('aria-hidden', String(!listening));
+  }
 }
 
 function bindInteractions() {

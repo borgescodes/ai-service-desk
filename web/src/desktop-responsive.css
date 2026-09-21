@@ -61,7 +61,7 @@
 @media (max-height: 720px) and (min-width: 900px) {
   .solutions-home { padding-top: 38px; }
   .help-articles { margin-top: 30px; }
-  .chat-welcome-avatar-stack { width: 94px; height: 94px; }
-  .chat-welcome-avatar-state > .jup-avatar { width: 94px; }
-  .chat-welcome h1 { font-size: 38px; }
+  .chat-welcome-avatar-stack { width: 108px; height: 108px; }
+  .chat-welcome-avatar-state > .jup-avatar { width: 108px; }
+  .chat-welcome h1 { font-size: 34px; }
 }

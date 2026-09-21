@@ -14,6 +14,16 @@ export function renderJupAvatar({ compact = false } = {}) {
   return renderJupVisual({ compact });
 }
 
+function personaIconPresentation(identity) {
+  if (identity.role === 'REQUESTER') return { modifier: 'requester', icon: 'user' };
+  const technicians = {
+    'tecnico-cdm': { modifier: 'cdm', icon: 'technician-cdm' },
+    'tecnico-m365': { modifier: 'm365', icon: 'technician-m365' },
+    'tecnico-geral': { modifier: 'general', icon: 'technician-general' },
+  };
+  return technicians[identity.identity_id] ?? { modifier: 'technician', icon: 'support' };
+}
+
 export function renderAppHeader({ activeRoute, operational = false, operationPath = '/demo/operacao/cdm', identities = [], identity = {}, pending = false, identityError = null }) {
   const globalItems = operational
     ? [[activeRoute, operationPath, activeRoute === 'handoffs' ? 'Encaminhamentos' : 'Solicitações recebidas']]
@@ -24,7 +34,10 @@ export function renderAppHeader({ activeRoute, operational = false, operationPat
     : identities.find(item => item.role === 'REQUESTER') ?? {};
   const links = items => items.map(([route, href, label]) => `<a href="${href}" data-route="${route}"${activeRoute === route || (route === 'solutions' && activeRoute === 'solution') ? ' aria-current="page"' : ''}>${navIcon(route)}<span>${label}</span></a>`).join('');
   const labels = { 'tecnico-cdm': 'Técnico CDM', 'tecnico-m365': 'Técnico Microsoft 365', 'tecnico-geral': 'Técnico Geral' };
-  const choices = identities.map(item => `<button class="persona-choice" type="button" data-persona="${escapeHtml(item.identity_id)}"${pending ? ' disabled' : ''} aria-pressed="${item.identity_id === identity.identity_id}"><span class="persona-choice-icon">${navIcon(item.role === 'REQUESTER' ? 'user' : 'support')}</span><span><strong>${escapeHtml(item.role === 'REQUESTER' ? 'Requester' : labels[item.identity_id] || item.name || item.identity_id)}</strong><small>${escapeHtml(item.name || item.area || '')}</small></span>${item.identity_id === identity.identity_id ? navIcon('check') : ''}</button>`).join('');
+  const choices = identities.map(item => {
+    const visual = personaIconPresentation(item);
+    return `<button class="persona-choice" type="button" data-persona="${escapeHtml(item.identity_id)}"${pending ? ' disabled' : ''} aria-pressed="${item.identity_id === identity.identity_id}"><span class="persona-choice-icon persona-choice-icon--${visual.modifier}">${navIcon(visual.icon)}</span><span><strong>${escapeHtml(item.role === 'REQUESTER' ? 'Requester' : labels[item.identity_id] || item.name || item.identity_id)}</strong><small>${escapeHtml(item.name || item.area || '')}</small></span>${item.identity_id === identity.identity_id ? navIcon('check') : ''}</button>`;
+  }).join('');
   const email = corporateEmailFromName(requester.name || '');
   return `<header class="app-header app-header--${operational ? 'operational' : 'public'}">
     <a class="brand-lockup" href="/" data-route="solutions" aria-label="Jup Resolve"><span class="brand-wordmark" aria-hidden="true"><span class="brand-wordmark__jup">Jup</span><span class="brand-wordmark__resolve">Resolve</span></span></a>
@@ -131,7 +144,7 @@ export function renderJupWorkspace({ identity = {}, messages = [], understood = 
           <button class="scroll-bottom" type="button" data-action="scroll-bottom" hidden aria-label="Voltar à última mensagem">Última mensagem ↓</button>
           <form id="jup-form" class="composer" aria-label="Enviar mensagem ao Jup" aria-busy="${loading}">
             ${commandMenuOpen && /^\/\S*$/.test(draft) ? '<div class="composer-command-menu" data-command-menu role="listbox" aria-label="Comandos"><button type="button" data-command="/solicitacoes" role="option" aria-label="/solicitacoes. Ver minhas solicitações e seus status"><strong>/solicitacoes</strong><span>Ver minhas solicitações e seus status</span></button></div>' : ''}
-            <div class="composer-input-row"><span class="composer-leading-icon" aria-hidden="true">${navIcon('jup')}</span><label class="sr-only" for="jup-message">Mensagem</label><textarea id="jup-message" name="message" rows="1" maxlength="3000" aria-describedby="composer-hint" placeholder="Digite sua mensagem aqui..."${loading ? ' disabled' : ''}>${escapeHtml(draft)}</textarea></div>
+            <div class="composer-input-row"><span class="composer-leading-icon" data-composing="${Boolean(String(draft).trim())}" aria-hidden="true"><span class="composer-leading-icon__state composer-leading-icon__state--idle">${navIcon('message-circle-dots')}</span><span class="composer-leading-icon__state composer-leading-icon__state--typing">${navIcon('message-circle-edit')}</span></span><label class="sr-only" for="jup-message">Mensagem</label><textarea id="jup-message" name="message" rows="1" maxlength="3000" aria-describedby="composer-hint" placeholder="Digite sua mensagem aqui..."${loading ? ' disabled' : ''}>${escapeHtml(draft)}</textarea></div>
             <div class="composer-actions"><span id="composer-hint" class="composer-hint">Enter para enviar · Shift+Enter para nova linha</span><button class="button button--primary composer-send" type="submit" aria-label="Enviar mensagem"${loading ? ' disabled' : ''}><span class="sr-only">${loading ? 'Aguarde...' : 'Enviar'}</span>${navIcon('send')}</button></div>
           </form>
         </div></div>

@@ -1,3 +1,5 @@
+import { createProgressiveScrollFollower } from './conversation.mjs';
+
 const motion = () => ({ gsap: globalThis.gsap, Flip: globalThis.Flip });
 
 export function createWelcomeEntry() {
@@ -102,6 +104,7 @@ export function presentChat(root, { welcome = false, followConversation = true, 
   }
 
   const timelines = [];
+  const progressiveFollowers = [];
   const welcomeTimeline = animateWelcome(root, gsap, welcome);
   if (welcomeTimeline) timelines.push(welcomeTimeline);
 
@@ -120,15 +123,14 @@ export function presentChat(root, { welcome = false, followConversation = true, 
     const weights = chunks.map(chunk => chunk.dataset.revealPause === 'block' ? 2.1 : chunk.dataset.revealPause === 'punctuation' ? 1.55 : 1);
     const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
     const thread = message.closest?.('.conversation-thread');
-    let follow = Boolean(followConversation);
-    const onScroll = () => { follow = thread ? thread.scrollHeight - thread.scrollTop - thread.clientHeight < 88 : false; };
-    thread?.addEventListener?.('scroll', onScroll, { passive: true });
+    const follower = createProgressiveScrollFollower(thread, followConversation);
+    progressiveFollowers.push(follower);
     const timeline = gsap.timeline({
-      onUpdate() { if (follow && thread) thread.scrollTop = thread.scrollHeight; },
+      onUpdate() { follower.update(); },
       onComplete() {
         followups.forEach(item => item.removeAttribute('aria-hidden'));
         message.querySelector?.('.response-announcement')?.remove?.();
-        thread?.removeEventListener?.('scroll', onScroll);
+        follower.stop();
       },
     });
     gsap.set(chunks, { autoAlpha: 0 });
@@ -146,6 +148,7 @@ export function presentChat(root, { welcome = false, followConversation = true, 
 
   return () => {
     timelines.forEach(timeline => timeline.kill());
+    progressiveFollowers.forEach(follower => follower.stop());
     fresh.forEach(exposeResponse);
   };
 }
