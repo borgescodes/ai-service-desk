@@ -22,7 +22,7 @@
 @media (max-width: 760px) {
   :root { --header-height: 68px; }
   .app-header { padding-inline: 16px; grid-template-columns: 135px 1fr auto; }
-  .brand-lockup img { width: 132px; }
+  .brand-wordmark { font-size: 23px; gap: 4px; }
   .primary-nav { gap: 13px; justify-content: end; }
   .header-new-chat { display: none; }
   .main-content { padding: 24px 16px 40px; }

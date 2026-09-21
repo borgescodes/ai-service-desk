@@ -378,8 +378,11 @@ def test_static_build_serves_assets_with_safe_mime_and_csp(tmp_path) -> None:
         root = client.get("/")
         assert css.status_code == 200
         assert css.headers["content-type"].startswith("text/css")
+        assert css.headers["cache-control"] == "no-store"
         assert js.status_code == 200
         assert "javascript" in js.headers["content-type"]
+        assert js.headers["cache-control"] == "no-store"
+        assert root.headers["cache-control"] == "no-store"
         csp = root.headers["content-security-policy"]
         assert "default-src 'self'" in csp
         assert "connect-src 'self'" in csp

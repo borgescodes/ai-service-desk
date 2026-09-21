@@ -32,6 +32,9 @@ test('header exposes backend persona choices and a real new-chat control', () =>
   const identities = [{ identity_id: 'pedro-miranda', name: 'Pedro Miranda', email: 'pedro@juparana.com.br', job_title: 'Analista', area: 'Revenda', role: 'REQUESTER' }, { identity_id: 'tecnico-cdm', name: 'Técnico CDM', role: 'TECHNICIAN' }];
   const html = renderAppHeader({ activeRoute: 'jup', identities, identity: identities[0] });
   assert.match(html, /Pedro Miranda/);
+  assert.match(html, /class="brand-wordmark"/);
+  assert.match(html, /brand-wordmark__jup">Jup<\/span><span class="brand-wordmark__resolve">Resolve/);
+  assert.doesNotMatch(html, /jup-resolve-logo\.svg|<img[^>]+brand/i);
   assert.match(html, /data-persona="tecnico-cdm"/);
   assert.match(html, /data-action="new-chat"/);
   assert.match(html, /Minhas solicitações/);

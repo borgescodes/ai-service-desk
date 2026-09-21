@@ -80,7 +80,7 @@ def create_app(
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = _CSP
-        if request.url.path.startswith("/api"):
+        if request.url.path.startswith("/api") or app.state.static_dir is not None:
             response.headers["Cache-Control"] = "no-store"
         return response
 

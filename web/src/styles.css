@@ -1,6 +1,6 @@
 * { box-sizing: border-box; }
 html { color-scheme: light; min-width: 320px; background: var(--color-canvas); scrollbar-gutter: stable; }
-body { min-height: 100dvh; margin: 0; background: var(--color-canvas); color: var(--color-ink); font: 450 14px/1.6 var(--font-ui); text-rendering: optimizeLegibility; }
+body { min-height: 100dvh; margin: 0; background: var(--color-canvas); color: var(--color-ink); font: 450 14px/1.6 var(--font-ui, "Montserrat Variable", "Segoe UI", sans-serif); font-synthesis: none; text-rendering: optimizeLegibility; }
 button, input, textarea { font: inherit; }
 button, summary { cursor: pointer; }
 button { border: 0; }
@@ -10,7 +10,7 @@ button, a { transition: color var(--transition-fast), background-color var(--tra
 button:disabled { cursor: not-allowed; opacity: .5; }
 :focus-visible { outline: 3px solid color-mix(in srgb, var(--color-accent) 74%, white); outline-offset: 3px; }
 h1, h2, h3, h4, p { margin: 0; }
-h1 { font: 700 clamp(36px, 4.4vw, 68px)/.98 var(--font-display); letter-spacing: -.035em; color: var(--color-primary-900); }
+h1 { font: 700 clamp(36px, 4.4vw, 68px)/.98 var(--font-display, "Magistral", "Montserrat Variable", sans-serif); letter-spacing: -.035em; color: var(--color-primary-900); }
 h2 { font-size: 20px; line-height: 1.25; letter-spacing: -.025em; }
 h3 { font-size: 13px; line-height: 1.35; }
 small { font-size: 12px; }
@@ -21,8 +21,11 @@ img { max-width: 100%; }
 .skip-link:focus { top: 10px; }
 
 .app-header { position: sticky; top: 0; z-index: 30; height: var(--header-height); padding: 0 max(28px, calc((100vw - var(--content-max)) / 2)); display: grid; grid-template-columns: minmax(190px, 1fr) auto minmax(300px, 1fr); align-items: center; gap: 26px; background: color-mix(in srgb, var(--color-canvas) 94%, white); border-bottom: 1px solid var(--color-border); }
-.brand-lockup { display: inline-flex; width: fit-content; align-items: center; }
-.brand-lockup img { display: block; width: 156px; height: auto; }
+.brand-lockup { display: inline-flex; width: fit-content; align-items: center; color: inherit; }
+.brand-lockup:hover { color: inherit; }
+.brand-wordmark { display: inline-flex; align-items: baseline; gap: 5px; font-family: var(--font-display, "Magistral", "Montserrat Variable", sans-serif); font-size: 27px; font-weight: 700; line-height: 1; letter-spacing: -.035em; white-space: nowrap; }
+.brand-wordmark__jup { color: var(--color-accent); }
+.brand-wordmark__resolve { color: var(--color-primary); }
 .primary-nav { display: flex; align-self: stretch; align-items: center; justify-content: center; gap: 30px; }
 .primary-nav a { position: relative; display: inline-flex; align-items: center; gap: 8px; height: 100%; color: var(--color-ink-soft); font-size: 12px; font-weight: 650; white-space: nowrap; }
 .primary-nav a::after { content: ""; position: absolute; inset: auto 0 -1px; height: 2px; background: transparent; }
