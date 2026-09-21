@@ -102,7 +102,8 @@ _ADMIN_ROLE_ALIAS = re.compile(
 _ENTER_ACCESS_ALIAS = re.compile(r"\bentrar\b", re.IGNORECASE)
 _GENERAL_IT_CLEAR = re.compile(
     r"\b(?:pc|computador|notebook|note|windows)\b.*\b(?:travando|travou|trava|lento|lentidao|"
-    r"erro|nao liga|nao abre)\b|\b(?:travando|travou|lentidao)\b.*\b(?:pc|computador|notebook|note)\b",
+    r"erro|nao liga|nao abre)\b|\b(?:travando|travou|lentidao)\b.*"
+    r"\b(?:pc|computador|notebook|note)\b",
     re.IGNORECASE,
 )
 _ACCESS_REQUEST = re.compile(

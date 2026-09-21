@@ -436,7 +436,9 @@ def test_cdm_offer_uses_direct_user_facing_action_without_duplicate_article_copy
             "status": "KNOWLEDGE_FOUND",
             "system": "CDM",
             "request_id": None,
-            "answer": "O acesso de solicitante ao CDM precisa de aprovação humana antes da liberação.",
+            "answer": (
+                "O acesso de solicitante ao CDM precisa de aprovação humana antes da liberação."
+            ),
             "knowledge_id": "KB-SYN-CDM-ACCESS-001",
             "article": {
                 "knowledge_id": "KB-SYN-FAQ-CDM-REQUEST-001",
