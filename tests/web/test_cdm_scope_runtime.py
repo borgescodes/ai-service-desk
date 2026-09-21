@@ -108,15 +108,17 @@ def test_arbitrary_areas_are_not_fuzzy_matched(runtime, area):
     assert result["status"] == "NEEDS_CLARIFICATION"
 
 
-def test_unknown_area_can_select_and_confirm_scope(runtime):
+def test_unknown_area_selection_is_informed_and_does_not_repeat_confirmation(runtime):
     identity = requester(runtime, "Financeiro")
-    runtime.send_message(identity, "Quero acesso ao CDM")
+    first = runtime.send_message(identity, "Quero acesso ao CDM")
+    assert "vou considerar essa escolha como sua confirmação" in first["question"]
+
     result = runtime.send_message(identity, "UBS")
+
+    assert result["status"] == "REQUEST_CREATED"
     assert result["business_scope"] == "ubs"
     assert result["scope_mismatch"] is True
-    assert result["request_id"] is None
-    result = runtime.send_message(identity, "Confirmo")
-    assert result["status"] == "REQUEST_CREATED"
+    assert result["scope_confirmed"] is True
 
 
 def test_unavailable_explicit_scope_does_not_fall_back_to_identity(runtime):
@@ -149,8 +151,7 @@ def test_runtime_accepts_extended_adapter_catalog():
 def test_short_scope_answer_keeps_original_purpose_and_cannot_change_role(runtime):
     identity = requester(runtime, "Financeiro")
     runtime.send_message(identity, "Quero acesso ao CDM")
-    runtime.send_message(identity, "UBS")
-    result = runtime.send_message(identity, "Sim")
+    result = runtime.send_message(identity, "UBS")
     detail = runtime.get_operational_request("tecnico-cdm", result["request_id"])
     assert detail["purpose"] == "Quero acesso ao CDM"
     assert detail["requested_role"] == "SOLICITANTE"

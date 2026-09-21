@@ -101,8 +101,8 @@ _ADMIN_ROLE_ALIAS = re.compile(
 )
 _ENTER_ACCESS_ALIAS = re.compile(r"\bentrar\b", re.IGNORECASE)
 _GENERAL_IT_CLEAR = re.compile(
-    r"\b(?:pc|computador|notebook|windows)\b.*\b(?:travando|travou|trava|lento|lentidao|"
-    r"erro|nao liga|nao abre)\b|\b(?:travando|travou|lentidao)\b.*\b(?:pc|computador|notebook)\b",
+    r"\b(?:pc|computador|notebook|note|windows)\b.*\b(?:travando|travou|trava|lento|lentidao|"
+    r"erro|nao liga|nao abre)\b|\b(?:travando|travou|lentidao)\b.*\b(?:pc|computador|notebook|note)\b",
     re.IGNORECASE,
 )
 _ACCESS_REQUEST = re.compile(
@@ -1621,7 +1621,9 @@ class DemoRuntime:
             f"{self.cdm_scope_catalog.label(scope)}. É isso mesmo?"
             if mismatch
             else f"Seu perfil está associado a {requester.area}. "
-            f"Para o CDM, qual área você precisa acessar: {labels}?"
+            f"Para o CDM, qual área você precisa acessar: {labels}? "
+            "Ao escolher uma área diferente do seu perfil, vou considerar essa escolha "
+            "como sua confirmação."
         )
         return {
             "status": "NEEDS_CLARIFICATION",
