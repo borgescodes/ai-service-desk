@@ -6,8 +6,9 @@ import { resetConversation } from '../src/state.mjs';
 test('empty chat welcomes inside the conversation without a synthetic message or fixed hero', () => {
   const html = renderJupWorkspace({ identity: { name: 'Ana da Silva' } });
   assert.match(html, /class="chat-welcome"/);
-  assert.match(html, /Olá, <strong>Ana<\/strong>! Como posso ajudar\?/);
-  assert.match(html, /Seu assistente virtual, sempre pronto para ajudar/);
+  assert.match(html, /welcome-line--greeting[^>]*>Olá, <strong>Ana!<\/strong>/);
+  assert.match(html, /welcome-line--question[^>]*>Como posso ajudar\?/);
+  assert.doesNotMatch(html, /Seu assistente virtual/);
   assert.doesNotMatch(html, /conversation-header|conversation-message--jup/);
   assert.match(html, /<textarea[^>]*(?<!disabled)>/);
 });

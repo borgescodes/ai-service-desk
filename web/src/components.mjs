@@ -1,4 +1,4 @@
-import { renderTrackingQueue, renderTrackingDetail, renderTrackingWorkspace } from './tracking.mjs';
+import { renderTrackingQueue, renderTrackingDetail, renderRequesterWorkspace } from './tracking.mjs';
 import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
 import { renderApprovedKnowledgeBody, renderMessageBody } from './knowledge_content.mjs';
 import { navIcon } from './icons.mjs';
@@ -59,12 +59,12 @@ function renderSupportHandoff(handoff) {
 function renderRequestSummary(summary) {
   const items = Array.isArray(summary?.items) ? summary.items : [];
   if (!items.length) return '';
-  return `<div class="tracking-queue request-summary-list" aria-label="Resumo das solicitações">${items.map(item => `<div class="tracking-row request-summary-row"><span class="tracking-row-top"><span class="tracking-system">${escapeHtml(item.system || 'Solicitação')}</span><small>${escapeHtml(item.request_id || '')}</small></span><span class="status-badge">${escapeHtml(item.state_label || '')}</span></div>`).join('')}</div>`;
+  return `<div class="request-summary-list" aria-label="Resumo das solicitações">${items.map(item => `<a class="request-summary-row" href="/requests" data-route="requests"><span class="request-summary-row__top"><strong>${escapeHtml(item.system || 'Solicitação')}</strong><small>${escapeHtml(item.request_id || '')}</small></span><span class="request-summary-row__bottom"><span class="request-summary-status">${escapeHtml(item.state_label || '')}</span><span class="request-summary-action" aria-hidden="true">${navIcon('arrow-right')}</span></span></a>`).join('')}</div>`;
 }
 
 function renderSourceCard(article) {
   if (!article?.knowledge_id || !article?.title || article.provenance?.status !== 'APPROVED') return '';
-  return `<a class="message-source-card" href="/solucoes/${encodeURIComponent(article.knowledge_id)}" data-solution-link data-knowledge-id="${escapeHtml(article.knowledge_id)}"><span class="source-card-icon">${navIcon('solutions')}</span><span class="source-card-copy"><small>Central de Suporte</small><strong>${escapeHtml(article.title)}</strong><span>Abrir artigo</span></span>${navIcon('arrow-right')}</a>`;
+  return `<a class="message-source-strip" href="/solucoes/${encodeURIComponent(article.knowledge_id)}" data-solution-link data-knowledge-id="${escapeHtml(article.knowledge_id)}"><span class="source-strip-icon">${navIcon('solutions')}</span><span class="source-strip-copy"><small>Central de Suporte</small><strong>${escapeHtml(article.title)}</strong></span><span class="source-strip-action">Abrir artigo ${navIcon('arrow-right')}</span></a>`;
 }
 
 function renderMessage(message, { fresh = false, visualState = null, initials = '', flipId = null } = {}) {
@@ -75,14 +75,23 @@ function renderMessage(message, { fresh = false, visualState = null, initials = 
   const requestSummary = message.role === 'JUP' ? renderRequestSummary(message.request_summary) : '';
   const sourceCard = message.role === 'JUP' ? renderSourceCard(message.article) : '';
   const assistantText = requestSummary ? String(message.text ?? '').split(/\n\s*\n/, 1)[0] : message.text;
+  const progressive = fresh && message.role === 'JUP' && !message.thinking && !message.failed;
+  const primary = message.thinking
+    ? `<div class="processing" role="status" aria-label="Jup está pensando"><div class="processing-status"><strong>Pensando · <span data-thinking-seconds="0">0</span>s</strong><span class="thinking-dots" aria-hidden="true"><span></span><span></span><span></span></span></div><p class="processing-activity">${escapeHtml(message.activity || 'Entendendo sua solicitação')}</p></div>`
+    : message.failed
+      ? `<p class="message-error" role="alert">${escapeHtml(message.text)}</p>`
+      : message.role === 'JUP'
+        ? `<div class="message-primary"${progressive ? ' data-progressive-response aria-hidden="true"' : ''}>${renderApprovedKnowledgeBody({ text: assistantText, procedureUrl: message.procedure_url, knowledgeId: message.knowledge_id })}</div>${progressive ? `<span class="sr-only response-announcement">${escapeHtml(assistantText)}</span>` : ''}`
+        : renderMessageBody(message.text);
+  const followupAttribute = progressive ? ' data-response-followup aria-hidden="true"' : '';
   return `<article class="conversation-message ${klass}${message.thinking ? ' conversation-message--thinking' : ''}${fresh ? ' is-new' : ''}">
     ${message.role === 'JUP' ? renderJupVisual({ state: emote, compact: true, flipId }) : ''}
     <div class="message-content"><div class="message-author"><strong>${role}</strong>${message.sentAt ? `<time datetime="${escapeHtml(message.sentAt)}">${escapeHtml(new Date(message.sentAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}</time>` : ''}</div>
-    <div class="message-bubble">${message.thinking ? `<div class="processing" role="status" aria-label="Jup está pensando"><div class="processing-status"><strong>Pensando · <span data-thinking-seconds="0">0</span>s</strong><span class="thinking-dots" aria-hidden="true"><span></span><span></span><span></span></span></div><p class="processing-activity">${escapeHtml(message.activity || 'Entendendo sua solicitação')}</p><div class="processing-context" aria-hidden="true"><span>${navIcon('jup')}</span></div></div>` : message.failed ? `<p class="message-error" role="alert">${escapeHtml(message.text)}</p>` : message.role === 'JUP' ? renderApprovedKnowledgeBody({ text: assistantText, procedureUrl: message.procedure_url, knowledgeId: message.knowledge_id }) : renderMessageBody(message.text)}
-    ${sourceCard}
-    ${requestSummary}
-    ${message.role === 'JUP' ? renderSupportHandoff(message.support_handoff) : ''}
-    ${message.role === 'JUP' && message.requestCta === 'REQUESTS' ? '<a class="button button--secondary message-request-cta" href="/requests" data-route="requests">Ver minhas solicitações</a>' : ''}
+    <div class="message-bubble">${primary}
+    ${sourceCard ? `<div${followupAttribute}>${sourceCard}</div>` : ''}
+    ${requestSummary ? `<div${followupAttribute}>${requestSummary}</div>` : ''}
+    ${message.role === 'JUP' && message.support_handoff ? `<div${followupAttribute}>${renderSupportHandoff(message.support_handoff)}</div>` : ''}
+    ${message.role === 'JUP' && message.requestCta === 'REQUESTS' ? `<div${followupAttribute}><a class="message-request-cta" href="/requests" data-route="requests">Ver todas as solicitações ${navIcon('arrow-right')}</a></div>` : ''}
     ${context ? `<div class="request-context">${context}</div>` : ''}</div></div>
     ${message.role === 'USER' && initials ? `<span class="message-user-avatar" aria-hidden="true">${escapeHtml(initials)}</span>` : ''}
   </article>`;
@@ -96,8 +105,7 @@ function renderChatWelcome(leaving, draft = '', identity = {}) {
       <div class="chat-welcome-avatar-state chat-welcome-avatar-state--idle" data-welcome-state="idle" aria-hidden="${listening}">${renderJupVisual({ state: 'idle' })}</div>
       <div class="chat-welcome-avatar-state chat-welcome-avatar-state--listening" data-welcome-state="listening" aria-hidden="${!listening}">${renderJupVisual({ state: 'listening' })}</div>
     </div>
-    <h1>Olá${firstName ? `, <strong>${escapeHtml(firstName)}</strong>` : ''}! Como posso ajudar?</h1>
-    <p class="chat-welcome-tagline">Seu assistente virtual, sempre pronto para ajudar</p>
+    <h1><span class="welcome-line welcome-line--greeting" data-welcome-line>Olá${firstName ? `, <strong>${escapeHtml(firstName)}!</strong>` : '!'}</span><span class="welcome-line welcome-line--question" data-welcome-line>Como posso ajudar?</span></h1>
   </div>`;
 }
 
@@ -133,7 +141,7 @@ export function renderJupWorkspace({ identity = {}, messages = [], understood = 
 }
 
 export function renderRequestList(items = [], selectedId = null) {
-  return renderTrackingWorkspace(items, selectedId);
+  return renderRequesterWorkspace(items, selectedId);
 }
 
 export function renderOperationDetail(item, uiState = {}) {
@@ -187,5 +195,9 @@ export function renderHandoffWorkspace(items = [], selectedId = null) {
   const selected = sorted.find(item => item.handoff_id === selectedId) || sorted[0];
   const selectedPresentation = handoffPresentation(selected);
   const conversation = (selected.source_conversation || []).map(entry => `<li><strong>${entry.role === 'USER' ? 'Solicitante' : 'Jup'}</strong><p>${escapeHtml(entry.text)}</p></li>`).join('');
-  return `<div class="tracking-workspace handoff-workspace"><section class="tracking-list" aria-label="Fila de encaminhamentos"><header class="tracking-list-header"><h2>Fila</h2><span>${sorted.length}</span></header><div class="handoff-queue">${sorted.map(item => { const summary = handoffPresentation(item); return `<button type="button" class="queue-row" data-handoff-id="${escapeHtml(item.handoff_id)}" aria-current="${item.handoff_id === selected.handoff_id}"><span class="tracking-row-top"><span class="tracking-system">${escapeHtml(summary.system)}</span><small>${escapeHtml(item.handoff_id)}</small></span><strong class="tracking-requester">${escapeHtml(item.requester?.name || 'Solicitante')}</strong><span class="tracking-subject">${escapeHtml(summary.subject)}</span><span class="tracking-row-state"><span class="status-badge">Encaminhado</span>${handoffUpdated(item) ? `<small class="tracking-updated">${navIcon('clock')} ${escapeHtml(handoffUpdated(item))}</small>` : ''}</span></button>`; }).join('')}</div></section><article class="tracking-detail handoff-detail"><header class="tracking-detail-header"><div><p class="tracking-kicker">${escapeHtml(selected.handoff_id)}</p><h2>${escapeHtml(selectedPresentation.system)}</h2></div><span class="status-badge">Encaminhado</span></header><section aria-label="Contexto do solicitante"><h3>Contexto do solicitante</h3><div class="tracking-person"><span class="tracking-person-icon">${escapeHtml((selected.requester?.name || '?')[0])}</span><div><strong>${escapeHtml(selected.requester?.name || '')}</strong><p>${escapeHtml(selected.requester?.area || '')}</p></div></div></section><section aria-label="Resumo do Jup"><h3>Resumo do Jup</h3><p class="handoff-summary-text">${escapeHtml(selectedPresentation.subject)}</p>${selectedPresentation.approved ? `<p class="tracking-muted">Orientação aprovada encontrada: ${escapeHtml(selectedPresentation.approved)}</p>` : ''}</section><section aria-label="Conversa"><h3>Conversa</h3><ol class="handoff-conversation-list">${conversation}</ol></section><details class="technical-disclosure"><summary>Detalhes técnicos</summary><dl><div><dt>Responsável</dt><dd>${escapeHtml(selected.technician?.name || '')}</dd></div><div><dt>Capability</dt><dd>${escapeHtml(selected.capability || '')}</dd></div><div><dt>Confiança</dt><dd>${escapeHtml(selected.confidence?.label || '')}</dd></div><div><dt>Resumo original</dt><dd class="technical-summary-raw">${escapeHtml(selected.technical_summary || '')}</dd></div></dl></details></article></div>`;
+  const queue = sorted.map((item) => {
+    const summary = handoffPresentation(item);
+    return `<button type="button" class="queue-row" data-handoff-id="${escapeHtml(item.handoff_id)}" aria-current="${item.handoff_id === selected.handoff_id}"><strong class="queue-row__subject">${escapeHtml(summary.subject)}</strong><span class="queue-row__meta"><span>${escapeHtml(item.requester?.name || 'Solicitante')}</span><small>${escapeHtml(item.handoff_id)}</small></span><span class="queue-row__state"><span class="status-badge">Encaminhado</span>${handoffUpdated(item) ? `<small class="tracking-updated">${navIcon('clock')} ${escapeHtml(handoffUpdated(item))}</small>` : ''}</span></button>`;
+  }).join('');
+  return `<div class="tracking-workspace handoff-workspace"><section class="tracking-list" aria-label="Fila de encaminhamentos"><header class="tracking-list-header"><h2>Fila</h2><span>${sorted.length}</span></header><div class="handoff-queue">${queue}</div></section><article class="tracking-detail handoff-detail"><header class="tracking-detail-header"><div><p class="tracking-kicker">${escapeHtml(selected.handoff_id)}</p><h2>${escapeHtml(selectedPresentation.subject)}</h2></div><span class="status-badge">Encaminhado</span></header><section aria-label="Contexto do solicitante"><h3>Contexto do solicitante</h3><div class="tracking-person"><span class="tracking-person-icon">${escapeHtml((selected.requester?.name || '?')[0])}</span><div><strong>${escapeHtml(selected.requester?.name || '')}</strong><p>${escapeHtml(selected.requester?.area || '')}</p></div></div></section><section aria-label="Resumo do Jup"><h3>Resumo do Jup</h3><p class="handoff-summary-text">${escapeHtml(selectedPresentation.subject)}</p>${selectedPresentation.approved ? `<p class="tracking-muted">Orientação aprovada encontrada: ${escapeHtml(selectedPresentation.approved)}</p>` : ''}</section><section aria-label="Conversa"><h3>Conversa</h3><ol class="handoff-conversation-list">${conversation}</ol></section><details class="technical-disclosure"><summary>Detalhes técnicos</summary><dl><div><dt>Responsável</dt><dd>${escapeHtml(selected.technician?.name || '')}</dd></div><div><dt>Capability</dt><dd>${escapeHtml(selected.capability || '')}</dd></div><div><dt>Confiança</dt><dd>${escapeHtml(selected.confidence?.label || '')}</dd></div><div><dt>Resumo original</dt><dd class="technical-summary-raw">${escapeHtml(selected.technical_summary || '')}</dd></div></dl></details></article></div>`;
 }

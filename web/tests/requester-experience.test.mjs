@@ -29,7 +29,8 @@ test('empty Jup workspace is concise and task-first', () => {
     loading: false,
     sourceContext: null,
   });
-  assert.match(html, /Olá, <strong>Pedro<\/strong>! Como posso ajudar\?/);
+  assert.match(html, /welcome-line--greeting[^>]*>Olá, <strong>Pedro!<\/strong>/);
+  assert.match(html, /welcome-line--question[^>]*>Como posso ajudar\?/);
   assert.match(html, /Digite sua mensagem aqui/);
   assert.doesNotMatch(html, /Eu organizo o contexto|O que entendi|Contexto estruturado/i);
 });
@@ -74,7 +75,7 @@ test('request-status response renders an explicit route CTA without inspecting i
     messages: [{ role: 'JUP', text: 'Você tem 1 solicitação em andamento.', requestCta: 'REQUESTS' }],
   });
   assert.match(html, /href="\/requests"[^>]*data-route/);
-  assert.match(html, />Ver minhas solicitações</);
+  assert.match(html, />Ver todas as solicitações /);
 });
 
 test('composer renders a compact slash menu only for command search', () => {

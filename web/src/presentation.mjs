@@ -34,17 +34,120 @@ export function animateJupFlip(root, state, reducedMotion = false) {
   });
 }
 
-export function presentChat(root, { reducedMotion = false } = {}) {
-  const { gsap } = motion();
-  const fresh = root.querySelectorAll('.conversation-message.is-new:not(.conversation-message--thinking)');
-  if (!gsap || reducedMotion || !fresh.length) return () => {};
-  const timeline = gsap.timeline();
-  fresh.forEach(message => {
-    const paragraphs = message.querySelectorAll('.message-bubble > p, .message-source-card, .support-handoff');
-    timeline.fromTo(message, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.18, ease: 'power3.out' }, 0);
-    if (paragraphs.length) timeline.fromTo(paragraphs, { autoAlpha: 0, y: 6 }, { autoAlpha: 1, y: 0, duration: 0.22, stagger: 0.035, ease: 'power3.out' }, 0.04);
+export function responseRevealDuration(wordCount) {
+  const words = Math.max(0, Number(wordCount) || 0);
+  if (words <= 24) return Math.min(1200, Math.max(700, 700 + words * 20));
+  if (words <= 120) return Math.min(2000, Math.max(1200, 1000 + words * 12));
+  return Math.min(3000, Math.max(2200, 2000 + (words - 120) * 2.1));
+}
+
+function exposeResponse(message) {
+  message.querySelector?.('[data-progressive-response]')?.removeAttribute?.('aria-hidden');
+  message.querySelectorAll?.('[data-response-followup]')?.forEach?.(item => item.removeAttribute?.('aria-hidden'));
+  message.querySelector?.('.response-announcement')?.remove?.();
+}
+
+function chunkResponse(primary) {
+  const doc = primary?.ownerDocument;
+  if (!doc?.createTreeWalker || !doc.createElement || !doc.createDocumentFragment) return [];
+  const filter = doc.defaultView?.NodeFilter ?? globalThis.NodeFilter;
+  if (!filter) return [];
+  const walker = doc.createTreeWalker(primary, filter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node.data.trim() && !node.parentElement?.closest?.('.sr-only')) textNodes.push(node);
+  }
+  const chunks = [];
+  textNodes.forEach(node => {
+    const tokens = node.data.match(/\S+\s*/g) || [];
+    if (!tokens.length) return;
+    const fragment = doc.createDocumentFragment();
+    for (let index = 0; index < tokens.length; index += 2) {
+      const text = tokens.slice(index, index + 2).join('');
+      const span = doc.createElement('span');
+      span.className = 'response-reveal-chunk';
+      span.textContent = text;
+      if (/[.!?;:]\s*$/.test(text)) span.dataset.revealPause = 'punctuation';
+      fragment.append(span);
+      chunks.push(span);
+    }
+    const last = chunks.at(-1);
+    if (last && node.parentElement?.matches?.('p, li, h1, h2, h3, h4')) last.dataset.revealPause = 'block';
+    const link = node.parentElement?.closest?.('a');
+    if (link && !link.getAttribute('aria-label')) link.setAttribute('aria-label', link.textContent.trim());
+    node.replaceWith(fragment);
   });
-  return () => timeline.kill();
+  return chunks;
+}
+
+function animateWelcome(root, gsap, enabled) {
+  if (!enabled) return null;
+  const welcome = root.querySelector?.('.chat-welcome:not(.chat-welcome--leaving)');
+  if (!welcome) return null;
+  const avatar = welcome.querySelector?.('.chat-welcome-avatar-stack');
+  const lines = welcome.querySelectorAll?.('[data-welcome-line]') || [];
+  const timeline = gsap.timeline();
+  if (avatar) timeline.fromTo(avatar, { autoAlpha: 0, scale: 0.94 }, { autoAlpha: 1, scale: 1, duration: 0.42, ease: 'power3.out' });
+  lines.forEach((line, index) => timeline.fromTo(line, { clipPath: 'inset(0 100% 0 0)', autoAlpha: 0.45 }, { clipPath: 'inset(0 0% 0 0)', autoAlpha: 1, duration: 0.48, ease: 'power3.out' }, 0.22 + index * 0.34));
+  return timeline;
+}
+
+export function presentChat(root, { welcome = false, followConversation = true, reducedMotion = false } = {}) {
+  const { gsap } = motion();
+  const fresh = [...root.querySelectorAll('.conversation-message.is-new:not(.conversation-message--thinking)')];
+  if (!gsap || reducedMotion) {
+    fresh.forEach(exposeResponse);
+    return () => {};
+  }
+
+  const timelines = [];
+  const welcomeTimeline = animateWelcome(root, gsap, welcome);
+  if (welcomeTimeline) timelines.push(welcomeTimeline);
+
+  fresh.forEach(message => {
+    const primary = message.querySelector?.('[data-progressive-response]');
+    if (!primary) return;
+    const chunks = chunkResponse(primary);
+    const followups = [...(message.querySelectorAll?.('[data-response-followup]') || [])];
+    if (!chunks.length) {
+      exposeResponse(message);
+      return;
+    }
+    primary.removeAttribute('aria-hidden');
+    const wordCount = primary.textContent.trim().split(/\s+/).filter(Boolean).length;
+    const duration = responseRevealDuration(wordCount) / 1000;
+    const weights = chunks.map(chunk => chunk.dataset.revealPause === 'block' ? 2.1 : chunk.dataset.revealPause === 'punctuation' ? 1.55 : 1);
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    const thread = message.closest?.('.conversation-thread');
+    let follow = Boolean(followConversation);
+    const onScroll = () => { follow = thread ? thread.scrollHeight - thread.scrollTop - thread.clientHeight < 88 : false; };
+    thread?.addEventListener?.('scroll', onScroll, { passive: true });
+    const timeline = gsap.timeline({
+      onUpdate() { if (follow && thread) thread.scrollTop = thread.scrollHeight; },
+      onComplete() {
+        followups.forEach(item => item.removeAttribute('aria-hidden'));
+        message.querySelector?.('.response-announcement')?.remove?.();
+        thread?.removeEventListener?.('scroll', onScroll);
+      },
+    });
+    gsap.set(chunks, { autoAlpha: 0 });
+    let cursor = 0;
+    chunks.forEach((chunk, index) => {
+      timeline.to(chunk, { autoAlpha: 1, duration: 0.07, ease: 'power2.out' }, cursor / totalWeight * Math.max(0.1, duration - 0.07));
+      cursor += weights[index];
+    });
+    if (followups.length) {
+      timeline.call(() => followups.forEach(item => item.removeAttribute('aria-hidden')), [], duration)
+        .fromTo(followups, { autoAlpha: 0, y: 3 }, { autoAlpha: 1, y: 0, duration: 0.16, stagger: 0.04, ease: 'power3.out' }, duration);
+    }
+    timelines.push(timeline);
+  });
+
+  return () => {
+    timelines.forEach(timeline => timeline.kill());
+    fresh.forEach(exposeResponse);
+  };
 }
 
 export async function dismissThinking(root, reducedMotion = false) {

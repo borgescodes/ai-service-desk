@@ -66,7 +66,7 @@ test('chat is conversation-first with honest timer and progressive approved sour
   });
   assert.match(html, /data-thinking-seconds="0"/);
   assert.match(html, /Pensando · <span[^>]*>0<\/span>s/);
-  assert.match(html, /class="message-source-card"/);
+  assert.match(html, /class="message-source-strip"/);
   assert.match(html, /Central de Suporte/);
   assert.match(html, /Abrir artigo/);
   assert.doesNotMatch(html, /chat-support-rail|data-reveal-response/);

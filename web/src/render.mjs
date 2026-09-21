@@ -1,3 +1,5 @@
+import { navIcon } from './icons.mjs';
+
 export function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -9,25 +11,28 @@ export function escapeHtml(value) {
 
 export function renderConfidence(confidence = {}) {
   const label = escapeHtml(confidence.label ?? confidence.level ?? 'Não informada');
-  const percent = Number.isFinite(confidence.percent) ? ` · ${confidence.percent}%` : '';
-  return `<span class="confidence-chip" data-tone="confidence"><span class="confidence-dot" aria-hidden="true"></span>Confiança ${label}${percent}</span>`;
+  const percent = Number.isFinite(confidence.percent) ? `<small>${confidence.percent}%</small>` : '';
+  const level = String(confidence.level || '').toUpperCase();
+  const active = ({ LOW: 1, MEDIUM: 2, HIGH: 3 })[level] || 0;
+  const meter = Array.from({ length: 3 }, (_, index) => `<span class="confidence-meter__segment${index < active ? ' is-active' : ''}"></span>`).join('');
+  return `<span class="confidence-meter" data-level="${escapeHtml(level || 'UNKNOWN')}"><strong>${label}</strong><span class="confidence-meter__bars" aria-hidden="true">${meter}</span>${percent}</span>`;
 }
 
 const STATUS_ICONS = {
-  PENDING_APPROVAL: '○',
-  APPROVED: '✓',
-  REJECTED: '×',
-  DENIED_POLICY: '!',
-  EXECUTING: '↻',
-  COMPLETED: '✓',
-  FAILED: '!',
+  PENDING_APPROVAL: 'pending',
+  APPROVED: 'check',
+  REJECTED: 'rejected',
+  DENIED_POLICY: 'blocked',
+  EXECUTING: 'sync',
+  COMPLETED: 'check',
+  FAILED: 'failed',
 };
 
 export function renderStatus(item = {}) {
   const state = escapeHtml(item.state ?? 'UNKNOWN');
   const label = escapeHtml(item.state_label ?? ({ PENDING_APPROVAL: 'Aguardando aprovação', APPROVED: 'Aprovada', REJECTED: 'Rejeitada', DENIED_POLICY: 'Não autorizada', EXECUTING: 'Em andamento', COMPLETED: 'Concluída', FAILED: 'Não concluída' })[item.state] ?? 'Estado indisponível');
-  const icon = escapeHtml(STATUS_ICONS[item.state] ?? '•');
-  return `<span class="status-badge" data-state="${state}"><span aria-hidden="true">${icon}</span><span>${label}</span></span>`;
+  const icon = STATUS_ICONS[item.state] ?? 'dot';
+  return `<span class="status-badge" data-state="${state}">${navIcon(icon)}<span>${label}</span></span>`;
 }
 
 export function renderErrorState(message, retryLabel = 'Tentar novamente') {
@@ -35,11 +40,11 @@ export function renderErrorState(message, retryLabel = 'Tentar novamente') {
 }
 
 export function renderUnauthorizedState(message) {
-  return `<section class="state-panel state-panel--unauthorized" role="alert"><span class="state-mark" aria-hidden="true">!</span><div><strong>Perfil sem acesso</strong><p>${escapeHtml(message)}</p><p><a href="/" data-route="solutions">Voltar para Soluções</a></p></div></section>`;
+  return `<section class="state-panel state-panel--unauthorized" role="alert"><span class="state-mark" aria-hidden="true">${navIcon('blocked')}</span><div><strong>Perfil sem acesso</strong><p>${escapeHtml(message)}</p><p><a href="/" data-route="solutions">Voltar para Soluções</a></p></div></section>`;
 }
 
 export function renderEmptyState(title, message) {
-  return `<section class="state-panel state-panel--empty"><span class="state-mark" aria-hidden="true">○</span><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(message)}</p></div></section>`;
+  return `<section class="state-panel state-panel--empty"><span class="state-mark" aria-hidden="true">${navIcon('inbox')}</span><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(message)}</p></div></section>`;
 }
 
 export function renderPrimaryNavigation(activeRoute, identity = {}) {

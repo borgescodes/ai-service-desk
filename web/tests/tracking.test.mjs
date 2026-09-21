@@ -19,7 +19,7 @@ test('timestamps use explicit Sao Paulo timezone with stable Portuguese formatti
 test('request tracking preserves a selectable list and one summary in the detail', () => {
   const html = renderRequestList([item]);
   assert.match(html, /data-request-select="REQ-1"/);
-  assert.match(html, /Resumo/);
+  assert.match(html, /Acesso para solicitar materiais/);
   assert.match(html, /Responsável/);
   assert.match(html, /14 set · 01:02/);
   assert.doesNotMatch(html.replace(/<[^>]*>/g, ''), /2026-09-14T/);

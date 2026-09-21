@@ -9,6 +9,8 @@ const ICONS = Object.freeze({
   'chart-no-axes-column-increasing': 'bxs-bar-chart-alt-2', chevron: 'bx-chevron-down',
   'chevron-down': 'bx-chevron-down', 'arrow-right': 'bx-right-arrow-alt', clock: 'bxs-time-five',
   check: 'bxs-check-circle', warning: 'bxs-error', user: 'bxs-user', request: 'bxs-file',
+  pending: 'bxs-time', rejected: 'bxs-x-circle', blocked: 'bxs-lock-alt', sync: 'bx-sync',
+  failed: 'bxs-error-circle', dot: 'bxs-circle',
   microsoft: 'bxl-microsoft',
 });
 

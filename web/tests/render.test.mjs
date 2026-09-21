@@ -19,7 +19,8 @@ test('escapeHtml neutralizes active markup and quotes', () => {
 
 test('HIGH confidence uses confidence semantics instead of approval or success semantics', () => {
   const html = renderConfidence({ level: 'HIGH', label: 'Alta', percent: 92, tone: 'confidence' });
-  assert.match(html, /Confiança/);
+  assert.match(html, />Alta</);
+  assert.match(html, /confidence-meter__bars/);
   assert.match(html, /92%/);
   assert.doesNotMatch(html, /success|aprovad/i);
 });
@@ -139,7 +140,7 @@ test('operation detail exposes server evidence and action state without deciding
   );
   assert.match(html, /Aprovar solicitação/);
   assert.match(html, /Rejeitar/);
-  assert.match(html, /Técnico CDM/);
+  assert.match(html, /Contexto essencial/);
   assert.match(html, /Aprovação humana necessária/);
 });
 

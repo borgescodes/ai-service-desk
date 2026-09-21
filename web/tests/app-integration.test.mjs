@@ -254,7 +254,8 @@ test('demo identity form creates and activates a trusted requester', async () =>
     area: 'UBS',
   });
   assert.match(ui.root.innerHTML, /Ana da Silva/);
-  assert.match(ui.root.innerHTML, /Olá, <strong>Ana<\/strong>! Como posso ajudar\?/);
+  assert.match(ui.root.innerHTML, /welcome-line--greeting[^>]*>Olá, <strong>Ana!<\/strong>/);
+  assert.match(ui.root.innerHTML, /welcome-line--question[^>]*>Como posso ajudar\?/);
 
   await ui.reset();
   const reset = calls.find(([url]) => url === '/api/jup/conversation/reset');

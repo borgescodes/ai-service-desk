@@ -109,10 +109,12 @@ test('Jup contextual sidebar keeps only new conversation and request tracking', 
   assert.doesNotMatch(html, /Artigos de ajuda/);
 });
 
-test('welcome tagline is typewriter-ready and draft content switches the welcome avatar to listening', () => {
+test('welcome has authored reveal lines and draft content switches the welcome avatar to listening', () => {
   const idle = renderJupWorkspace({ draft: '' });
   const listening = renderJupWorkspace({ draft: 'oi' });
-  assert.match(idle, /class="chat-welcome-tagline"/);
+  assert.match(idle, /welcome-line--greeting/);
+  assert.match(idle, /welcome-line--question/);
+  assert.doesNotMatch(idle, /chat-welcome-tagline/);
   assert.match(idle, /data-listening="false"/);
   assert.match(idle, /chat-welcome[^]*?data-state="idle"/);
   assert.match(listening, /data-listening="true"/);
@@ -126,5 +128,5 @@ test('desktop shell allows FAQ document scrolling and gives conversation a brand
   assert.match(css, /scrollbar-gutter:\s*stable/);
   assert.doesNotMatch(css, /body:has\(\.solutions-home\)[^}]*overflow:\s*hidden/);
   assert.match(css, /\.conversation-thread[^}]*scrollbar-color:/);
-  assert.match(css, /\.chat-welcome-tagline/);
+  assert.match(css, /\.welcome-line/);
 });

@@ -133,10 +133,6 @@ function selectedIdentity() {
   return state.identities.find((item) => item.identity_id === state.identityId) ?? null;
 }
 
-function pageHeading(title, description) {
-  return `<div class="page-heading"><div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p></div></div>`;
-}
-
 function operationPath() {
   if (state.identityId === 'tecnico-m365') return '/demo/operacao/m365';
   if (state.identityId === 'tecnico-geral') return '/demo/operacao/general';
@@ -173,18 +169,18 @@ function renderRoute() {
   }
 
   if (state.route === 'requests') {
-    return `${pageHeading('Minhas solicitações', 'Veja o estado atual e o próximo passo de cada atendimento.')}${renderRequestList(state.routeData.items ?? [], state.selectedRequestId)}`;
+    return renderRequestList(state.routeData.items ?? [], state.selectedRequestId);
   }
 
   if (state.route === 'approvals') {
     const items = sortNewestFirst(state.routeData.items ?? []);
     const selected = state.routeData.selected ?? items.find((item) => item.request_id === state.selectedRequestId) ?? items[0] ?? null;
-    return `${pageHeading('Solicitações recebidas', 'Revise o contexto e dê continuidade ao atendimento.')}<div class="tracking-workspace"><section class="tracking-list" aria-label="Fila de solicitações"><header class="tracking-list-header"><h2>Fila de atendimento</h2><span>${items.length}</span></header>${renderApprovalQueue(items, selected?.request_id)}</section><section aria-label="Detalhe da pendência">${renderOperationDetail(selected, state)}</section></div>${renderHandoffs(state.routeData.handoffs ?? [])}`;
+    return `<h1 class="sr-only">Solicitações recebidas</h1><div class="tracking-workspace"><section class="tracking-list" aria-label="Fila de solicitações"><header class="tracking-list-header"><h2>Fila de atendimento</h2><span>${items.length}</span></header>${renderApprovalQueue(items, selected?.request_id)}</section><section aria-label="Detalhe da pendência">${renderOperationDetail(selected, state)}</section></div>${renderHandoffs(state.routeData.handoffs ?? [])}`;
   }
 
   if (state.route === 'handoffs') {
     const items = state.routeData.handoffs ?? [];
-    return `${pageHeading('Encaminhamentos', 'Atendimentos que precisam de continuidade humana.')}${renderHandoffWorkspace(items, state.selectedHandoffId)}`;
+    return `<h1 class="sr-only">Encaminhamentos</h1>${renderHandoffWorkspace(items, state.selectedHandoffId)}`;
   }
 
   return '<section class="tracking-empty"><strong>Área indisponível</strong><p>Escolha outro destino no menu principal.</p></section>';
