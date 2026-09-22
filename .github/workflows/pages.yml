@@ -2,9 +2,6 @@ name: GitHub Pages demo
 
 on:
   pull_request:
-    paths:
-      - "web/**"
-      - ".github/workflows/pages.yml"
   push:
     branches: [main]
   workflow_dispatch:
@@ -62,26 +59,46 @@ jobs:
           grep -q '/ai-service-desk/app.mjs' pages-dist/index.html
           grep -q '/ai-service-desk/assets/' pages-dist/tokens.css
 
-      - name: Upload validated site
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: web/pages-dist
-
   deploy:
     name: Deploy
-    if: github.event_name != 'pull_request'
     needs: validate
+    if: github.event_name != 'pull_request'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build exact frontend for Pages
+        working-directory: web
+        env:
+          JUP_PAGES_BASE_PATH: /ai-service-desk
+        run: npm run build:pages
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:
           enablement: true
+
+      - name: Upload static site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/pages-dist
 
       - name: Deploy
         id: deployment
