@@ -48,9 +48,9 @@ const CATALOG = Object.freeze([
 const BASE_IDENTITIES = Object.freeze([
   {
     identity_id: 'pedro-miranda',
-    name: 'Pedro Miranda',
-    email: 'pedro.miranda@juparana.com.br',
-    job_title: 'Analista de Acesso ao Mercado',
+    name: 'Fulano de Tal',
+    email: 'fulano.tal@example.invalid',
+    job_title: 'Colaborador',
     area: 'Revenda - Matriz',
     role: 'REQUESTER',
     can_operate: false,

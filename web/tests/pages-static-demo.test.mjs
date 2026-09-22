@@ -47,6 +47,14 @@ test('local static demo opt-in survives client-side navigation', () => {
   }
 });
 
+test('static demo exposes only fictitious requester identity data', async () => {
+  const identities = await staticApiRequest('/api/session/identities');
+  const requester = identities.find(item => item.role === 'REQUESTER');
+
+  assert.equal(requester?.name, 'Fulano de Tal');
+  assert.equal(requester?.email, 'fulano.tal@example.invalid');
+});
+
 test('static demo exposes FAQ without backend transport', async () => {
   const home = await staticApiRequest('/api/faq');
   assert.ok(home.groups.length >= 4);
