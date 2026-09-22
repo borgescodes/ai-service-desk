@@ -10,7 +10,7 @@ Canonical design:
 
 Model policy:
 
-`MODEL_ROUTING.md`
+`AGENTS.md`
 
 Branch:
 
@@ -495,7 +495,7 @@ Priority surfaces:
 ### Reuse
 
 - current tokens;
-- `DESIGN.md`;
+- `docs/design.md`;
 - Inter;
 - existing Jup brand assets;
 - current layout/components.

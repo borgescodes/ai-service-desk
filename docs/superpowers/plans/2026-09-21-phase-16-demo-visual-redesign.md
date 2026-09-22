@@ -8,7 +8,7 @@
 
 **Stack:** HTML, CSS, JavaScript ESM, Node test runner, GSAP + Flip locais, Boxicons local, Montserrat variável local, Magistral Bold WOFF2 fornecida.
 
-**Spec:** `DESIGN.md` e briefing aprovado desta rodada.
+**Spec:** `docs/design.md` e briefing aprovado desta rodada.
 
 ## Restrições globais
 
@@ -59,7 +59,7 @@
 
 ### Tarefa 4: superfícies editoriais e operacionais
 
-**Arquivos:** `web/src/solutions.mjs`, `web/src/knowledge_content.mjs`, `web/src/tracking.mjs`, `web/src/styles.css`, `web/src/desktop-responsive.css`, `DESIGN.md`, testes.
+**Arquivos:** `web/src/solutions.mjs`, `web/src/knowledge_content.mjs`, `web/src/tracking.mjs`, `web/src/styles.css`, `web/src/desktop-responsive.css`, `docs/design.md`, testes.
 
 - [ ] Escrever/ajustar testes apenas para os novos contratos estruturais.
 - [ ] Confirmar RED.

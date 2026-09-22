@@ -132,11 +132,9 @@ ai-service-desk/
 ├── knowledge/                # conhecimento aprovado/versionado
 ├── playbooks/                # playbooks operacionais
 ├── tests/                    # testes Python
-├── docs/                     # documentação técnica
+├── docs/                     # documentação técnica e sistema visual
 ├── .github/
 │   └── workflows/            # CI e publicação
-├── PRODUCT.md
-├── DESIGN.md
 └── README.md
 ```
 
@@ -242,8 +240,7 @@ Jup Resolve foi estruturado para não delegar autoridade operacional ao modelo.
 
 Referências principais:
 
-- [Contexto de produto](PRODUCT.md)
-- [Sistema visual](DESIGN.md)
+- [Sistema visual](docs/design.md)
 - [Ambiente da aplicação web](docs/environment/web-demo.md)
 - [Policy e autorização](docs/policy/phase-7.md)
 
