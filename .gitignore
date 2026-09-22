@@ -28,6 +28,7 @@ embeddings/
 logs/
 reports/
 web/node_modules/
+web/pages-dist/
 
 # Corporate data must stay outside Git
 base_ti_preparada.csv

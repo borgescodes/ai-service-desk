@@ -3,6 +3,7 @@ import { renderJupVisual, visualStateFromUi } from './jup_visual.mjs';
 import { renderApprovedKnowledgeBody, renderMessageBody } from './knowledge_content.mjs';
 import { navIcon } from './icons.mjs';
 import { corporateEmailFromName } from './state.mjs';
+import { routePath, withBasePath } from './router.mjs';
 import {
   escapeHtml,
   renderEmptyState,
@@ -26,8 +27,8 @@ function personaIconPresentation(identity) {
 
 export function renderAppHeader({ activeRoute, operational = false, operationPath = '/demo/operacao/cdm', identities = [], identity = {}, pending = false, identityError = null }) {
   const globalItems = operational
-    ? [[activeRoute, operationPath, activeRoute === 'handoffs' ? 'Encaminhamentos' : 'Solicitações recebidas']]
-    : [['solutions', '/', 'Central de Suporte'], ['jup', '/jup', 'Falar com o Jup'], ['requests', '/requests', 'Minhas solicitações']];
+    ? [[activeRoute, withBasePath(operationPath), activeRoute === 'handoffs' ? 'Encaminhamentos' : 'Solicitações recebidas']]
+    : [['solutions', routePath('solutions'), 'Central de Suporte'], ['jup', routePath('jup'), 'Falar com o Jup'], ['requests', routePath('requests'), 'Minhas solicitações']];
   const initials = (identity.name || 'Jup').split(' ').slice(0, 2).map(word => word[0]).join('');
   const requester = identity.role === 'REQUESTER'
     ? identity
@@ -40,7 +41,7 @@ export function renderAppHeader({ activeRoute, operational = false, operationPat
   }).join('');
   const email = corporateEmailFromName(requester.name || '');
   return `<header class="app-header app-header--${operational ? 'operational' : 'public'}">
-    <a class="brand-lockup" href="/" data-route="solutions" aria-label="Jup Resolve"><span class="brand-wordmark" aria-hidden="true"><span class="brand-wordmark__jup">Jup</span><span class="brand-wordmark__resolve">Resolve</span></span></a>
+    <a class="brand-lockup" href="${routePath('solutions')}" data-route="solutions" aria-label="Jup Resolve"><span class="brand-wordmark" aria-hidden="true"><span class="brand-wordmark__jup">Jup</span><span class="brand-wordmark__resolve">Resolve</span></span></a>
     <nav class="primary-nav" aria-label="Navegação principal">${links(globalItems)}</nav>
     <div class="header-actions">${activeRoute === 'jup' ? `<button class="header-new-chat" type="button" data-action="new-chat"${pending ? ' disabled' : ''}>${navIcon('plus')}<span>Nova conversa</span></button>` : ''}<details class="persona-menu"><summary><span class="user-avatar">${escapeHtml(initials)}</span><span class="user-copy"><strong>${escapeHtml(identity.name || 'Carregando')}</strong><small>${escapeHtml(identity.area || 'Juparanã')}</small></span>${navIcon('chevron')}</summary><div class="persona-options"><div class="persona-list"><p>Trocar usuário</p>${choices}</div><details class="demo-identity-config"${identityError ? ' open' : ''}><summary>${navIcon('plus')}Novo usuário</summary><form id="demo-identity-form"><label><span>Nome</span><input name="name" data-identity-name type="text" required maxlength="180" value="${escapeHtml(requester.name || '')}" autocomplete="off"></label><div class="identity-field-row"><label><span>Cargo</span><input name="job_title" type="text" required maxlength="180" value="${escapeHtml(requester.job_title || '')}" autocomplete="off"></label><label><span>Área de atuação</span><input name="area" type="text" required maxlength="180" value="${escapeHtml(requester.area || '')}" autocomplete="off"></label></div><label class="email-preview"><span>E-mail</span><input name="email" data-email-preview type="email" readonly value="${escapeHtml(email)}"></label>${identityError ? `<p class="identity-form-error" role="alert">${escapeHtml(identityError)}</p>` : ''}<button class="button button--primary identity-save" type="submit"${pending ? ' disabled' : ''}>${pending === 'identity' ? 'Criando...' : 'Criar usuário'}</button></form></details></div></details></div>
   </header>`;
@@ -72,12 +73,12 @@ function renderSupportHandoff(handoff) {
 function renderRequestSummary(summary) {
   const items = Array.isArray(summary?.items) ? summary.items : [];
   if (!items.length) return '';
-  return `<div class="request-summary-list" aria-label="Resumo das solicitações">${items.map(item => `<a class="request-summary-row" href="/requests" data-route="requests"><span class="request-summary-row__top"><strong>${escapeHtml(item.system || 'Solicitação')}</strong><small>${escapeHtml(item.request_id || '')}</small></span><span class="request-summary-row__bottom"><span class="request-summary-status">${escapeHtml(item.state_label || '')}</span><span class="request-summary-action" aria-hidden="true">${navIcon('arrow-right')}</span></span></a>`).join('')}</div>`;
+  return `<div class="request-summary-list" aria-label="Resumo das solicitações">${items.map(item => `<a class="request-summary-row" href="${routePath('requests')}" data-route="requests"><span class="request-summary-row__top"><strong>${escapeHtml(item.system || 'Solicitação')}</strong><small>${escapeHtml(item.request_id || '')}</small></span><span class="request-summary-row__bottom"><span class="request-summary-status">${escapeHtml(item.state_label || '')}</span><span class="request-summary-action" aria-hidden="true">${navIcon('arrow-right')}</span></span></a>`).join('')}</div>`;
 }
 
 function renderSourceCard(article) {
   if (!article?.knowledge_id || !article?.title || article.provenance?.status !== 'APPROVED') return '';
-  return `<a class="message-source-strip" href="/solucoes/${encodeURIComponent(article.knowledge_id)}" data-solution-link data-knowledge-id="${escapeHtml(article.knowledge_id)}"><span class="source-strip-icon">${navIcon('solutions')}</span><span class="source-strip-copy"><small>Central de Suporte</small><strong>${escapeHtml(article.title)}</strong></span><span class="source-strip-action">Abrir artigo ${navIcon('arrow-right')}</span></a>`;
+  return `<a class="message-source-strip" href="${routePath('solution', { knowledgeId: article.knowledge_id })}" data-solution-link data-knowledge-id="${escapeHtml(article.knowledge_id)}"><span class="source-strip-icon">${navIcon('solutions')}</span><span class="source-strip-copy"><small>Central de Suporte</small><strong>${escapeHtml(article.title)}</strong></span><span class="source-strip-action">Abrir artigo ${navIcon('arrow-right')}</span></a>`;
 }
 
 function renderMessage(message, { fresh = false, visualState = null, initials = '', flipId = null } = {}) {
@@ -104,7 +105,7 @@ function renderMessage(message, { fresh = false, visualState = null, initials = 
     ${sourceCard ? `<div${followupAttribute}>${sourceCard}</div>` : ''}
     ${requestSummary ? `<div${followupAttribute}>${requestSummary}</div>` : ''}
     ${message.role === 'JUP' && message.support_handoff ? `<div${followupAttribute}>${renderSupportHandoff(message.support_handoff)}</div>` : ''}
-    ${message.role === 'JUP' && message.requestCta === 'REQUESTS' ? `<div${followupAttribute}><a class="message-request-cta" href="/requests" data-route="requests">Ver todas as solicitações ${navIcon('arrow-right')}</a></div>` : ''}
+    ${message.role === 'JUP' && message.requestCta === 'REQUESTS' ? `<div${followupAttribute}><a class="message-request-cta" href="${routePath('requests')}" data-route="requests">Ver todas as solicitações ${navIcon('arrow-right')}</a></div>` : ''}
     ${context ? `<div class="request-context">${context}</div>` : ''}</div></div>
     ${message.role === 'USER' && initials ? `<span class="message-user-avatar" aria-hidden="true">${escapeHtml(initials)}</span>` : ''}
   </article>`;

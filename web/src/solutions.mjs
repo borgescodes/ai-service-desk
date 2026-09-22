@@ -2,6 +2,7 @@ import { navIcon } from './icons.mjs';
 import { APPROVED_PROCEDURE_URL, renderApprovedKnowledgeBody } from './knowledge_content.mjs';
 import { renderJupVisual } from './jup_visual.mjs';
 import { escapeHtml } from './render.mjs';
+import { routePath } from './router.mjs';
 
 export const FAQ_TOPICS = Object.freeze([
   ['acessos-rotinas', 'Acessos e rotinas'],
@@ -17,7 +18,7 @@ export const DEMO_PROMPTS = Object.freeze([
 ]);
 
 export function draftPath(text) {
-  return `/jup?draft=${encodeURIComponent(String(text ?? '').slice(0, 3000))}`;
+  return `${routePath('jup')}?draft=${encodeURIComponent(String(text ?? '').slice(0, 3000))}`;
 }
 
 export function renderDemoScenarios() {
@@ -70,13 +71,13 @@ function visualArticle(article) {
   const metadata = article.knowledge_id && FUNCTIONAL_ARTICLES[article.knowledge_id];
   if (metadata) {
     const icon = metadata.symbol ? `<img src="/assets/brand/${metadata.symbol}" alt="" width="24" height="24">` : navIcon(metadata.icon);
-    return `<a class="faq-item faq-item--available" href="/solucoes/${article.knowledge_id}" data-solution-link data-knowledge-id="${article.knowledge_id}"><span class="faq-item-icon">${icon}</span><strong>${escapeHtml(article.title)}</strong>${arrowIcon()}</a>`;
+    return `<a class="faq-item faq-item--available" href="${routePath('solution', { knowledgeId: article.knowledge_id })}" data-solution-link data-knowledge-id="${article.knowledge_id}"><span class="faq-item-icon">${icon}</span><strong>${escapeHtml(article.title)}</strong>${arrowIcon()}</a>`;
   }
   return `<div class="faq-item faq-item--catalog" role="link" aria-disabled="true"><span class="faq-item-icon">${navIcon('book-open-text')}</span><span>${escapeHtml(article.title)}</span>${arrowIcon()}</div>`;
 }
 
 function renderFaqHelpStrip() {
-  return `<aside class="faq-help-strip">${renderJupVisual({ state: 'idle' })}<h2>Ainda não encontrou a resposta?</h2><a class="button button--primary" href="/jup" data-route="jup">${navIcon('message-circle')}Falar com o Jup</a></aside>`;
+  return `<aside class="faq-help-strip">${renderJupVisual({ state: 'idle' })}<h2>Ainda não encontrou a resposta?</h2><a class="button button--primary" href="${routePath('jup')}" data-route="jup">${navIcon('message-circle')}Falar com o Jup</a></aside>`;
 }
 
 function renderFaqDirectory(content, countLabel = '') {
@@ -124,10 +125,10 @@ export function renderSolutionDetail(detail) {
   const officialUrl = detail.procedure_url === APPROVED_PROCEDURE_URL || (detail.knowledge_id === 'KB-SYN-FAQ-CDM-REQUEST-001' && detail.procedure_url === 'https://cdm.juparana.com.br/') ? detail.procedure_url : null;
   const icon = metadata?.symbol ? `<img class="article-symbol" src="/assets/brand/${metadata.symbol}" width="64" height="64" alt="${escapeHtml(detail.system || '')}">` : `<span class="article-symbol">${navIcon(metadata?.icon || 'book-open-text')}</span>`;
   return `<article class="solution-detail">
-    <nav class="breadcrumb" aria-label="Localização"><a href="/" data-route="solutions">Central de Suporte</a><span aria-hidden="true">/</span><span>${escapeHtml(detail.category || '')}</span><span aria-hidden="true">/</span><span>${escapeHtml(detail.system || '')}</span></nav>
+    <nav class="breadcrumb" aria-label="Localização"><a href="${routePath('solutions')}" data-route="solutions">Central de Suporte</a><span aria-hidden="true">/</span><span>${escapeHtml(detail.category || '')}</span><span aria-hidden="true">/</span><span>${escapeHtml(detail.system || '')}</span></nav>
     <header class="solution-article-header">${icon}<p class="solution-category">${escapeHtml(detail.category || '')} · ${escapeHtml(detail.system || '')}</p><h1>${escapeHtml(detail.title)}</h1><p>${metadata?.intro || 'Siga as orientações abaixo.'}</p>${officialUrl ? `<a class="button button--primary" href="${officialUrl}" target="_blank" rel="noopener noreferrer">${metadata?.officialLabel || 'Abrir referência oficial ↗'}</a>` : ''}</header>
     <div class="knowledge-body">${renderApprovedKnowledgeBody({ text: detail.answer, procedureUrl: detail.procedure_url, knowledgeId: detail.knowledge_id })}</div>
     <aside class="security-note"><strong>Cuide da sua segurança</strong><p>Não compartilhe senhas ou códigos de verificação. Use sempre o endereço oficial do sistema.</p></aside>
-    <footer class="solution-outcome"><div><h2>Ainda precisa de ajuda?</h2><p>Continue o atendimento com o Jup.</p></div><a class="button button--primary" href="/jup?from=${encodeURIComponent(detail.knowledge_id)}" data-route="jup">Falar com o Jup ${navIcon('arrow-right')}</a></footer>
+    <footer class="solution-outcome"><div><h2>Ainda precisa de ajuda?</h2><p>Continue o atendimento com o Jup.</p></div><a class="button button--primary" href="${routePath('jup')}?from=${encodeURIComponent(detail.knowledge_id)}" data-route="jup">Falar com o Jup ${navIcon('arrow-right')}</a></footer>
   </article>`;
 }

@@ -14,7 +14,7 @@ import {
 } from './components.mjs';
 import { sortNewestFirst } from './tracking.mjs';
 import { escapeHtml, renderErrorState, renderUnauthorizedState } from './render.mjs';
-import { demoIdentityForPath, resolveRoute, routeParams } from './router.mjs';
+import { demoIdentityForPath, resolveRoute, routeParams, withBasePath } from './router.mjs';
 import { activateIdentity, clearRequesterChatState, corporateEmailFromName, createInitialState, resetConversation, personaPath } from './state.mjs';
 
 const app = document.querySelector('#app');
@@ -346,7 +346,8 @@ async function loadRoute() {
 }
 
 async function navigate(path) {
-  if (window.location.pathname + window.location.search !== path) window.history.pushState({}, '', path);
+  const target = withBasePath(path);
+  if (window.location.pathname + window.location.search !== target) window.history.pushState({}, '', target);
   state.route = resolveRoute(window.location.pathname);
   await loadRoute();
   window.scrollTo?.({ top: 0, left: 0, behavior: 'auto' });

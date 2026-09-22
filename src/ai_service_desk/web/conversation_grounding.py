@@ -77,7 +77,10 @@ def ground_response(result, context, delta) -> ResponseGrounding:
             *content,
             ProtectedContent(
                 "ACTION_OFFER",
-                "Você pode solicitar por aqui: eu registro a solicitação para análise da governança do CDM.",
+                (
+                    "Você pode solicitar por aqui: eu registro a solicitação para análise "
+                    "da governança do CDM."
+                ),
             ),
         )
     return replace(
