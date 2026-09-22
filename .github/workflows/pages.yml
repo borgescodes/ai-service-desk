@@ -1,6 +1,10 @@
-name: Deploy GitHub Pages demo
+name: GitHub Pages demo
 
 on:
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/pages.yml"
   push:
     branches: [main]
   workflow_dispatch:
@@ -11,14 +15,12 @@ permissions:
   id-token: write
 
 concurrency:
-  group: github-pages
+  group: github-pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  validate:
+    name: Validate static demo
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -60,15 +62,26 @@ jobs:
           grep -q '/ai-service-desk/app.mjs' pages-dist/index.html
           grep -q '/ai-service-desk/assets/' pages-dist/tokens.css
 
+      - name: Upload validated site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/pages-dist
+
+  deploy:
+    name: Deploy
+    if: github.event_name != 'pull_request'
+    needs: validate
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+
+    steps:
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:
           enablement: true
-
-      - name: Upload static site
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: web/pages-dist
 
       - name: Deploy
         id: deployment
