@@ -1,0 +1,60 @@
+name: Temporary Pages validation
+
+on:
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/pages-selfhosted-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: [self-hosted, Windows, X64, ai-service-desk, ollama]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Lint
+        working-directory: web
+        run: npm run lint
+
+      - name: Tests
+        working-directory: web
+        run: npm test
+
+      - name: Build Pages artifact
+        working-directory: web
+        env:
+          JUP_PAGES_BASE_PATH: /ai-service-desk
+        run: npm run build:pages
+
+      - name: Validate artifact
+        shell: powershell
+        working-directory: web
+        run: |
+          $required = @(
+            "pages-dist/index.html",
+            "pages-dist/404.html",
+            "pages-dist/static_demo.mjs"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing Pages artifact: $path" }
+          }
+          if (-not (Select-String -Path "pages-dist/index.html" -SimpleMatch "/ai-service-desk/app.mjs" -Quiet)) {
+            throw "Pages base path missing from index.html"
+          }
