@@ -15,7 +15,7 @@ const ARTICLES = Object.freeze([
     category: CATEGORY_LABELS['acessos-rotinas'],
     category_key: 'acessos-rotinas',
     system: 'CDM',
-    answer: 'Para solicitar seu acesso ao CDM:\n\n1. Acesse https://cdm.juparana.com.br/.\n2. Na tela de entrada, clique em Solicitar Acesso.\n3. Informe seu e-mail corporativo @juparana.com.br.\n4. Selecione uma ou mais áreas de negócio relacionadas à sua atuação.\n5. Clique em Enviar.\n6. Sua solicitação será registrada e encaminhada para análise da governança do CDM.\n7. Depois que o acesso for aprovado e provisionado, você receberá um e-mail informando que o acesso ao CDM foi liberado.\n8. No e-mail, utilize a opção Entrar no CDM ou acesse novamente o endereço do CDM.\n9. Entre utilizando sua conta corporativa Microsoft 365.\n\nSe aparecer um erro ou você não conseguir entrar após a liberação, informe a mensagem ao suporte. Não envie sua senha.',
+    answer: `Para solicitar seu acesso ao CDM:\n\n1. Acesse ${CDM_URL}.\n2. Na tela de entrada, clique em Solicitar Acesso.\n3. Informe seu e-mail corporativo @juparana.com.br.\n4. Selecione uma ou mais áreas de negócio relacionadas à sua atuação.\n5. Clique em Enviar.\n6. Sua solicitação será registrada e encaminhada para análise da governança do CDM.\n7. Depois que o acesso for aprovado e provisionado, você receberá um e-mail informando que o acesso ao CDM foi liberado.\n8. No e-mail, utilize a opção Entrar no CDM ou acesse novamente o endereço do CDM.\n9. Entre utilizando sua conta corporativa Microsoft 365.\n\nSe aparecer um erro ou você não conseguir entrar após a liberação, informe a mensagem ao suporte. Não envie sua senha.`,
     procedure_url: CDM_URL,
     provenance: { status: 'APPROVED', source: 'SYNTHETIC_DEMO' },
   },
