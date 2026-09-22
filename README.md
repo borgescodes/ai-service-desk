@@ -246,3 +246,10 @@ python -m ai_service_desk --help
 ```
 
 A documentação técnica detalhada está em `docs/`.
+
+Referências principais:
+
+- política e autorização: `docs/policy/phase-7.md`;
+- ambiente da aplicação web: `docs/environment/web-demo.md`;
+- sistema visual: `DESIGN.md`;
+- contexto de produto: `PRODUCT.md`.
