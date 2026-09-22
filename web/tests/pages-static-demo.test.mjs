@@ -35,6 +35,18 @@ test('static demo activates only on Pages or explicit local opt-in', () => {
   assert.equal(isStaticDemo(new URL('http://127.0.0.1:8000/')), false);
 });
 
+test('local static demo opt-in survives client-side navigation', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { location: new URL('http://127.0.0.1:8080/?static-demo=1') };
+  try {
+    assert.equal(isStaticDemo(), true);
+    globalThis.window.location = new URL('http://127.0.0.1:8080/jup');
+    assert.equal(isStaticDemo(), true);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test('static demo exposes FAQ without backend transport', async () => {
   const home = await staticApiRequest('/api/faq');
   assert.ok(home.groups.length >= 4);
