@@ -2,14 +2,15 @@ name: GitHub Pages demo
 
 on:
   pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/pages.yml"
   push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: github-pages-${{ github.ref }}
@@ -63,6 +64,10 @@ jobs:
     name: Deploy
     needs: validate
     if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
