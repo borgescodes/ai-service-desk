@@ -13,14 +13,13 @@ import { isStaticDemo, staticApiRequest } from '../src/static_demo.mjs';
 const pagesLocation = new URL('https://borgescodes.github.io/ai-service-desk/jup');
 
 test('Pages base path is removed for routing and restored for links', () => {
-  assert.equal(appBasePath(pagesLocation), '/ai-service-desk');
-  assert.equal(stripBasePath('/ai-service-desk/jup', pagesLocation), '/jup');
-  assert.equal(resolveRoute('/ai-service-desk/jup'), 'jup');
-  assert.equal(withBasePath('/requests', pagesLocation), '/ai-service-desk/requests');
-
   const originalWindow = globalThis.window;
   globalThis.window = { location: pagesLocation };
   try {
+    assert.equal(appBasePath(pagesLocation), '/ai-service-desk');
+    assert.equal(stripBasePath('/ai-service-desk/jup', pagesLocation), '/jup');
+    assert.equal(resolveRoute('/ai-service-desk/jup'), 'jup');
+    assert.equal(withBasePath('/requests', pagesLocation), '/ai-service-desk/requests');
     assert.equal(
       routePath('solution', { knowledgeId: 'KB A/B' }),
       '/ai-service-desk/solucoes/KB%20A%2FB',
