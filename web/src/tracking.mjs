@@ -1,5 +1,6 @@
 import { escapeHtml as esc, formatTimestamp, renderStatus, renderConfidence } from './render.mjs';
 import { navIcon } from './icons.mjs';
+import { routePath } from './router.mjs';
 
 const subject = item => item.purpose || item.requested_role || 'Solicitação de atendimento';
 const timestamp = item => [item.updated_at, item.created_at, item.timeline?.at(-1)?.occurred_at]
@@ -73,7 +74,7 @@ export function renderTrackingDetail(item, { operational = false, pendingAction 
 }
 
 export function renderRequesterWorkspace(items = [], selectedId = null) {
-  if (!items.length) return '<section class="requester-requests"><h1 class="sr-only">Minhas solicitações</h1><div class="tracking-empty tracking-empty--requester"><strong>Nenhuma solicitação ainda</strong><p>Quando você iniciar um atendimento, poderá acompanhar o andamento por aqui.</p><a class="button button--primary" href="/jup" data-route="jup">Falar com o Jup</a></div></section>';
+  if (!items.length) return '<section class="requester-requests"><h1 class="sr-only">Minhas solicitações</h1><div class="tracking-empty tracking-empty--requester"><strong>Nenhuma solicitação ainda</strong><p>Quando você iniciar um atendimento, poderá acompanhar o andamento por aqui.</p><a class="button button--primary" href="${routePath('jup')}" data-route="jup">Falar com o Jup</a></div></section>';
   const sorted = sortNewestFirst(items);
   const selected = sorted.find(item => item.request_id === selectedId) || sorted[0];
   return `<section class="requester-requests"><h1 class="sr-only">Minhas solicitações</h1><div class="requester-request-list" aria-label="Suas solicitações"><div class="requester-request-columns" aria-hidden="true"><span>Sistema e assunto</span><span>Solicitação</span><span>Status</span><span>Atualização</span><span>Responsável</span></div>${sorted.map(item => `<button type="button" class="requester-request-row" data-request-select="${esc(item.request_id)}" aria-current="${item.request_id === selected.request_id}"><span class="requester-request-main"><strong>${esc(item.system || 'Atendimento')}</strong><span>${esc(subject(item))}</span></span><small>${esc(item.request_id)}</small>${renderStatus(item)}<span class="requester-request-time">${updated(item) ? `${navIcon('clock')} ${esc(formatTimestamp(updated(item)))}` : 'Sem atualização'}</span><strong class="requester-request-owner">${esc(item.routing?.technician_name || 'Aguardando atribuição')}</strong></button>`).join('')}</div><div class="requester-request-detail" aria-label="Detalhe da solicitação">${renderTrackingDetail(selected)}</div></section>`;
