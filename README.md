@@ -1,29 +1,142 @@
-# AI Service Desk
+# Jup Resolve
 
-> O objetivo não é automatizar o chamado. É descobrir se o chamado precisa existir.
+> Entender primeiro. Agir quando necessário.
 
-O AI Service Desk é uma camada inteligente anterior à abertura de chamados de TI. A Fase 1 incorporou o motor local 2.1 ao pacote oficial `ai_service_desk`, preservando classificação conservadora, segurança, indexação reproduzível e retrieval com abstinência.
+O Jup Resolve é uma camada inteligente de atendimento para Service Desk. A aplicação conversa com o solicitante, preserva contexto, consulta conhecimento aprovado, encaminha quando necessário e mantém decisões sensíveis sob controle do backend.
 
-A Fase 2 foi dividida em dois trilhos:
+A proposta é reduzir chamados evitáveis sem transformar toda necessidade em automação. Quando existe orientação segura e aprovada, o Jup pode orientar. Quando existe um fluxo autorizado, pode conduzir. Quando a situação exige avaliação humana, encaminha o contexto já organizado.
 
-- **Fase 2A, gate da competição:** retrieval demonstrável sobre um subconjunto real, controlado e determinístico de 240 tickets.
-- **Fase 2B, evidência de escala:** auditoria e indexação do snapshot completo de 15.542 tickets, sem bloquear a evolução do produto.
+## Teste a aplicação
 
-A Fase 3 adiciona avaliação reproduzível, sweep de thresholds e uma decisão conservadora de calibração. O benchmark versionado é sintético e serve como evidência de regressão, não como medida de precisão do corpus corporativo.
+O projeto possui duas formas de executar a mesma experiência de frontend.
 
-A Fase 4 adiciona uma base de conhecimento aprovada e separada do histórico. Somente artigos `APPROVED`, com provenance `APPROVED_KNOWLEDGE` válida, podem produzir orientação oficial. A resposta vem literalmente do campo `answer` aprovado.
+### GitHub Pages
 
-A Fase 5 adiciona uma triagem conversacional curta e controlada. Ela preserva somente o contexto necessário entre até 3 mensagens do usuário, faz no máximo 2 perguntas objetivas e consulta a mesma knowledge `APPROVED` da Fase 4 quando o contexto estiver suficiente.
+A publicação no GitHub Pages reutiliza fielmente o frontend oficial de `web/src`.
 
-Históricos recuperados são evidências não validadas. Eles não são soluções aprovadas e não autorizam ações.
+Não existe uma segunda interface, uma reconstrução visual ou uma versão inspirada no produto. Os mesmos componentes, estilos, tokens, assets, animações e estados de interface são usados no runtime local e no Pages.
 
-## Requisitos
+No Pages, somente a camada de transporte muda:
 
-- Python 3.14
-- Git
-- Ollama somente para os comandos que usam modelos locais
+```text
+web/src
+  ↓
+mesmo frontend
+  ↓
+adapter estático e determinístico
+  ↓
+dados sintéticos no navegador
+```
 
-## Ambiente local
+Esse modo não depende de Python, FastAPI, Ollama ou Qwen. Nenhuma ação corporativa é executada.
+
+A demonstração estática permite testar:
+
+- Central de Suporte e busca de artigos;
+- conversa com o Jup;
+- orientação de Microsoft 365;
+- solicitação simulada de acesso ao CDM;
+- Minhas solicitações;
+- troca entre solicitante e perfis técnicos;
+- aprovação e rejeição simuladas;
+- encaminhamentos;
+- oportunidades de prevenção.
+
+As respostas da demo estática são determinísticas. Elas servem para exercitar a experiência e os estados do produto, não para representar inferência de um modelo.
+
+### Runtime completo local
+
+O runtime completo continua no repositório e não foi removido ou substituído pela demo estática.
+
+```text
+Browser
+  ↓
+FastAPI
+  ↓
+DemoRuntime / conversational core
+  ├── interpretação
+  ├── knowledge aprovada
+  ├── playbooks
+  ├── policy
+  ├── routing
+  ├── approval
+  └── execution
+       ↓
+integrações controladas
+```
+
+No modo `LOCAL_AI`, o runtime pode usar Ollama e os modelos locais configurados pelo projeto. O navegador nunca conversa diretamente com o modelo ou com integrações externas.
+
+## Princípio de arquitetura
+
+```text
+IA entende e conversa.
+Backend decide e executa.
+```
+
+O modelo pode auxiliar interpretação e linguagem natural. Policy, autorização, routing, approval, provenance, execução e identidade permanecem regras da aplicação.
+
+Essa separação permite trocar o modelo sem transferir regras de negócio e segurança para o LLM ou SLM.
+
+## Estrutura do repositório
+
+```text
+ai-service-desk/
+├── src/ai_service_desk/   # domínio, runtime, API e integrações
+├── web/
+│   ├── src/               # frontend oficial
+│   ├── tests/             # testes do frontend
+│   └── scripts/           # builds local e GitHub Pages
+├── knowledge/             # conhecimento versionado permitido
+├── playbooks/             # playbooks versionados
+├── tests/                 # testes Python
+├── docs/                  # documentação técnica
+└── .github/workflows/     # CI e publicação
+```
+
+## Frontend
+
+A fonte de verdade visual é `web/src`.
+
+O build do Pages parte do mesmo build normal e apenas:
+
+1. adapta caminhos absolutos para o subdiretório do GitHub Pages;
+2. adiciona o fallback de SPA em `404.html`;
+3. ativa o adapter estático quando a aplicação roda em `github.io`.
+
+CSS, layout, componentes e animações não possuem uma implementação paralela para a demo pública.
+
+### Testar a versão estática localmente
+
+Requer Node 24.
+
+```powershell
+cd web
+npm ci
+npm run lint
+npm test
+npm run build:pages
+python -m http.server 8080 --directory pages-dist
+```
+
+Abra:
+
+```text
+http://127.0.0.1:8080/?static-demo=1
+```
+
+Nesse modo, as chamadas de API são atendidas no navegador.
+
+## Executar o runtime completo
+
+Requisitos principais:
+
+- Python 3.14;
+- Git;
+- Node 24;
+- Ollama somente para `LOCAL_AI`.
+
+Crie o ambiente:
 
 ```powershell
 python -m venv .venv
@@ -32,7 +145,45 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
+Instale e valide o frontend:
+
+```powershell
+cd web
+npm ci
+npm run lint
+npm test
+npm run build
+cd ..
+```
+
+No Windows:
+
+```powershell
+.\run-web-demo.cmd
+```
+
+Ou:
+
+```powershell
+python -m ai_service_desk web-demo --host 127.0.0.1 --port 8000
+```
+
+Abra:
+
+```text
+http://127.0.0.1:8000/
+```
+
+## Modos do runtime
+
+- `DETERMINISTIC`: comportamento reproduzível para validação e testes.
+- `LOCAL_AI`: usa a camada local de IA configurada no projeto.
+
+O modo do GitHub Pages é separado desses dois. Ele simula o contrato da API somente para permitir testar a interface sem infraestrutura local.
+
 ## Qualidade
+
+Backend:
 
 ```powershell
 python -m ruff check .
@@ -40,265 +191,58 @@ python -m ruff format --check .
 python -m pytest
 ```
 
-## CLI
+Frontend:
 
-A interface operacional oficial é:
+```powershell
+cd web
+npm run lint
+npm test
+npm run build
+```
+
+Build do Pages:
+
+```powershell
+cd web
+npm run build:pages
+```
+
+O workflow do GitHub Pages executa lint, testes e build antes da publicação.
+
+## GitHub Pages
+
+O workflow `.github/workflows/pages.yml` publica somente `web/pages-dist`.
+
+O artefato publicado contém o frontend e os dados sintéticos necessários à demo estática. Backend Python, modelos locais, índices e integrações não são executados no GitHub Pages.
+
+Após o workflow estar na `main`:
+
+```text
+Settings
+→ Pages
+→ Source
+→ GitHub Actions
+```
+
+Endereço esperado:
+
+```text
+https://borgescodes.github.io/ai-service-desk/
+```
+
+## Segurança e limites
+
+- O browser não recebe credenciais de integração.
+- O Pages não executa ações corporativas.
+- Os dados da demo estática são sintéticos.
+- Knowledge oficial continua dependente de provenance aprovada no runtime completo.
+- Histórico recuperado não se torna automaticamente procedimento aprovado.
+- A demo estática não substitui testes de policy, autorização ou integrações reais.
+
+## CLI
 
 ```powershell
 python -m ai_service_desk --help
 ```
 
-Inspecionar um corpus sem exibir históricos e sem chamar IA:
-
-```powershell
-python -m ai_service_desk inspect --file <arquivo.csv>
-```
-
-Auditar um snapshot preparado contra um manifesto versionado, gerando somente relatório agregado:
-
-```powershell
-python -m ai_service_desk audit `
-  --file <corpus.csv> `
-  --manifest docs/data/phase-2-corpus-v1.json `
-  --report <relatorio-agregado.json>
-```
-
-Gerar o subconjunto determinístico da Fase 2A, sem chamar Ollama:
-
-```powershell
-python -m ai_service_desk demo-subset `
-  --file C:\ai-service-desk-data\phase-2\corpus\base_ti_preparada.csv `
-  --output C:\ai-service-desk-data\phase-2\demo\demo_subset.csv `
-  --report C:\ai-service-desk-data\phase-2\demo\reports\subset.json `
-  --checkout (Get-Location) `
-  --per-group 40
-```
-
-Validar retrieval sobre o subconjunto da competição:
-
-```powershell
-python -m ai_service_desk demo-smoke `
-  --file C:\ai-service-desk-data\phase-2\demo\demo_subset.csv `
-  --subset-report C:\ai-service-desk-data\phase-2\demo\reports\subset.json `
-  --index C:\ai-service-desk-data\phase-2\demo\index `
-  --report C:\ai-service-desk-data\phase-2\demo\reports\smoke.json `
-  --checkout (Get-Location) `
-  --url http://127.0.0.1:11434
-```
-
-Verificar o Ollama local e os modelos obrigatórios:
-
-```powershell
-python -m ai_service_desk doctor
-```
-
-A homologação de escala da Fase 2B usa `real-smoke`. Corpus, índice e relatório precisam estar fora do checkout Git:
-
-```powershell
-python -m ai_service_desk real-smoke `
-  --file C:\ai-service-desk-data\phase-2\corpus\base_ti_preparada.csv `
-  --manifest docs/data/phase-2-corpus-v1.json `
-  --index C:\ai-service-desk-data\phase-2\index `
-  --report C:\ai-service-desk-data\phase-2\reports\real-corpus-smoke.json `
-  --checkout (Get-Location) `
-  --url http://127.0.0.1:11434
-```
-
-Executar o benchmark sintético e a decisão de calibração da Fase 3:
-
-```powershell
-python -m ai_service_desk evaluate `
-  --index <indice-sintetico-externo> `
-  --cases tests/fixtures/phase3_eval_cases.jsonl `
-  --report C:\ai-service-desk-data\phase-3\reports\phase3-evaluation.json `
-  --checkout (Get-Location) `
-  --url http://127.0.0.1:11434
-```
-
-Validar a FAQ sintética da Fase 4 sem chamar Ollama:
-
-```powershell
-python -m ai_service_desk knowledge-validate `
-  --file knowledge/phase4_synthetic_faq.jsonl
-```
-
-Criar um índice exclusivamente de conhecimento aprovado:
-
-```powershell
-python -m ai_service_desk knowledge-index `
-  --file knowledge/phase4_synthetic_faq.jsonl `
-  --index C:\ai-service-desk-data\phase-4\index `
-  --url http://127.0.0.1:11434
-```
-
-Consultar a base aprovada:
-
-```powershell
-python -m ai_service_desk knowledge-search `
-  --index C:\ai-service-desk-data\phase-4\index `
-  --query "Nao consigo acessar o CIGAM" `
-  --threshold 0.65 `
-  --url http://127.0.0.1:11434
-```
-
-Executar o smoke sintético da Fase 4:
-
-```powershell
-python -m ai_service_desk knowledge-smoke `
-  --index C:\ai-service-desk-data\phase-4\index `
-  --report C:\ai-service-desk-data\phase-4\reports\smoke.json `
-  --url http://127.0.0.1:11434
-```
-
-Executar os 10 cenários sintéticos da triagem conversacional da Fase 5:
-
-```powershell
-python -m ai_service_desk triage-smoke `
-  --index C:\ai-service-desk-data\phase-5\index `
-  --cases tests/fixtures/phase5_triage_conversations.jsonl `
-  --report C:\ai-service-desk-data\phase-5\reports\smoke.json `
-  --url http://127.0.0.1:11434
-```
-
-Também estão disponíveis `show-index`, `prepare`, `index`, `import-legacy`, `search` e `validate`.
-
-`doctor`, `index`, `import-legacy`, `search`, `validate`, `demo-smoke`, `real-smoke`, `evaluate`, `knowledge-index`, `knowledge-search`, `knowledge-smoke` e `triage-smoke` dependem do Ollama local. `knowledge-validate` é offline. O cliente aceita somente HTTP em loopback e não baixa modelos automaticamente.
-
-## Fase 2A: demonstração da competição
-
-O subset padrão possui 240 registros reais, distribuídos deterministicamente em seis grupos de 40:
-
-- CIGAM
-- SIAGRI
-- impressão
-- acesso
-- software
-- casos gerais restantes
-
-A escolha dentro de cada grupo é ordenada por SHA-256 do `ticket_id`. Isso torna a seleção reproduzível e evita escolher manualmente apenas casos com resultados convenientes.
-
-Esse subset **não é um dataset de avaliação**. Ele não sustenta afirmações de precisão, recall, cobertura ou percentual global de automação. O objetivo da Fase 2A é demonstrar invariantes do produto com tempo de preparação compatível com a competição.
-
-Os cenários automáticos cobrem CIGAM, SIAGRI, impressão, sistema inexistente e contexto CIGAM + SIAGRI ambíguo. A demonstração também verifica que o retrieval não promove evidência de outro sistema e que sabe retornar `SEM_CONTEXTO`, `CONTEXTO_AMBIGUO` ou `SEM_EVIDENCIA` quando necessário.
-
-## Fase 2B: escala do corpus completo
-
-O snapshot completo possui 15.542 tickets. Sua indexação continua válida como prova adicional de escala, integridade e retomada por checkpoint, mas não bloqueia interface, triagem conversacional ou demais funcionalidades voltadas à competição.
-
-## Fase 3: avaliação e calibração
-
-O benchmark `phase3-synthetic-v1` possui 28 consultas sintéticas com ground truth. Ele mede classificação, retrieval, abstinência, vazamento entre sistemas, falhas de contexto e latência.
-
-O sweep compara `0.50`, `0.55`, `0.60`, `0.65`, `0.70`, `0.75` e `0.80`, reutilizando a mesma classificação e o mesmo embedding de cada consulta. Os hard gates exigem zero vazamento de sistema, zero aceitação insegura e zero falhas nos casos de sistema desconhecido e contexto ambíguo.
-
-**As métricas sintéticas são evidência de regressão, não precisão no corpus real.** O threshold de runtime permanece em `0.65` com decisão `HOLD` porque ainda não existe um gold set corporativo real rotulado por humanos. Uma recomendação sintética não altera o runtime automaticamente.
-
-Detalhes de métricas, privacidade e homologação estão em `docs/evaluation/phase-3.md`.
-
-## Fase 4: FAQ e base de conhecimento
-
-A base de conhecimento possui schema próprio e não assume semanticamente o modelo de tickets. `build_index` e `load_index` são usados somente como infraestrutura interna por meio de uma projeção encapsulada.
-
-Somente `APPROVED` entra no índice. `DRAFT` e `RETIRED` nunca produzem orientação oficial. Todo índice consultável precisa de `knowledge-provenance.json` com domínio `APPROVED_KNOWLEDGE` e hashes compatíveis com o manifesto. Um índice histórico, um sidecar ausente ou qualquer divergência são rejeitados de forma fail-closed.
-
-O retrieval exige compatibilidade exata de sistema e intent, não faz fallback entre contextos e mantém o threshold `0.65`. Contexto ambíguo, sistema desconhecido e baixa evidência resultam em abstinência.
-
-Quando uma FAQ aprovada é encontrada, o sistema devolve literalmente o `answer` armazenado. O LLM não reescreve nem inventa procedimento nesta fase.
-
-A fixture `knowledge/phase4_synthetic_faq.jsonl` é 100% fictícia e os detalhes operacionais estão em `docs/knowledge/phase-4.md`.
-
-## Fase 5: triagem conversacional
-
-A Fase 5 envolve a knowledge aprovada com uma máquina de estados curta. `TriageEngine` preserva somente `problem_text`, classificação resolvida, entidades necessárias, contadores e o campo pendente. Não existe transcript acumulado, banco de sessão ou memória global.
-
-`MAX_USER_TURNS` permanece em 3 e `MAX_CLARIFICATIONS` em 2. O terceiro turno é totalmente processável. Correções de system são conservadoras, `confidence` não participa de decisões e cada mensagem aceita é classificada no máximo uma vez.
-
-`KnowledgeEngine.search()` permanece retrocompatível. A triagem usa `search_classified()` para evitar segunda classificação e `available_systems()` como única interface de disponibilidade. O threshold continua `0.65` e a query não recebe labels ou reforços artificiais para superar o limiar.
-
-Os resultados públicos são `NEEDS_CLARIFICATION`, `KNOWLEDGE_FOUND` e `TRIAGE_ABSTAINED`. Quando há `KNOWLEDGE_FOUND`, a resposta continua sendo o `answer` literal da Fase 4. Nenhum histórico não validado vira procedimento oficial.
-
-As 10 conversas versionadas são 100% sintéticas. Os detalhes estão em `docs/triage/phase-5.md`.
-
-## Dados
-
-Exports brutos do TiFlux, corpus corporativo real, subconjunto real da demo, embeddings, índices, logs e relatórios gerados ficam fora do Git. Os testes e o CI hospedado usam somente dados sintéticos.
-
-O snapshot v1 da Fase 2 é descrito por `docs/data/phase-2-corpus-v1.json`. O manifesto guarda somente schema, contagens e fingerprints seguros. `base_ti_preparada.csv`, `demo_subset.csv`, `documents.jsonl` e `embeddings.npy` não são versionados.
-
-O threshold `0.65` permanece oficial por decisão `HOLD` da Fase 3. Ele não é apresentado como probabilidade calibrada nem como evidência de precisão real enquanto não existir um gold set corporativo humano.
-
-## CI e homologação
-
-O CI hospedado valida instalação em Python 3.14, Ruff e pytest sem acessar Ollama ou dados corporativos reais.
-
-A homologação local é separada:
-
-- `.github/workflows/local-ai-smoke.yml` valida runner, Python, Ollama e modelos.
-- `.github/workflows/engine-smoke.yml` valida o motor oficial ponta a ponta com corpus sintético.
-- `.github/workflows/demo-retrieval-smoke.yml` é o gate da Fase 2A e valida o subconjunto real de 240 registros no Dell sem publicar dados.
-- `.github/workflows/real-corpus-smoke.yml` valida o snapshot completo da Fase 2B como evidência adicional de escala.
-- `.github/workflows/phase3-evaluation.yml` executa o benchmark sintético, a decisão de calibração e as invariantes seguras da demo no Dell.
-- `.github/workflows/phase4-knowledge-smoke.yml` valida a FAQ sintética aprovada e as invariantes fail-closed da Fase 4 no Dell.
-- `.github/workflows/phase5-triage-smoke.yml` valida os 10 cenários sintéticos da triagem no Dell sem publicar transcript ou answer.
-- `.github/workflows/phase7-policy-smoke.yml` valida policy e confidence no SHA exato informado, sem Ollama ou chamada externa.
-
-Os workflows locais são manuais e executam no runner Windows homologado.
-
-## Documentação
-
-- Especificações: `docs/superpowers/specs/`
-- Planos: `docs/superpowers/plans/`
-- Avaliação e calibração: `docs/evaluation/phase-3.md`
-- FAQ e base de conhecimento: `docs/knowledge/phase-4.md`
-- Triagem conversacional: `docs/triage/phase-5.md`
-- Policy Engine: `docs/policy/phase-7.md`
-- Manifesto seguro da Fase 2: `docs/data/phase-2-corpus-v1.json`
-- Equivalência do motor 2.1: `docs/migration/engine-v2.1-equivalence.md`
-- Homologação local: `docs/environment/local-demo.md`
-- Roadmap: `docs/roadmap.md`
-
-## Fase 6: playbooks declarativos
-
-A Fase 6 adiciona conteúdo operacional aprovado e estruturado depois de `KNOWLEDGE_FOUND`. O vínculo é exclusivamente por `knowledge_id`, sem retrieval semântico, segunda classificação, LLM ou escolha probabilística. Um knowledge APPROVED pode ter no máximo um playbook APPROVED ativo, enquanto um playbook aprovado pode servir a vários knowledge IDs quando o procedimento é literalmente o mesmo.
-
-Os steps são `INSTRUCTION`, `CHECK` e `ACTION_PROPOSAL`. Uma `ACTION_PROPOSAL` carrega `capability` simbólica no contrato de máquina para a futura Fase 7, mas a Fase 6 não decide permissões e não executa comandos, scripts, PowerShell, APIs ou qualquer ação real. `playbook-validate`, `playbook-build` e `playbook-smoke` não instanciam `OllamaClient`; apenas a preparação upstream do índice de knowledge pode depender do embedding local da Fase 4.
-
-O catálogo e sua provenance falham fechado diante de sidecar ausente, hashes divergentes, adulteração, binding de knowledge incompatível ou conflito de dois playbooks APPROVED para o mesmo ID. `DRAFT` e `RETIRED` nunca fornecem conteúdo operacional.
-
-Detalhes: `docs/playbooks/phase-6.md`. Especificação: `docs/superpowers/specs/2026-09-08-phase-6-playbooks-design.md`. Homologação manual: `.github/workflows/phase6-playbook-smoke.yml`.
-
-## Fase 7: Policy Engine
-
-A Fase 7 decide policy e confidence de forma deterministica para o fluxo de acesso ao CDM. Ela nao cria solicitacao persistida, nao aprova acesso e nao executa acao externa. Detalhes operacionais: `docs/policy/phase-7.md`.
-
-## Fase 12: Jup Resolve web demo
-
-A Fase 12 expõe o domínio homologado das Fases 1 a 11 em uma aplicação web local chamada **Jup Resolve**. A camada visual é uma SPA em HTML semântico, CSS e ES Modules, servida pelo FastAPI no mesmo origin; fontes, ícones e motion são empacotados localmente durante o build.
-
-O princípio de arquitetura permanece: **UI apresenta estado; backend decide estado.** O frontend não implementa Policy, Routing, Approval, Execution ou regras de Prevenção.
-
-Para executar no Windows:
-
-```powershell
-.\run-web-demo.cmd
-```
-
-Ou manualmente:
-
-```powershell
-node web\scripts\lint.mjs
-node --test web\tests\*.test.mjs
-node web\scripts\build.mjs
-python -m ai_service_desk web-demo --host 127.0.0.1 --port 8000
-```
-
-O smoke determinístico da demonstração é:
-
-```powershell
-python -m ai_service_desk web-demo-smoke
-```
-
-A saída esperada é `WEB DEMO SMOKE OK 10/10`.
-
-Documentação operacional: `docs/environment/web-demo.md`.
-Roteiro da apresentação: `docs/demo/phase-12-demo-script.md`.
+A documentação técnica detalhada está em `docs/`.

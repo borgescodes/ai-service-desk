@@ -1,0 +1,75 @@
+name: Deploy GitHub Pages demo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Frontend lint
+        working-directory: web
+        run: npm run lint
+
+      - name: Frontend tests
+        working-directory: web
+        run: npm test
+
+      - name: Build exact frontend for Pages
+        working-directory: web
+        env:
+          JUP_PAGES_BASE_PATH: /ai-service-desk
+        run: npm run build:pages
+
+      - name: Validate Pages artifact
+        working-directory: web
+        run: |
+          test -f pages-dist/index.html
+          test -f pages-dist/404.html
+          test -f pages-dist/static_demo.mjs
+          grep -q '/ai-service-desk/app.mjs' pages-dist/index.html
+          grep -q '/ai-service-desk/assets/' pages-dist/tokens.css
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload static site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/pages-dist
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
