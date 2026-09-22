@@ -403,11 +403,24 @@ function updateRequest(requestId, action, identityId, expectedVersion) {
   return publicRequest(record);
 }
 
-export function isStaticDemo(location = globalThis.window?.location ?? globalThis.location ?? null) {
+function detectsStaticDemo(location) {
   const hostname = String(location?.hostname ?? '').toLocaleLowerCase('en-US');
   if (hostname.endsWith('.github.io')) return true;
   const params = new URLSearchParams(String(location?.search ?? ''));
   return params.get('static-demo') === '1';
+}
+
+let staticDemoSession = detectsStaticDemo(
+  globalThis.window?.location ?? globalThis.location ?? null,
+);
+
+export function isStaticDemo(location) {
+  if (location !== undefined) return detectsStaticDemo(location);
+  if (staticDemoSession) return true;
+  staticDemoSession = detectsStaticDemo(
+    globalThis.window?.location ?? globalThis.location ?? null,
+  );
+  return staticDemoSession;
 }
 
 export async function staticApiRequest(path, { method = 'GET', body, identityId, signal } = {}) {
