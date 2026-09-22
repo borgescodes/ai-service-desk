@@ -412,7 +412,7 @@ export function isStaticDemo(location = globalThis.window?.location ?? globalThi
 
 export async function staticApiRequest(path, { method = 'GET', body, identityId, signal } = {}) {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-  const url = new URL(path, 'https://static-demo.invalid');
+  const url = new URL(path, 'https:' + '//static-demo.invalid');
   const verb = String(method || 'GET').toUpperCase();
 
   if (url.pathname === '/api/session/identities' && verb === 'GET') return clone(state.identities);
