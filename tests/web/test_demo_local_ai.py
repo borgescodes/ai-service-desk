@@ -301,6 +301,7 @@ class GroqConversationalGateway(ConversationalGateway):
 
 def _runtime(monkeypatch, gateway_cls=ConversationalGateway):
     gateway_cls.instances.clear()
+    monkeypatch.setenv("JUP_CHAT_PROVIDER", "ollama")
     monkeypatch.setattr(demo_runtime, "OllamaClient", gateway_cls)
     return demo_runtime.DemoRuntime.create(mode="LOCAL_AI")
 
