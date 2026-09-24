@@ -295,6 +295,10 @@ class FailingConversationalGateway(LocalAIGatewayBase):
         raise OllamaError("falha local simulada")
 
 
+class GroqConversationalGateway(ConversationalGateway):
+    instances = []
+
+
 def _runtime(monkeypatch, gateway_cls=ConversationalGateway):
     gateway_cls.instances.clear()
     monkeypatch.setattr(demo_runtime, "OllamaClient", gateway_cls)
@@ -675,3 +679,43 @@ def test_local_ai_startup_validates_models_without_warmup_chat(monkeypatch):
         assert metrics["turns"] == []
     finally:
         runtime.close()
+
+
+def test_local_ai_defaults_chat_to_the_ollama_embedding_client(monkeypatch):
+    monkeypatch.delenv("JUP_CHAT_PROVIDER", raising=False)
+    runtime = _runtime(monkeypatch)
+    try:
+        assert runtime._chat_client is runtime._ollama_client
+        assert runtime._ollama_client.model_checks == [
+            "qwen3.5:4b",
+            "qwen3-embedding:0.6b",
+        ]
+    finally:
+        runtime.close()
+
+
+def test_groq_chat_keeps_embeddings_on_ollama(monkeypatch):
+    ConversationalGateway.instances.clear()
+    GroqConversationalGateway.instances.clear()
+    monkeypatch.setenv("JUP_CHAT_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    monkeypatch.setattr(demo_runtime, "OllamaClient", ConversationalGateway)
+    monkeypatch.setattr(demo_runtime, "GroqClient", GroqConversationalGateway)
+
+    runtime = demo_runtime.DemoRuntime.create(mode="LOCAL_AI")
+    ollama = runtime._ollama_client
+    groq = runtime._chat_client
+    try:
+        result = runtime.send_message("pedro-miranda", "Preciso acessar o CDM")
+
+        assert result["request_id"]
+        assert groq is not ollama
+        assert ollama.model_checks == ["qwen3-embedding:0.6b"]
+        assert ollama.embed_requests
+        assert ollama.payloads == []
+        assert len(groq.payloads) == 2
+    finally:
+        runtime.close()
+
+    assert ollama.closed
+    assert groq.closed

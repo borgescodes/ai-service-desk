@@ -12,6 +12,26 @@ A demonstração da Fase 15 usa o conversational core local, permanece sintétic
 
 Não é necessário executar `npm install`. O frontend não possui dependências npm de runtime e não usa CDN. O roteiro conversacional usa `--mode LOCAL_AI`, com Ollama e `qwen3.5:4b`; o modo `DETERMINISTIC` mantém os smokes reproduzíveis.
 
+### Provider de chat
+
+Sem configuração adicional, o modo `LOCAL_AI` preserva o Ollama para chat e embeddings:
+
+```powershell
+$env:JUP_CHAT_PROVIDER = "ollama"
+```
+
+Para usar a Groq somente no chat:
+
+```powershell
+$env:JUP_CHAT_PROVIDER = "groq"
+$env:GROQ_API_KEY = "<environment>"
+$env:GROQ_MODEL = "openai/gpt-oss-120b"
+```
+
+`GROQ_API_KEY` deve existir apenas no ambiente local e nunca deve ser versionada. Mesmo com
+Groq, os embeddings permanecem no Ollama local com `qwen3-embedding:0.6b`; não há fallback
+automático entre providers.
+
 ## Arquitetura da demo
 
 ```text

@@ -1,3 +1,4 @@
+import os
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -12,6 +13,7 @@ from ai_service_desk.engine.cdm_scope import LOCAL_CDM_SCOPE_CATALOG
 from ai_service_desk.engine.classification import TicketClassification, classify_ticket
 from ai_service_desk.engine.confidence import assess_support_context
 from ai_service_desk.engine.execution import ExecutionEngine
+from ai_service_desk.engine.groq import GroqClient, GroqError
 from ai_service_desk.engine.knowledge import build_knowledge_index
 from ai_service_desk.engine.learning_prevention import (
     InMemoryOutcomeStore,
@@ -147,6 +149,7 @@ class DemoRuntime:
         if mode not in DEMO_MODES:
             raise ValueError(f"Modo de demo invalido: {mode!r}.")
         self._ollama_client = None
+        self._chat_client = None
         self._local_ai_startup_ms = 0.0
         self._local_ai_total_calls = 0
         self._local_ai_failed_calls = 0
@@ -154,19 +157,35 @@ class DemoRuntime:
         self._local_ai_turns: list[dict] = []
         if mode == "LOCAL_AI":
             client = OllamaClient()
+            chat_provider = os.environ.get("JUP_CHAT_PROVIDER", "ollama").strip().lower()
+            if chat_provider not in {"ollama", "groq"}:
+                client.close()
+                raise ValueError("JUP_CHAT_PROVIDER deve ser 'ollama' ou 'groq'.")
             startup_started = perf_counter()
             try:
-                client.model_info("qwen3.5:4b")
+                if chat_provider == "ollama":
+                    client.model_info("qwen3.5:4b")
                 client.model_info("qwen3-embedding:0.6b")
             except OllamaError as exc:
                 client.close()
+                required_models = (
+                    "qwen3.5:4b e qwen3-embedding:0.6b"
+                    if chat_provider == "ollama"
+                    else "qwen3-embedding:0.6b"
+                )
                 raise WebDemoError(
                     "LOCAL_AI_UNAVAILABLE",
-                    "Não foi possível validar qwen3.5:4b e qwen3-embedding:0.6b no Ollama local.",
+                    f"Não foi possível validar {required_models} no Ollama local.",
                 ) from exc
             finally:
                 self._local_ai_startup_ms = max(0.0, (perf_counter() - startup_started) * 1000)
             self._ollama_client = client
+            try:
+                self._chat_client = client if chat_provider == "ollama" else GroqClient()
+            except Exception:
+                client.close()
+                self._ollama_client = None
+                raise
         self.cdm_scope_catalog = scope_catalog
         self.mode = mode
         self.identity_provider = DemoIdentityProvider()
@@ -397,7 +416,7 @@ class DemoRuntime:
         )
 
     def _interpret_conversation(self, context, message):
-        if self._ollama_client is None:
+        if self._chat_client is None:
             raise WebDemoError(
                 "LOCAL_AI_UNAVAILABLE",
                 "Cliente LOCAL_AI não está disponível.",
@@ -413,7 +432,7 @@ class DemoRuntime:
         self._local_ai_total_calls += 1
         ok = False
         try:
-            response = self._ollama_client.chat(payload)
+            response = self._chat_client.chat(payload)
 
             systems = self.business_vocabulary.systems(message)
             resolved_entities = self.business_vocabulary.entities(message)
@@ -429,7 +448,7 @@ class DemoRuntime:
             )
             ok = True
             return delta
-        except OllamaError as exc:
+        except (OllamaError, GroqError) as exc:
             raise WebDemoError(
                 "LOCAL_AI_INFERENCE_FAILED",
                 "A inferência local falhou; nenhuma decisão foi substituída por fallback.",
@@ -514,7 +533,7 @@ class DemoRuntime:
         return context
 
     def _generate_response(self, message, context, grounding):
-        if self._ollama_client is None:
+        if self._chat_client is None:
             raise WebDemoError(
                 "LOCAL_AI_UNAVAILABLE",
                 "Cliente LOCAL_AI não está disponível.",
@@ -525,7 +544,7 @@ class DemoRuntime:
             self._local_ai_total_calls += 1
             ok = False
             try:
-                response = self._ollama_client.chat(payload)
+                response = self._chat_client.chat(payload)
                 ok = True
                 return response
             finally:
@@ -972,11 +991,7 @@ class DemoRuntime:
             return pending
 
         if is_social_greeting(message):
-            chat = (
-                self._ollama_client.chat
-                if self.mode == "LOCAL_AI" and self._ollama_client
-                else None
-            )
+            chat = self._chat_client.chat if self.mode == "LOCAL_AI" and self._chat_client else None
             return {
                 "status": "SOCIAL",
                 "request_id": None,
@@ -1831,6 +1846,9 @@ class DemoRuntime:
         try:
             self._close_mutable_resources()
         finally:
+            if self._chat_client is not None and self._chat_client is not self._ollama_client:
+                self._chat_client.close()
+            self._chat_client = None
             if self._ollama_client is not None:
                 self._ollama_client.close()
                 self._ollama_client = None

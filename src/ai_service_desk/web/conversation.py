@@ -2,6 +2,7 @@ import json
 import re
 from collections.abc import Callable
 
+from ai_service_desk.engine.groq import GroqError
 from ai_service_desk.engine.ollama import OllamaError
 from ai_service_desk.engine.validation import normalize_text
 
@@ -400,5 +401,5 @@ def generate_natural_response(message, context, grounding, chat):
             grounding,
             chat,
         )
-    except (OllamaError, ValueError, KeyError, TypeError, AttributeError):
+    except (OllamaError, GroqError, ValueError, KeyError, TypeError, AttributeError):
         return grounding.fallback_message
