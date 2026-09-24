@@ -263,6 +263,12 @@ function friendlyError(error) {
         message: 'O estado mudou. Recarregue os dados e tente novamente.',
       };
     }
+    if (error.status === 502) {
+      return {
+        kind: 'error',
+        message: 'Não foi possível concluir a resposta do Jup. Tente novamente.',
+      };
+    }
     return { kind: 'error', message: error.message };
   }
   return {

@@ -57,6 +57,7 @@ async function boot(path, respond, identities = [
     const payload = url === '/api/session/identities' && (!options || options.method === 'GET')
       ? identities
       : await respond(url, options);
+    if (payload instanceof Response) return payload;
     return new Response(JSON.stringify(payload), { status: 200 });
   };
   await import(`../src/app.mjs?test=${++serial}`); await tick();
@@ -94,6 +95,18 @@ test('transport failure keeps conversation and composer visible with warning sta
   assert.match(ui.root.innerHTML, /data-state="warning"/);
   assert.match(ui.root.innerHTML, /id="jup-form"/);
   assert.match(ui.root.innerHTML, /role="alert"/);
+});
+
+test('provider failure is neutral and never presented as an identity error', async () => {
+  const ui = await boot('/jup', url => url === '/api/jup/messages'
+    ? new Response(JSON.stringify({ error: {
+      code: 'LOCAL_AI_INFERENCE_FAILED',
+      message: 'A inferência local falhou no provider.',
+    } }), { status: 502 })
+    : []);
+  await ui.send('boa tarde');
+  assert.match(ui.root.innerHTML, /Não foi possível concluir a resposta do Jup\. Tente novamente\./);
+  assert.doesNotMatch(ui.root.innerHTML, /identidade|inferência|Ollama|Groq|backend|provider/i);
 });
 
 

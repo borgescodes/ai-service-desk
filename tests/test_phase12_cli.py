@@ -1,3 +1,5 @@
+import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -85,6 +87,82 @@ def test_windows_launcher_pins_python_to_its_checkout() -> None:
     assert 'set "PROJECT_ROOT=%~dp0"' in launcher
     assert 'pushd "%PROJECT_ROOT%"' in launcher
     assert 'set "PYTHONPATH=%PROJECT_ROOT%src;%PYTHONPATH%"' in launcher
+
+
+@pytest.mark.parametrize(
+    ("env_file", "process_provider", "expected_provider", "expected_model", "expected_key"),
+    [
+        (None, None, "", "", ""),
+        (
+            "# comentário\n\nJUP_CHAT_PROVIDER=groq\n"
+            "GROQ_MODEL=openai/gpt-oss-120b\nGROQ_API_KEY=file-secret\nIGNORED=value\n",
+            None,
+            "groq",
+            "openai/gpt-oss-120b",
+            "file-secret",
+        ),
+        (
+            "JUP_CHAT_PROVIDER=groq\nGROQ_MODEL=file-model\nGROQ_API_KEY=file-secret\n",
+            "ollama",
+            "ollama",
+            "file-model",
+            "file-secret",
+        ),
+    ],
+)
+def test_windows_launcher_loads_only_expected_local_env_without_overriding_process(
+    tmp_path,
+    env_file,
+    process_provider,
+    expected_provider,
+    expected_model,
+    expected_key,
+) -> None:
+    launcher = tmp_path / "run-web-demo.cmd"
+    launcher.write_text(Path("run-web-demo.cmd").read_text(encoding="utf-8"), encoding="utf-8")
+    if env_file is not None:
+        (tmp_path / ".env.local").write_text(env_file, encoding="utf-8")
+    build_script = tmp_path / "web" / "scripts" / "build.mjs"
+    build_script.parent.mkdir(parents=True)
+    build_script.write_text("", encoding="utf-8")
+    package = tmp_path / "src" / "ai_service_desk"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "import os\n"
+        "assert os.environ.get('JUP_CHAT_PROVIDER', '') == os.environ['EXPECT_PROVIDER']\n"
+        "assert os.environ.get('GROQ_MODEL', '') == os.environ['EXPECT_MODEL']\n"
+        "assert os.environ.get('GROQ_API_KEY', '') == os.environ['EXPECT_KEY']\n"
+        "assert 'IGNORED' not in os.environ\n"
+        "print('LAUNCH_OK')\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    for name in ("JUP_CHAT_PROVIDER", "GROQ_MODEL", "GROQ_API_KEY", "IGNORED"):
+        env.pop(name, None)
+    if process_provider is not None:
+        env["JUP_CHAT_PROVIDER"] = process_provider
+    env.update(
+        {
+            "EXPECT_PROVIDER": expected_provider,
+            "EXPECT_MODEL": expected_model,
+            "EXPECT_KEY": expected_key,
+        }
+    )
+
+    result = subprocess.run(
+        ["cmd.exe", "/d", "/c", str(launcher)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "LAUNCH_OK" in result.stdout
+    assert "file-secret" not in result.stdout
+    assert "file-secret" not in result.stderr
 
 
 def test_phase12_operator_docs_and_windows_launcher_cover_demo_flow() -> None:

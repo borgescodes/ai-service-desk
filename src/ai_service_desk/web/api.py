@@ -100,6 +100,12 @@ def create_app(
             status = 404
         elif exc.code == "ROUTING_INCONSISTENT":
             status = 409
+        elif exc.code in {
+            "LOCAL_AI_INFERENCE_FAILED",
+            "LOCAL_AI_RESPONSE_INVALID",
+            "LOCAL_AI_UNAVAILABLE",
+        }:
+            status = 502
         else:
             status = 403
         return _error(status, exc.code, str(exc))

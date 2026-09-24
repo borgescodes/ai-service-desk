@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from ai_service_desk.web.api import create_app
 from ai_service_desk.web.demo_runtime import DemoRuntime
+from ai_service_desk.web.errors import WebDemoError
 
 
 def _client(runtime: DemoRuntime, *, demo_mode: bool = True, host: str = "127.0.0.1"):
@@ -200,6 +201,31 @@ def test_api_rejects_requester_approval_without_external_execution() -> None:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "NOT_AUTHORIZED"
         assert runtime.fake_cdm_store.access_count == 0
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["LOCAL_AI_INFERENCE_FAILED", "LOCAL_AI_RESPONSE_INVALID", "LOCAL_AI_UNAVAILABLE"],
+)
+def test_api_maps_local_ai_failures_to_bad_gateway(code) -> None:
+    runtime = DemoRuntime.create()
+    client = _client(runtime)
+
+    def fail(_identity_id, _message):
+        raise WebDemoError(code, "diagnóstico interno")
+
+    runtime.send_message = fail
+    try:
+        response = client.post(
+            "/api/jup/messages",
+            headers={"X-Demo-Identity": "pedro-miranda"},
+            json={"message": "boa tarde"},
+        )
+
+        assert response.status_code == 502
+        assert response.json()["error"]["code"] == code
     finally:
         runtime.close()
 

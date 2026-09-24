@@ -2,6 +2,7 @@ import pytest
 import requests
 
 from ai_service_desk.engine.groq import GroqClient, GroqError
+from ai_service_desk.web.conversation_interpreter import _interpretation_schema
 
 
 class FakeResponse:
@@ -85,12 +86,12 @@ def test_chat_adapts_only_supported_groq_fields():
         ],
         "stream": False,
         "temperature": 0.4,
-        "max_completion_tokens": 256,
+        "max_completion_tokens": 1024,
         "response_format": {
             "type": "json_schema",
             "json_schema": {
                 "name": "jup_response",
-                "strict": True,
+                "strict": False,
                 "schema": {
                     "type": "object",
                     "properties": {"answer": {"type": "string"}},
@@ -107,6 +108,87 @@ def test_chat_adapts_only_supported_groq_fields():
     assert request["timeout"] == (5, 180)
     assert request["allow_redirects"] is False
     assert response.closed
+
+
+@pytest.mark.parametrize(
+    ("num_predict", "expected"),
+    [(128, 1024), (2048, 2048)],
+)
+def test_chat_applies_groq_completion_token_floor(num_predict, expected):
+    session = FakeSession(
+        response=FakeResponse(
+            data={
+                "choices": [
+                    {
+                        "message": {"content": '{"answer":"ok"}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        )
+    )
+    client = GroqClient(api_key="test-key")
+    client.session = session
+    payload = _ollama_payload()
+    payload["options"]["num_predict"] = num_predict
+
+    client.chat(payload)
+
+    request_payload = session.requests[0][1]["json"]
+    assert request_payload["max_completion_tokens"] == expected
+
+
+def test_chat_omits_completion_limit_when_num_predict_is_absent():
+    session = FakeSession(
+        response=FakeResponse(
+            data={
+                "choices": [
+                    {
+                        "message": {"content": '{"answer":"ok"}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        )
+    )
+    client = GroqClient(api_key="test-key")
+    client.session = session
+    payload = _ollama_payload()
+    del payload["options"]["num_predict"]
+
+    client.chat(payload)
+
+    request_payload = session.requests[0][1]["json"]
+    assert "max_completion_tokens" not in request_payload
+
+
+def test_chat_sends_the_flexible_interpreter_schema_in_best_effort_mode():
+    session = FakeSession(
+        response=FakeResponse(
+            data={
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "{}"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        )
+    )
+    client = GroqClient(api_key="test-key")
+    client.session = session
+    payload = _ollama_payload()
+    payload["format"] = _interpretation_schema()
+
+    client.chat(payload)
+
+    response_format = session.requests[0][1]["json"]["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is False
+    assert response_format["json_schema"]["schema"]["properties"]["e"] == {
+        "type": "object",
+        "additionalProperties": {"type": "string"},
+    }
 
 
 @pytest.mark.parametrize(

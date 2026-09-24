@@ -45,16 +45,17 @@ class GroqClient:
             "messages": payload["messages"],
             "stream": False,
             "temperature": options["temperature"],
-            "max_completion_tokens": options["num_predict"],
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
                     "name": "jup_response",
-                    "strict": True,
+                    "strict": False,
                     "schema": payload["format"],
                 },
             },
         }
+        if "num_predict" in options:
+            request_payload["max_completion_tokens"] = max(options["num_predict"], 1024)
         try:
             response = self.session.post(
                 GROQ_CHAT_COMPLETIONS_URL,
